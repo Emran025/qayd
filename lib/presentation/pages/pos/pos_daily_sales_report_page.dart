@@ -54,26 +54,25 @@ class _ReportBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final currency = report.currency.symbol;
     return ListView(
       padding: const EdgeInsets.all(SpacingTokens.lg),
       children: [
         Text(
-          '${report.from.toIso8601String().split('T').first} · ${report.invoices.length} ${AppStrings.posDailySalesInvoiceCount}',
+          '${report.from.toLocal().toString().split(' ').first} · ${report.invoices.length} ${AppStrings.posDailySalesInvoiceCount}',
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: SpacingTokens.md),
         _MetricCard(
             label: AppStrings.posDailySalesGross,
-            value: '${report.grossTotal.minorUnits} $currency'),
+            value: formatPosMoney(report.grossTotal)),
         const SizedBox(height: SpacingTokens.sm),
         _MetricCard(
             label: AppStrings.posDailySalesPaid,
-            value: '${report.paidTotal.minorUnits} $currency'),
+            value: formatPosMoney(report.paidTotal)),
         const SizedBox(height: SpacingTokens.sm),
         _MetricCard(
             label: AppStrings.posDailySalesDue,
-            value: '${report.dueTotal.minorUnits} $currency'),
+            value: formatPosMoney(report.dueTotal)),
         const SizedBox(height: SpacingTokens.lg),
         FilledButton.icon(
           onPressed: () => _export(context),
@@ -114,4 +113,4 @@ class _MetricCard extends StatelessWidget {
           trailing: Text(value, style: Theme.of(context).textTheme.titleLarge),
         ),
       );
-}
+}import 'package:qayd/presentation/pos/pos_money_display.dart';

@@ -172,6 +172,16 @@ final class SqlitePosStockMovementRepository
         currency: context.currency,
         scale: context.scale,
       );
+      // Sale postings are built from an average cost snapshot. If another
+      // movement changed that snapshot before this transaction acquired the
+      // write lock, accepting the stale unit cost would make COGS diverge
+      // from the inventory valuation. Reject and let the caller rebuild.
+      if (movement.direction == PosStockMovementDirection.outbound &&
+          movement.unitCost != balance.averageUnitCost) {
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.posStockAppendFailed),
+        );
+      }
       try {
         balance.apply(movement);
       } on InvalidPosStockException catch (error) {

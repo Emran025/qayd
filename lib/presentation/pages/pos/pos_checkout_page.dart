@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
@@ -11,9 +12,11 @@ import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
+import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/pos/pos_background_barcode_scanner.dart';
 import 'package:qayd/presentation/pos/pos_checkout_cubit.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
+import 'package:qayd/presentation/widgets/account_picker_sheet.dart';
 
 /// Fast POS checkout surface. Completion delegates to the governed atomic
 /// application boundary after the operator provides settlement details.
@@ -64,6 +67,8 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
   final _advanceController = TextEditingController(text: '0');
   final _customerController = TextEditingController();
   final _paymentAccountController = TextEditingController();
+  String? _customerAccountId;
+  String? _paymentAccountId;
   PosPaymentMethod _paymentMethod = PosPaymentMethod.cash;
   final _scannerKey = GlobalKey<PosBackgroundBarcodeScannerState>();
   bool _isBackCamera = true;
@@ -78,6 +83,24 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
     _customerController.dispose();
     _paymentAccountController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAccount({required bool customer}) async {
+    final selected = await showAccountPickerSheet(
+      context,
+      listAccounts: InjectionContainer.listAccountsUseCase,
+      hideSterileRoots: true,
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      if (customer) {
+        _customerAccountId = selected.id;
+        _customerController.text = selected.name;
+      } else {
+        _paymentAccountId = selected.id;
+        _paymentAccountController.text = selected.name;
+      }
+    });
   }
 
   void _onChanged(String value) {
@@ -100,8 +123,12 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
           currency: widget.currency,
           advanceMinorUnits: advance,
           paymentMethod: _paymentMethod,
-          customerAccountId: _accountId(_customerController.text),
-          paymentAccountId: _accountId(_paymentAccountController.text),
+          customerAccountId: _customerAccountId == null
+              ? null
+              : AccountId(_customerAccountId!),
+          paymentAccountId: _paymentAccountId == null
+              ? null
+              : AccountId(_paymentAccountId!),
         );
     if (mounted &&
         context.read<PosCheckoutCubit>().state.status ==
@@ -110,11 +137,6 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
         SnackBar(content: Text(AppStrings.posCheckoutCompleted)),
       );
     }
-  }
-
-  AccountId? _accountId(String raw) {
-    final value = raw.trim();
-    return value.isEmpty ? null : AccountId(value);
   }
 
   Future<void> _toggleCamera() async {
@@ -146,6 +168,7 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
           BlocBuilder<PosCheckoutCubit, PosCheckoutState>(
             builder: (context, state) => _CheckoutContent(
               state: state,
+              currency: widget.currency,
               inputController: _inputController,
               onChanged: _onChanged,
               onSubmitted: (_) => _submitInput(),
@@ -160,6 +183,8 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
               advanceController: _advanceController,
               customerController: _customerController,
               paymentAccountController: _paymentAccountController,
+              onPickCustomer: () => _pickAccount(customer: true),
+              onPickPaymentAccount: () => _pickAccount(customer: false),
               isBackCamera: _isBackCamera,
               scannerError: _scannerError,
               onToggleCamera: _toggleCamera,
@@ -182,6 +207,7 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
 class _CheckoutContent extends StatelessWidget {
   const _CheckoutContent({
     required this.state,
+    required this.currency,
     required this.inputController,
     required this.onChanged,
     required this.onSubmitted,
@@ -195,12 +221,15 @@ class _CheckoutContent extends StatelessWidget {
     required this.advanceController,
     required this.customerController,
     required this.paymentAccountController,
+    required this.onPickCustomer,
+    required this.onPickPaymentAccount,
     required this.isBackCamera,
     required this.scannerError,
     required this.onToggleCamera,
   });
 
   final PosCheckoutState state;
+  final CurrencyCode currency;
   final TextEditingController inputController;
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSubmitted;
@@ -214,6 +243,8 @@ class _CheckoutContent extends StatelessWidget {
   final TextEditingController advanceController;
   final TextEditingController customerController;
   final TextEditingController paymentAccountController;
+  final VoidCallback onPickCustomer;
+  final VoidCallback onPickPaymentAccount;
   final bool isBackCamera;
   final String? scannerError;
   final VoidCallback onToggleCamera;
@@ -282,7 +313,7 @@ class _CheckoutContent extends StatelessWidget {
                 leading: const Icon(Icons.inventory_2_outlined),
                 title: Text(product.name),
                 subtitle:
-                    Text('${product.sku} · ${product.salePrice.minorUnits}'),
+                    Text('${product.sku} · ${formatPosMoney(product.salePrice)}'),
                 trailing: const Icon(Icons.add_circle_outline),
                 onTap: () => onAddProduct(product),
               ),
@@ -344,7 +375,7 @@ class _CheckoutContent extends StatelessWidget {
                   contentPadding: EdgeInsets.zero,
                   title: Text(AppStrings.posCheckoutSubtotal),
                   trailing: Text(
-                    '${state.subtotalMinorUnits}',
+                    formatPosMinor(state.subtotalMinorUnits, currency),
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
@@ -380,14 +411,22 @@ class _CheckoutContent extends StatelessWidget {
                 const SizedBox(height: SpacingTokens.sm),
                 TextFormField(
                   controller: paymentAccountController,
+                  readOnly: true,
+                  onTap: onPickPaymentAccount,
                   decoration: InputDecoration(
-                      labelText: AppStrings.posCheckoutPaymentAccount),
+                    labelText: AppStrings.posCheckoutPaymentAccount,
+                    suffixIcon: const Icon(Icons.account_balance_outlined),
+                  ),
                 ),
                 const SizedBox(height: SpacingTokens.sm),
                 TextFormField(
                   controller: customerController,
+                  readOnly: true,
+                  onTap: onPickCustomer,
                   decoration: InputDecoration(
-                      labelText: AppStrings.posCheckoutCustomerAccount),
+                    labelText: AppStrings.posCheckoutCustomerAccount,
+                    suffixIcon: const Icon(Icons.person_outline_rounded),
+                  ),
                 ),
                 const SizedBox(height: SpacingTokens.md),
                 FilledButton.icon(
@@ -424,7 +463,7 @@ class _CheckoutLineTile extends StatelessWidget {
       child: ListTile(
         title: Text(line.product.name),
         subtitle: Text(
-          '${line.quantity.toExactString()} × ${line.product.salePrice.minorUnits} = ${line.totalMinorUnits}',
+          '${line.quantity.toExactString()} × ${formatPosMoney(line.product.salePrice)} = ${formatPosMinor(line.totalMinorUnits, line.product.currency)}',
         ),
         leading: IconButton(
           tooltip: AppStrings.posCheckoutClearCart,

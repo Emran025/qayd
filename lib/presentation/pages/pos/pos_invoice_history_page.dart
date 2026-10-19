@@ -7,6 +7,7 @@ import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_details.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
+import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/pos/pos_invoice_history_cubit.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
 import 'package:qayd/presentation/utils/share_pdf_bytes.dart';
@@ -84,9 +85,9 @@ class _HistoryViewState extends State<_HistoryView> {
                     leading: const Icon(Icons.receipt_long_outlined),
                     title: Text(invoice.invoiceNumber),
                     subtitle: Text(
-                        '${invoice.status.name} · ${invoice.total.minorUnits} ${invoice.currency.symbol}'),
+                        '${invoice.status.name} · ${formatPosMoney(invoice.total)}'),
                     trailing: Text(
-                        '${AppStrings.posCheckoutAdvance}: ${invoice.paid.minorUnits}'),
+                        '${AppStrings.posCheckoutAdvance}: ${formatPosMoney(invoice.paid)}'),
                     onTap: () => Navigator.of(context).push<void>(
                       MaterialPageRoute(
                         builder: (_) => PosInvoiceDetailPage(
@@ -157,7 +158,7 @@ class _InvoiceDetailsBody extends StatelessWidget {
           child: ListTile(
             title: Text(invoice.invoiceNumber),
             subtitle: Text(
-                '${invoice.status.name} · ${invoice.invoiceDate.toIso8601String()}'),
+                '${invoice.status.name} · ${invoice.invoiceDate.toLocal().toString().split('.').first}'),
             trailing: Icon(invoice.signature == null
                 ? Icons.warning_amber_outlined
                 : Icons.verified_outlined),
@@ -169,9 +170,9 @@ class _InvoiceDetailsBody extends StatelessWidget {
             child: ListTile(
               title: Text(line.productNameSnapshot),
               subtitle: Text(
-                  '${line.quantity.toExactString()} × ${line.unitPrice.minorUnits}'),
+                  '${line.quantity.toExactString()} × ${formatPosMoney(line.unitPrice)}'),
               trailing: Text(
-                  '${line.lineTotal.minorUnits} ${invoice.currency.symbol}'),
+                  formatPosMoney(line.lineTotal)),
             ),
           ),
         ),
@@ -181,13 +182,13 @@ class _InvoiceDetailsBody extends StatelessWidget {
             children: [
               ListTile(
                   title: Text(AppStrings.posCheckoutSubtotal),
-                  trailing: Text('${invoice.subtotal.minorUnits}')),
+                  trailing: Text(formatPosMoney(invoice.subtotal))),
               ListTile(
                   title: Text(AppStrings.posCheckoutAdvance),
-                  trailing: Text('${invoice.paid.minorUnits}')),
+                  trailing: Text(formatPosMoney(invoice.paid))),
               ListTile(
                   title: Text(AppStrings.posInvoiceDueLabel),
-                  trailing: Text('${invoice.due.minorUnits}')),
+                  trailing: Text(formatPosMoney(invoice.due))),
             ],
           ),
         ),

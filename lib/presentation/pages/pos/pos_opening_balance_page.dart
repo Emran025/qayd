@@ -6,6 +6,7 @@ import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
+import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/pos/pos_catalog_cubit.dart';
 import 'package:qayd/presentation/pos/pos_stock_cubit.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
@@ -278,7 +279,7 @@ class _CurrentBalanceCard extends StatelessWidget {
             title: Text(AppStrings.posOpeningBalanceCurrent),
             subtitle: Text(
               '${balance.quantity.toExactString()} · '
-              '${balance.averageUnitCost.minorUnits} ${product!.currency.code}',
+              formatPosMoney(balance.averageUnitCost),
             ),
           ),
         );

@@ -101,6 +101,9 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
   final ListPosProductsUseCase _listProducts;
   final CompletePosSaleUseCase? completeSale;
   final IdGenerator? idGenerator;
+  String? _pendingInvoiceId;
+  String? _pendingInvoiceNumber;
+  String? _pendingIdempotencyKey;
 
   Future<void> completeCheckout({
     required String warehouseId,
@@ -118,11 +121,18 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
     }
     emit(state.copyWith(
         status: PosCheckoutStatus.completing, clearFailure: true));
-    final id = idGenerator?.next() ??
-        'pos-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+    final id = _pendingInvoiceId ??
+        (idGenerator?.next() ??
+            'pos-${DateTime.now().toUtc().microsecondsSinceEpoch}');
+    final invoiceNumber = _pendingInvoiceNumber ??
+        'POS-${DateTime.now().toUtc().millisecondsSinceEpoch}';
+    final idempotencyKey = _pendingIdempotencyKey ?? 'pos-sale:$id';
+    _pendingInvoiceId = id;
+    _pendingInvoiceNumber = invoiceNumber;
+    _pendingIdempotencyKey = idempotencyKey;
     final result = await action(
       invoiceId: id,
-      invoiceNumber: 'POS-${DateTime.now().toUtc().millisecondsSinceEpoch}',
+      invoiceNumber: invoiceNumber,
       warehouseId: warehouseId,
       currency: currency,
       lines: state.lines
@@ -131,7 +141,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
                 quantity: line.quantity,
               ))
           .toList(growable: false),
-      idempotencyKey: 'pos-sale:$id',
+      idempotencyKey: idempotencyKey,
       invoiceDate: DateTime.now().toUtc(),
       createdAt: DateTime.now().toUtc(),
       customerAccountId: customerAccountId,
@@ -155,6 +165,9 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
         clearSearch: true,
       )),
     );
+    if (state.status == PosCheckoutStatus.completed) {
+      _clearPendingSale();
+    }
   }
 
   Future<void> search(String rawQuery) async {
@@ -202,6 +215,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
 
   void addProduct(PosProduct product, {int units = 1}) {
     if (units <= 0) return;
+    _clearPendingSale();
     final quantity = PosQuantity.fromScaled(
       PosMoneyMath.scaleFactor(product.quantityScale) * units,
       scale: product.quantityScale,
@@ -228,6 +242,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
   }
 
   void setQuantity(String productId, PosQuantity quantity) {
+    _clearPendingSale();
     if (quantity.isZero) {
       removeProduct(productId);
       return;
@@ -243,6 +258,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
   }
 
   void removeProduct(String productId) {
+    _clearPendingSale();
     emit(
       state.copyWith(
         lines: List.unmodifiable(
@@ -253,6 +269,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
   }
 
   void clearCart() {
+    _clearPendingSale();
     emit(
       state.copyWith(
         lines: const [],
@@ -262,5 +279,11 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
         status: PosCheckoutStatus.ready,
       ),
     );
+  }
+
+  void _clearPendingSale() {
+    _pendingInvoiceId = null;
+    _pendingInvoiceNumber = null;
+    _pendingIdempotencyKey = null;
   }
 }

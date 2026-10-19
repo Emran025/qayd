@@ -9,6 +9,7 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/navigation/qayd_page_route.dart';
+import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/pos/pos_catalog_cubit.dart';
 import 'package:qayd/presentation/theme/qayd_theme_extensions.dart';
 import 'package:qayd/presentation/theme/radius_tokens.dart';
@@ -263,10 +264,10 @@ class _ProductCard extends StatelessWidget {
                     runSpacing: SpacingTokens.xs,
                     children: [
                       Text(
-                        '${AppStrings.posCatalogSalePrice}: ${product.salePrice.minorUnits} ${product.currency.symbol}',
+                        '${AppStrings.posCatalogSalePrice}: ${formatPosMoney(product.salePrice)}',
                       ),
                       Text(
-                        '${AppStrings.posCatalogPurchasePrice}: ${product.purchasePrice.minorUnits} ${product.currency.symbol}',
+                        '${AppStrings.posCatalogPurchasePrice}: ${formatPosMoney(product.purchasePrice)}',
                       ),
                     ],
                   ),
