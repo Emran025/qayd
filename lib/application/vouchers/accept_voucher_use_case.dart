@@ -169,7 +169,7 @@ class AcceptVoucherUseCase {
       syncEventDispatcher?.dispatchVoucherAcceptance(signedVoucher).ignore();
 
       return const Success(null);
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

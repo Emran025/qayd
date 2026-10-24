@@ -89,7 +89,7 @@ class RejectVoucherUseCase {
       syncEventDispatcher?.dispatchVoucherRejection(rejected).ignore();
 
       return saved;
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

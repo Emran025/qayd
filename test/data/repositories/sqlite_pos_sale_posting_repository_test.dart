@@ -7,7 +7,6 @@ import 'package:qayd/data/mappers/pos_invoice_mapper.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sale_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_stock_movement_repository.dart';
 import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
-import 'package:qayd/domain/entities/ledger_entry.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
@@ -168,7 +167,6 @@ PosAccountingPosting _posting({
   required String affectedAccountId,
   required int amount,
   required DateTime date,
-  bool emptyEntries = false,
 }) {
   final voucher = Voucher.draft(
     id: VoucherId(voucherId),
@@ -182,15 +180,13 @@ PosAccountingPosting _posting({
     description: 'POS sale',
     createdAt: date,
   ).confirm(date);
-  final entries = emptyEntries
-      ? const <LedgerEntry>[]
-      : EntryGenerator().generateForConfirmedVoucher(
-          voucher: voucher,
-          transactionId: TransactionId(transactionId),
-          debitEntryId: EntryId(debitEntryId),
-          creditEntryId: EntryId(creditEntryId),
-          ledgerCreatedAt: date,
-        );
+  final entries = EntryGenerator().generateForConfirmedVoucher(
+    voucher: voucher,
+    transactionId: TransactionId(transactionId),
+    debitEntryId: EntryId(debitEntryId),
+    creditEntryId: EntryId(creditEntryId),
+    ledgerCreatedAt: date,
+  );
   return PosAccountingPosting(
     sourceId: invoiceId,
     voucher: voucher,
@@ -261,14 +257,14 @@ PosSalePosting _sale({bool invalidCogs = false}) {
         voucherId: 'cogs-voucher-1',
         invoiceId: invoiceId,
         transactionId: 'cogs-tx-1',
-        debitEntryId: 'cogs-debit-1',
-        creditEntryId: 'cogs-credit-1',
+        // Force a ledger primary-key conflict after the second voucher write.
+        debitEntryId: invalidCogs ? 'sale-debit-1' : 'cogs-debit-1',
+        creditEntryId: invalidCogs ? 'sale-credit-1' : 'cogs-credit-1',
         type: VoucherType.payment,
         counterpartyId: 'cogs',
         affectedAccountId: 'inventory',
         amount: 100,
         date: date,
-        emptyEntries: invalidCogs,
       ),
     ],
     payments: const [],

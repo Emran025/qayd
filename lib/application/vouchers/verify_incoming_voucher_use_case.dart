@@ -125,7 +125,7 @@ class VerifyIncomingVoucherUseCase {
         matchedKeyHex: result.matchedKeyHex,
         failureReason: failureReason,
       ));
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

@@ -23,6 +23,7 @@ final class CreatePosProductInput {
     this.expiryTracking = false,
     this.barcodes = const <String>[],
     this.description,
+    this.categoryId,
     this.unitName = 'unit',
   });
 
@@ -36,6 +37,7 @@ final class CreatePosProductInput {
   final bool expiryTracking;
   final List<String> barcodes;
   final String? description;
+  final String? categoryId;
   final String unitName;
 }
 
@@ -87,6 +89,7 @@ final class CreatePosProductUseCase {
             .map(PosBarcode.new)
             .toList(growable: false),
         description: input.description,
+        categoryId: input.categoryId,
         unitName: input.unitName,
       );
       return await _repository.save(product);

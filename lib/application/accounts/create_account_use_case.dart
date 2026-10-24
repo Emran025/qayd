@@ -171,7 +171,7 @@ class CreateAccountUseCase {
           createdAtIso: account.createdAt.toIso8601String(),
         ),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

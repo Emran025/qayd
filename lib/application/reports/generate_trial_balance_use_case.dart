@@ -97,7 +97,7 @@ class GenerateTrialBalanceUseCase {
           isOverallBalanced: report.isBalanced,
         ),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

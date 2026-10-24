@@ -15,6 +15,8 @@ import 'package:qayd/domain/repositories/account_repository.dart';
 import 'package:qayd/domain/entities/voucher.dart';
 import 'package:qayd/domain/entities/account.dart';
 import 'package:qayd/domain/entities/transaction_fee_setting.dart';
+import 'package:qayd/domain/value_objects/account_classification.dart';
+import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/voucher_id.dart';
 
@@ -107,6 +109,14 @@ void main() {
           .thenAnswer((_) async => const Success(null));
       when(() => mockAccountRepo.getAll())
           .thenAnswer((_) async => const Success([]));
+      when(() => mockAccountRepo.getById(AccountId('me-789'))).thenAnswer(
+        (_) async => Success(Account.createRoot(
+          id: AccountId('me-789'),
+          name: 'Mediator',
+          classification: AccountClassification.payables,
+          createdAt: DateTime.utc(2026, 1, 1),
+        )),
+      );
 
       when(() => mockVoucherRepo.saveTripartitePair(
             receiptVoucher: any(named: 'receiptVoucher'),
@@ -179,7 +189,8 @@ void main() {
       // Arrange
       final feeSetting = MockTransactionFeeSetting();
       when(() => feeSetting.value).thenReturn(100);
-      when(() => feeSetting.calculationType).thenReturn(FeeCalculationType.fixed);
+      when(() => feeSetting.calculationType)
+          .thenReturn(FeeCalculationType.fixed);
 
       when(() => mockWriteGuard.assertWritesPermitted())
           .thenAnswer((_) async => const Success(null));
@@ -188,8 +199,16 @@ void main() {
       when(() => mockIdGen.next()).thenReturn('unique-id');
       when(() => mockGetFee.call())
           .thenAnswer((_) async => Success(feeSetting));
-      when(() => mockAccountRepo.getAll())
+      when(() => mockAccountRepo.getAll(excludeArchived: true))
           .thenAnswer((_) async => const Success([]));
+      when(() => mockAccountRepo.getById(AccountId('me-789'))).thenAnswer(
+        (_) async => Success(Account.createRoot(
+          id: AccountId('me-789'),
+          name: 'Mediator',
+          classification: AccountClassification.payables,
+          createdAt: DateTime.utc(2026, 1, 1),
+        )),
+      );
 
       when(() => mockVoucherRepo.saveTripartitePair(
             receiptVoucher: any(named: 'receiptVoucher'),
@@ -205,11 +224,15 @@ void main() {
       final result = await useCase.call(input);
 
       // Assert
-      expect(result.isSuccess, isTrue);
+      expect(
+        result.isSuccess,
+        isTrue,
+        reason: result.failureOrNull?.toString(),
+      );
       // Verify fee voucher was saved
       verify(() => mockVoucherRepo.save(any())).called(1);
-      // Verify revenue account was auto-created if not exists
-      verify(() => mockAccountRepo.save(any())).called(1);
+      // The fee income and remittance-clearing accounts are both created.
+      verify(() => mockAccountRepo.save(any())).called(2);
     });
   });
 }

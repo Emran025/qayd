@@ -146,6 +146,6 @@ void main() {
     expect(out.counterpartyName, 'CP Name');
     expect(out.affectedName, 'Aff Name');
     expect(out.qrData, 'qr-data');
-    expect(out.canApprove, isFalse); // Me is sender, so can't approve own draft
+    expect(out.canApprove, isTrue); // The local creator can confirm their draft.
   });
 }

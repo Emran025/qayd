@@ -131,6 +131,25 @@ void main() {
       expect(repository.saved!.expiryTracking, isTrue);
     });
 
+    test('preserves the explicit unit of measure', () async {
+      final repository = _ProductRepo();
+      final useCase = _useCase(productRepo: repository, currency: sar);
+
+      final result = await useCase(
+        const CreatePosProductInput(
+          sku: 'SKU-UNIT',
+          name: 'Coffee',
+          currencyCode: 'SAR',
+          salePriceMinor: 300,
+          purchasePriceMinor: 100,
+          unitName: 'box',
+        ),
+      );
+
+      expect(result.isSuccess, isTrue);
+      expect(repository.saved!.unitName, 'box');
+    });
+
     test('returns validation failure when currency is not registered', () async {
       final repository = _ProductRepo();
       final useCase = _useCase(productRepo: repository, currency: sar);

@@ -140,8 +140,4 @@ If you are modifying, extending, or auditing Qayd, you are bound by the followin
 #### *The integrity of the Qayd local ledger is absolute.*
 
 > [!TIP]
-> To build a release APK with code obfuscation and split debug information, run:
->
-> ```bash
-> flutter build apk --release --obfuscate --split-debug-info=debug-info --dart-define-from-file=config_prod.json
-> ```
+> Production Android releases are built by `.github/workflows/build-release.yml` from a tag such as `v1.2.3` or `v1.2.3+45`. The workflow injects production values from GitHub Actions secrets, validates the signed APK, and publishes APK, AAB, debug symbols, and checksums. Do not commit production values or rely on `config_prod.json`; that file is intentionally ignored by Git. See [Android release deployment](docs/android-release-deployment.md) for the required repository configuration.

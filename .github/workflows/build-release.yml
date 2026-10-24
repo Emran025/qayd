@@ -1,65 +1,99 @@
-name: Build & Release — Qayd Android
+name: Qayd Android Release
 
-# Release builds are tag-only. Supported tags:
-#   v1.2.3       -> versionName=1.2.3, versionCode=run_number
-#   v1.2.3+45    -> versionName=1.2.3, versionCode=45
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: qayd-release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  FLUTTER_VERSION: '3.47.1'
-  JAVA_VERSION: '17'
+  FLUTTER_VERSION: "3.47.1"
+  JAVA_VERSION: "17"
 
 jobs:
-  build:
-    name: Build signed Android APK
+  quality:
+    name: Release quality gate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 35
     steps:
       - name: Checkout exact tag
         uses: actions/checkout@v4
 
-      - name: Validate and extract version
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: qayd-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Static analysis
+        run: flutter analyze --no-pub --no-fatal-infos
+
+      - name: Unit and widget tests
+        run: flutter test --no-pub --reporter expanded
+
+  build:
+    name: Build and verify signed Android artifacts
+    runs-on: ubuntu-latest
+    needs: quality
+    timeout-minutes: 50
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      build_name: ${{ steps.version.outputs.build_name }}
+      build_number: ${{ steps.version.outputs.build_number }}
+      apk_name: ${{ steps.version.outputs.apk_name }}
+      aab_name: ${{ steps.version.outputs.aab_name }}
+      debug_info_name: ${{ steps.version.outputs.debug_info_name }}
+    steps:
+      - name: Checkout exact tag
+        uses: actions/checkout@v4
+
+      - name: Validate release tag and derive Android version
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]]; then
-            echo "Unsupported release tag: $TAG" >&2
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]]; then
+            echo "Unsupported release tag: $tag" >&2
             echo 'Expected v1.2.3 or v1.2.3+45.' >&2
             exit 1
           fi
 
-          VERSION="${TAG#v}"
-          if [[ "$VERSION" == *'+'* ]]; then
-            BUILD_NAME="${VERSION%%+*}"
-            BUILD_NUMBER="${VERSION##*+}"
+          version="${tag#v}"
+          if [[ "$version" == *'+'* ]]; then
+            build_name="${version%%+*}"
+            build_number="${version##*+}"
           else
-            BUILD_NAME="$VERSION"
-            BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+            build_name="$version"
+            build_number="$GITHUB_RUN_NUMBER"
           fi
-
-          if (( BUILD_NUMBER < 1 || BUILD_NUMBER > 2100000000 )); then
-            echo "Invalid Android versionCode: $BUILD_NUMBER" >&2
+          if [[ ! "$build_number" =~ ^[0-9]+$ ]]; then
+            echo "Invalid Android versionCode: $build_number" >&2
+            exit 1
+          fi
+          build_number=$((10#$build_number))
+          if (( build_number < 1 || build_number > 2100000000 )); then
+            echo "Invalid Android versionCode: $build_number" >&2
             exit 1
           fi
 
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "build_name=$BUILD_NAME" >> "$GITHUB_OUTPUT"
-          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "apk_versioned=qayd-${TAG}.apk" >> "$GITHUB_OUTPUT"
-          echo "apk_canonical=qayd.apk" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "build_name=$build_name" >> "$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "apk_name=qayd-${tag}.apk" >> "$GITHUB_OUTPUT"
+          echo "aab_name=qayd-${tag}.aab" >> "$GITHUB_OUTPUT"
+          echo "debug_info_name=qayd-debug-info-${tag}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -74,11 +108,40 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+          cache-key: qayd-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
 
-      - name: Install dependencies
-        run: flutter pub get
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
 
-      - name: Materialize signing files in the runner workspace
+      - name: Validate production configuration
+        shell: bash
+        env:
+          QAYD_API_URL: ${{ secrets.QAYD_API_URL }}
+          QAYD_ANDROID_APPLICATION_ID: ${{ vars.QAYD_ANDROID_APPLICATION_ID }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENABLED: ${{ vars.SENTRY_ENABLED }}
+        run: |
+          set -euo pipefail
+          : "${QAYD_API_URL:?Missing QAYD_API_URL repository secret}"
+          : "${QAYD_ANDROID_APPLICATION_ID:?Missing QAYD_ANDROID_APPLICATION_ID repository variable}"
+          if [[ ! "$QAYD_API_URL" =~ ^https://[^[:space:]]+$ ]]; then
+            echo 'QAYD_API_URL must be a valid HTTPS URL.' >&2
+            exit 1
+          fi
+          if [[ ! "$QAYD_ANDROID_APPLICATION_ID" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]] || [[ "$QAYD_ANDROID_APPLICATION_ID" == "com.example.qayd" ]]; then
+            echo 'Set a final, unique QAYD_ANDROID_APPLICATION_ID; do not release com.example.qayd.' >&2
+            exit 1
+          fi
+          case "${SENTRY_ENABLED:-false}" in
+            true|false) ;;
+            *) echo 'SENTRY_ENABLED must be true or false.' >&2; exit 1 ;;
+          esac
+          if [[ "${SENTRY_ENABLED:-false}" == "true" && -z "${SENTRY_DSN:-}" ]]; then
+            echo 'SENTRY_ENABLED=true requires the SENTRY_DSN secret.' >&2
+            exit 1
+          fi
+
+      - name: Materialize and verify Android signing key
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -91,10 +154,13 @@ jobs:
           : "${ANDROID_KEYSTORE_PASSWORD:?Missing ANDROID_KEYSTORE_PASSWORD secret}"
           : "${ANDROID_KEY_ALIAS:?Missing ANDROID_KEY_ALIAS secret}"
           : "${ANDROID_KEY_PASSWORD:?Missing ANDROID_KEY_PASSWORD secret}"
-
           mkdir -p android/keystore
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/keystore/qayd-release.jks
           chmod 600 android/keystore/qayd-release.jks
+          test -s android/keystore/qayd-release.jks
+          keytool -list -keystore android/keystore/qayd-release.jks \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null
           cat > android/key.properties <<EOF
           storeFile=keystore/qayd-release.jks
           storePassword=${ANDROID_KEYSTORE_PASSWORD}
@@ -103,9 +169,14 @@ jobs:
           EOF
           chmod 600 android/key.properties
 
-      - name: Build signed release APK
+      - name: Build signed APK and Play-ready AAB
         shell: bash
         env:
+          BUILD_NAME: ${{ steps.version.outputs.build_name }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+          APK_NAME: ${{ steps.version.outputs.apk_name }}
+          AAB_NAME: ${{ steps.version.outputs.aab_name }}
+          DEBUG_INFO_NAME: ${{ steps.version.outputs.debug_info_name }}
           QAYD_API_URL: ${{ secrets.QAYD_API_URL }}
           QAYD_ANDROID_APPLICATION_ID: ${{ vars.QAYD_ANDROID_APPLICATION_ID }}
           REVERB_APP_KEY: ${{ secrets.REVERB_APP_KEY }}
@@ -116,103 +187,111 @@ jobs:
           SENTRY_ENABLED: ${{ vars.SENTRY_ENABLED }}
         run: |
           set -euo pipefail
-          : "${QAYD_API_URL:?Missing QAYD_API_URL secret}"
-          : "${QAYD_ANDROID_APPLICATION_ID:?Missing QAYD_ANDROID_APPLICATION_ID repository variable}"
-          if [[ ! "$QAYD_ANDROID_APPLICATION_ID" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]]; then
-            echo "Invalid Android applicationId format" >&2
-            exit 1
-          fi
+          common_args=(
+            --release
+            --build-name="$BUILD_NAME"
+            --build-number="$BUILD_NUMBER"
+            --obfuscate
+            "--dart-define=QAYD_API_URL=${QAYD_API_URL}"
+            "--dart-define=REVERB_APP_KEY=${REVERB_APP_KEY:-}"
+            "--dart-define=SENTRY_DSN=${SENTRY_DSN:-}"
+            "--dart-define=SENTRY_ENV=${SENTRY_ENV:-production}"
+            "--dart-define=SENTRY_RELEASE=${SENTRY_RELEASE:-$BUILD_NAME}"
+            "--dart-define=SENTRY_DIST=${SENTRY_DIST:-$BUILD_NUMBER}"
+            "--dart-define=SENTRY_ENABLED=${SENTRY_ENABLED:-false}"
+          )
 
-          flutter build apk \
-            --release \
-            --build-name="${{ steps.version.outputs.build_name }}" \
-            --build-number="${{ steps.version.outputs.build_number }}" \
-            --split-debug-info="debug-info/${{ steps.version.outputs.build_name }}" \
-            --dart-define="QAYD_API_URL=${QAYD_API_URL}" \
-            --dart-define="REVERB_APP_KEY=${REVERB_APP_KEY:-}" \
-            --dart-define="SENTRY_DSN=${SENTRY_DSN:-}" \
-            --dart-define="SENTRY_ENV=${SENTRY_ENV:-production}" \
-            --dart-define="SENTRY_RELEASE=${SENTRY_RELEASE:-${{ steps.version.outputs.build_name }}}" \
-            --dart-define="SENTRY_DIST=${SENTRY_DIST:-${{ steps.version.outputs.build_number }}}" \
-            --dart-define="SENTRY_ENABLED=${SENTRY_ENABLED:-false}" \
-            -- \
-            -PqaydApplicationId="$QAYD_ANDROID_APPLICATION_ID"
+          flutter build apk "${common_args[@]}" \
+            --split-debug-info="debug-info/apk" \
+            -- -PqaydApplicationId="$QAYD_ANDROID_APPLICATION_ID"
+          flutter build appbundle "${common_args[@]}" \
+            --split-debug-info="debug-info/appbundle" \
+            -- -PqaydApplicationId="$QAYD_ANDROID_APPLICATION_ID"
 
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk "dist/${{ steps.version.outputs.apk_versioned }}"
-          cp build/app/outputs/flutter-apk/app-release.apk "dist/${{ steps.version.outputs.apk_canonical }}"
-          test -s "dist/${{ steps.version.outputs.apk_versioned }}"
-          test -s "dist/${{ steps.version.outputs.apk_canonical }}"
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/$APK_NAME"
+          cp build/app/outputs/flutter-apk/app-release.apk dist/qayd.apk
+          cp build/app/outputs/bundle/release/app-release.aab "dist/$AAB_NAME"
+          test -s "dist/$APK_NAME"
+          test -s dist/qayd.apk
+          test -s "dist/$AAB_NAME"
 
-      - name: Upload versioned APK artifact
+          android_sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [[ -z "$android_sdk" ]]; then
+            echo 'Android SDK path is not set on the release runner.' >&2
+            exit 1
+          fi
+          apksigner="$(find "$android_sdk/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          aapt="$(find "$android_sdk/build-tools" -type f -name aapt -print | sort -V | tail -n 1)"
+          [[ -x "$apksigner" && -x "$aapt" ]] || { echo 'Android build tools are missing apksigner or aapt.' >&2; exit 1; }
+          "$apksigner" verify --verbose --print-certs "dist/$APK_NAME" > dist/signing-certificate.txt
+          "$aapt" dump badging "dist/$APK_NAME" | grep -Fq \
+            "package: name='$QAYD_ANDROID_APPLICATION_ID' versionCode='$BUILD_NUMBER' versionName='$BUILD_NAME'"
+          jarsigner -verify "dist/$AAB_NAME" >/dev/null
+
+          test -d debug-info
+          zip -qr "dist/$DEBUG_INFO_NAME" debug-info
+          (cd dist && sha256sum "$APK_NAME" qayd.apk "$AAB_NAME" "$DEBUG_INFO_NAME" signing-certificate.txt > SHA256SUMS)
+          test -s dist/SHA256SUMS
+
+      - name: Upload release assets
         uses: actions/upload-artifact@v4
         with:
-          name: qayd-apk-versioned
-          path: dist/${{ steps.version.outputs.apk_versioned }}
+          name: qayd-release-assets-${{ steps.version.outputs.tag }}
+          path: dist/*
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
-      - name: Upload canonical APK artifact
+      - name: Retain raw debug symbols
         uses: actions/upload-artifact@v4
         with:
-          name: qayd-apk-canonical
-          path: dist/${{ steps.version.outputs.apk_canonical }}
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload debug symbols artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: qayd-debug-symbols
+          name: qayd-debug-info-${{ steps.version.outputs.tag }}
           path: debug-info/
           if-no-files-found: error
           retention-days: 90
 
-    outputs:
-      tag: ${{ steps.version.outputs.tag }}
-      build_name: ${{ steps.version.outputs.build_name }}
-      build_number: ${{ steps.version.outputs.build_number }}
-      apk_versioned: ${{ steps.version.outputs.apk_versioned }}
-      apk_canonical: ${{ steps.version.outputs.apk_canonical }}
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f android/key.properties && rm -rf android/keystore
 
-  release:
+  publish:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      contents: write
     timeout-minutes: 10
-
     steps:
-      - name: Download versioned APK
+      - name: Download release assets
         uses: actions/download-artifact@v4
         with:
-          name: qayd-apk-versioned
+          name: qayd-release-assets-${{ needs.build.outputs.tag }}
           path: dist/
 
-      - name: Download canonical APK
-        uses: actions/download-artifact@v4
-        with:
-          name: qayd-apk-canonical
-          path: dist/
-
-      - name: Publish GitHub Release
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.build.outputs.tag }}
-          name: "Qayd ${{ needs.build.outputs.build_name }}"
+          name: Qayd ${{ needs.build.outputs.build_name }}
           make_latest: true
           fail_on_unmatched_files: true
           body: |
             ## قيد — الإصدار ${{ needs.build.outputs.build_name }}
 
-            ملفات Android الموقّعة متاحة في الأسفل. الملف `qayd.apk` هو الاسم الثابت المستخدم للرابط المباشر لأحدث إصدار.
+            اجتاز الإصدار التحليل والاختبارات، وبُني APK وAAB موقّعان بعد التحقق من هوية الحزمة ورقم الإصدار.
 
-            | الملف | الوصف |
-            |---|---|
-            | `${{ needs.build.outputs.apk_versioned }}` | نسخة مرتبطة بهذا الإصدار |
-            | `${{ needs.build.outputs.apk_canonical }}` | الاسم الثابت لأحدث APK |
+            - `${{ needs.build.outputs.apk_name }}`: APK مرتبط بهذا الإصدار.
+            - `qayd.apk`: APK بالاسم الثابت لأحدث إصدار.
+            - `${{ needs.build.outputs.aab_name }}`: Android App Bundle للتوزيع عبر المتجر.
+            - `${{ needs.build.outputs.debug_info_name }}`: رموز فك التعتيم اللازمة لتحليل الأعطال.
+            - `SHA256SUMS`: بصمات SHA-256 لملفات الإصدار.
 
-            **Build:** `${{ needs.build.outputs.build_name }}+${{ needs.build.outputs.build_number }}`
-            **Tag:** `${{ needs.build.outputs.tag }}`
+            Build: `${{ needs.build.outputs.build_name }}+${{ needs.build.outputs.build_number }}`
+            Tag: `${{ needs.build.outputs.tag }}`
           files: |
-            dist/${{ needs.build.outputs.apk_versioned }}
-            dist/${{ needs.build.outputs.apk_canonical }}
+            dist/${{ needs.build.outputs.apk_name }}
+            dist/qayd.apk
+            dist/${{ needs.build.outputs.aab_name }}
+            dist/${{ needs.build.outputs.debug_info_name }}
+            dist/signing-certificate.txt
+            dist/SHA256SUMS

@@ -14,7 +14,6 @@ import 'package:qayd/domain/value_objects/voucher_state.dart';
 import 'package:qayd/domain/value_objects/voucher_type.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 
-
 /// Receipt or payment document with strict draft → confirmed → settled lifecycle.
 ///
 /// Separation of concerns:
@@ -286,13 +285,13 @@ class Voucher {
     VoucherId? originVoucherId,
   }) {
     if (counterpartyId == affectedAccountId) {
-      throw  SelfCancelingEntryException(
+      throw SelfCancelingEntryException(
         messageAr: AppStrings.theAffectedPartyAnd,
         code: 'voucher_self_counterparty',
       );
     }
     if (amount.isZero) {
-      throw  InvalidAmountException(
+      throw InvalidAmountException(
         messageAr: AppStrings.theBondAmountMust,
         code: 'voucher_amount_zero',
       );
@@ -301,9 +300,13 @@ class Voucher {
     // Policy v2.0:
     // Creating the voucher constitutes implicit approval by the sender.
     // Documentation completion requires the receiver's signature.
-    final senderStatus = senderSignatureHex != null ? AgreementStatus.accepted : AgreementStatus.accepted; 
+    final senderStatus = senderSignatureHex != null
+        ? AgreementStatus.accepted
+        : AgreementStatus.accepted;
     // Wait, if I am creating it, I am the sender, so I accept it by default.
-    final receiverStatus = receiverSignatureHex != null ? AgreementStatus.accepted : AgreementStatus.underRequest;
+    final receiverStatus = receiverSignatureHex != null
+        ? AgreementStatus.accepted
+        : AgreementStatus.underRequest;
     const lifecycleStatus = VoucherLifecycle.draft;
 
     return Voucher._(
@@ -417,7 +420,8 @@ class Voucher {
       signerPhone: signerPhone ?? this.signerPhone,
       // Freeze canonical phones on first write; never overwrite if already set.
       canonicalSenderPhone: this.canonicalSenderPhone ?? canonicalSenderPhone,
-      canonicalReceiverPhone: this.canonicalReceiverPhone ?? canonicalReceiverPhone,
+      canonicalReceiverPhone:
+          this.canonicalReceiverPhone ?? canonicalReceiverPhone,
     );
   }
 
@@ -446,11 +450,12 @@ class Voucher {
     String? notes,
     List<String>? tags,
   }) {
-    final canEdit = canWithdraw || state.isWithdrawn;
+    final canEdit = state.isDraft ||
+        state.isWithdrawn ||
+        receiverStatus == AgreementStatus.rejected;
     if (!canEdit) {
-      throw  ImmutableEntityException(
-        messageAr:
-            AppStrings.theInstrumentCannotBe,
+      throw ImmutableEntityException(
+        messageAr: AppStrings.theInstrumentCannotBe,
         code: 'voucher_not_editable',
       );
     }
@@ -466,13 +471,13 @@ class Voucher {
     final nextCounterparty = counterpartyId ?? this.counterpartyId;
     final nextAffected = affectedAccountId ?? this.affectedAccountId;
     if (nextCounterparty == nextAffected) {
-      throw  SelfCancelingEntryException(
+      throw SelfCancelingEntryException(
         messageAr: AppStrings.theAffectedPartyAnd,
         code: 'voucher_self_counterparty',
       );
     }
     if (nextAmount.isZero) {
-      throw  InvalidAmountException(
+      throw InvalidAmountException(
         messageAr: AppStrings.theBondAmountMust,
         code: 'voucher_amount_zero',
       );
@@ -511,7 +516,7 @@ class Voucher {
 
   void assertDraftDeletionAllowed() {
     if (!state.isDraft) {
-      throw  ImmutableEntityException(
+      throw ImmutableEntityException(
         messageAr: AppStrings.bondsCanBeDeleted,
         code: 'voucher_delete_not_draft',
       );
@@ -520,7 +525,7 @@ class Voucher {
 
   void assertMutableForAccountingSideEffects() {
     if (state.isSettled) {
-      throw  ImmutableEntityException(
+      throw ImmutableEntityException(
         messageAr: AppStrings.aSettledBondIs,
         code: 'voucher_settled_immutable',
       );
@@ -573,7 +578,8 @@ class Voucher {
       lifecycleStatus: lifecycleStatus ?? this.lifecycleStatus,
       signerPhone: signerPhone ?? this.signerPhone,
       canonicalSenderPhone: canonicalSenderPhone ?? this.canonicalSenderPhone,
-      canonicalReceiverPhone: canonicalReceiverPhone ?? this.canonicalReceiverPhone,
+      canonicalReceiverPhone:
+          canonicalReceiverPhone ?? this.canonicalReceiverPhone,
       tripartiteMeta: tripartiteMeta ?? this.tripartiteMeta,
       originVoucherId: originVoucherId ?? this.originVoucherId,
       rejectionReason: rejectionReason ?? this.rejectionReason,

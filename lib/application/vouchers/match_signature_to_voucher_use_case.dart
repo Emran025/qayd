@@ -125,7 +125,7 @@ class MatchSignatureToVoucherUseCase {
       }
 
       return Success(updatedVoucher);
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(ValidationFailure(
         messageAr: AppStrings.anUnexpectedErrorOccurred,
         code: 'match_exception',

@@ -60,7 +60,7 @@ class SettleVoucherUseCase {
         );
       }
       return result;
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

@@ -127,6 +127,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
     final invoiceNumber = _pendingInvoiceNumber ??
         'POS-${DateTime.now().toUtc().millisecondsSinceEpoch}';
     final idempotencyKey = _pendingIdempotencyKey ?? 'pos-sale:$id';
+    final now = DateTime.now().toUtc();
     _pendingInvoiceId = id;
     _pendingInvoiceNumber = invoiceNumber;
     _pendingIdempotencyKey = idempotencyKey;
@@ -142,8 +143,8 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
               ))
           .toList(growable: false),
       idempotencyKey: idempotencyKey,
-      invoiceDate: DateTime.now().toUtc(),
-      createdAt: DateTime.now().toUtc(),
+      invoiceDate: now,
+      createdAt: now,
       customerAccountId: customerAccountId,
       settlement: PosSaleSettlementInput(
         advanceMinorUnits: advanceMinorUnits,

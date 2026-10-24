@@ -279,7 +279,7 @@ class _CurrentBalanceCard extends StatelessWidget {
             title: Text(AppStrings.posOpeningBalanceCurrent),
             subtitle: Text(
               '${balance.quantity.toExactString()} · '
-              formatPosMoney(balance.averageUnitCost),
+              '${formatPosMoney(balance.averageUnitCost)}',
             ),
           ),
         );

@@ -6,6 +6,7 @@ import 'package:qayd/domain/entities/pos_sales_report.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
+import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
 import 'package:qayd/presentation/utils/share_pdf_bytes.dart';
 
@@ -113,4 +114,4 @@ class _MetricCard extends StatelessWidget {
           trailing: Text(value, style: Theme.of(context).textTheme.titleLarge),
         ),
       );
-}import 'package:qayd/presentation/pos/pos_money_display.dart';
+}

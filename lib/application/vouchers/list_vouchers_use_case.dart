@@ -112,7 +112,7 @@ class ListVouchersUseCase {
               .toList(growable: false),
         ),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

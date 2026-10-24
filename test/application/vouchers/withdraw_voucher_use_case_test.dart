@@ -87,6 +87,8 @@ void main() {
         .thenAnswer((_) async => Success(voucher));
     when(() => mockVoucherRepo.save(any()))
         .thenAnswer((_) async => const Success(null));
+    when(() => mockVoucherRepo.getByOriginVoucherId(any()))
+        .thenAnswer((_) async => const Success([]));
     when(() => mockSyncEventDispatcher.dispatchVoucherWithdrawal(any()))
         .thenAnswer((_) async {});
 

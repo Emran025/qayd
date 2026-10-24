@@ -185,6 +185,19 @@ void main() {
     expect(result.isFailure, isTrue);
   });
 
+  test('rejects a zero advance unless the settlement is explicitly credit',
+      () async {
+    final result = await createUseCase()(input(
+      customerAccountId: AccountId('customer'),
+      settlement: PosSaleSettlementInput(
+        advanceMinorUnits: 0,
+        paymentMethod: PosPaymentMethod.cash,
+      ),
+    ));
+
+    expect(result.isFailure, isTrue);
+  });
+
   test('fails before payload construction when a required account is missing',
       () async {
     final ids = <String, String>{

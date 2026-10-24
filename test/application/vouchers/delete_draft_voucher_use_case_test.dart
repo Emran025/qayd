@@ -5,7 +5,12 @@ import 'package:qayd/domain/repositories/voucher_repository.dart';
 import 'package:qayd/application/governance/governance_write_guard.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/error/failures.dart';
+import 'package:qayd/domain/entities/voucher.dart';
+import 'package:qayd/domain/value_objects/account_id.dart';
+import 'package:qayd/domain/value_objects/currency_code.dart';
+import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/voucher_id.dart';
+import 'package:qayd/domain/value_objects/voucher_type.dart';
 
 class MockVoucherRepository extends Mock implements VoucherRepository {}
 
@@ -23,6 +28,23 @@ void main() {
   setUp(() {
     mockVoucherRepo = MockVoucherRepository();
     mockWriteGuard = MockGovernanceWriteGuard();
+    final currency = CurrencyCode(
+      code: 'SAR',
+      nameAr: 'ريال سعودي',
+      symbol: 'ر.س',
+    );
+    final draft = Voucher.draft(
+      id: VoucherId('v-1'),
+      type: VoucherType.receipt,
+      date: DateTime.utc(2026, 1, 1),
+      amount: Money.fromMinorUnits(100, currency),
+      currency: currency,
+      counterpartyId: AccountId('counterparty'),
+      affectedAccountId: AccountId('cash'),
+      createdAt: DateTime.utc(2026, 1, 1),
+    );
+    when(() => mockVoucherRepo.getById(any()))
+        .thenAnswer((_) async => Success(draft));
 
     useCase = DeleteDraftVoucherUseCase(
       mockVoucherRepo,
