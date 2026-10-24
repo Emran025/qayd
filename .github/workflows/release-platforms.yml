@@ -86,6 +86,15 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+      - name: Install Linux desktop dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - name: Generate Windows Flutter build files
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: flutter create --platforms=windows --project-name qayd .
       - name: Resolve dependencies
         run: flutter pub get --enforce-lockfile
       - name: Validate production API configuration
