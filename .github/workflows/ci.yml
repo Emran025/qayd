@@ -10,6 +10,7 @@ on:
       - "pubspec.lock"
       - "analysis_options.yaml"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/build-release.yml"
   pull_request:
     branches: [main]
     paths:
@@ -19,6 +20,7 @@ on:
       - "pubspec.lock"
       - "analysis_options.yaml"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/build-release.yml"
 
 permissions:
   contents: read

@@ -179,6 +179,7 @@ jobs:
           DEBUG_INFO_NAME: ${{ steps.version.outputs.debug_info_name }}
           QAYD_API_URL: ${{ secrets.QAYD_API_URL }}
           QAYD_ANDROID_APPLICATION_ID: ${{ vars.QAYD_ANDROID_APPLICATION_ID }}
+          ORG_GRADLE_PROJECT_qaydApplicationId: ${{ vars.QAYD_ANDROID_APPLICATION_ID }}
           REVERB_APP_KEY: ${{ secrets.REVERB_APP_KEY }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_ENV: ${{ vars.SENTRY_ENV }}
@@ -202,11 +203,9 @@ jobs:
           )
 
           flutter build apk "${common_args[@]}" \
-            --split-debug-info="debug-info/apk" \
-            -- -PqaydApplicationId="$QAYD_ANDROID_APPLICATION_ID"
+            --split-debug-info="debug-info/apk"
           flutter build appbundle "${common_args[@]}" \
-            --split-debug-info="debug-info/appbundle" \
-            -- -PqaydApplicationId="$QAYD_ANDROID_APPLICATION_ID"
+            --split-debug-info="debug-info/appbundle"
 
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk "dist/$APK_NAME"
