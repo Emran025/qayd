@@ -90,7 +90,10 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev
+      - name: Generate Linux Flutter build files
+        if: matrix.platform == 'linux'
+        run: flutter create --platforms=linux --project-name qayd .
       - name: Generate Windows Flutter build files
         if: matrix.platform == 'windows'
         shell: bash
@@ -126,7 +129,6 @@ jobs:
           QAYD_API_URL: ${{ env.QAYD_API_URL }}
         run: |
           set -euo pipefail
-          export DART_DEFINES="QAYD_API_URL=${QAYD_API_URL:-}"
           ${{ matrix.command }} --dart-define="QAYD_API_URL=${QAYD_API_URL:-}"
       - name: Archive artifact
         shell: bash
