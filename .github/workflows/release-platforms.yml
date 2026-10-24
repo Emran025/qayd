@@ -1,0 +1,173 @@
+name: Qayd Cross-Platform Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example 1.0.1+2)"
+        required: true
+        type: string
+      publish:
+        description: "Create a GitHub release with the built artifacts"
+        required: false
+        default: true
+        type: boolean
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qayd-cross-platform-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: "3.47.1"
+  QAYD_API_URL: ${{ secrets.QAYD_API_URL }}
+  QAYD_IOS_BUNDLE_ID: ${{ vars.QAYD_IOS_BUNDLE_ID || 'com.accsystem.qayd' }}
+  QAYD_MACOS_BUNDLE_ID: ${{ vars.QAYD_MACOS_BUNDLE_ID || 'com.accsystem.qayd.macos' }}
+
+jobs:
+  quality:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - run: flutter analyze --no-pub --no-fatal-infos
+      - run: flutter test --no-pub --reporter expanded
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: web
+            runner: ubuntu-latest
+            command: flutter build web --release --base-href=/
+            artifact: build/web
+          - platform: linux
+            runner: ubuntu-latest
+            command: flutter build linux --release
+            artifact: build/linux/x64/release/bundle
+          - platform: windows
+            runner: windows-latest
+            command: flutter build windows --release
+            artifact: build/windows/x64/runner/Release
+          - platform: macos
+            runner: macos-latest
+            command: flutter build macos --release
+            artifact: build/macos/Build/Products/Release/qayd.app
+          - platform: ios-unsigned
+            runner: macos-latest
+            command: flutter build ios --release --no-codesign
+            artifact: build/ios/iphoneos/Runner.app
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        if: runner.os != 'macOS'
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Validate production API configuration
+        if: env.QAYD_API_URL != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$QAYD_API_URL" =~ ^https://[^[:space:]]+$ ]] || {
+            echo 'QAYD_API_URL must be a valid HTTPS URL.' >&2
+            exit 1
+          }
+      - name: Validate final application identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in "$QAYD_IOS_BUNDLE_ID" "$QAYD_MACOS_BUNDLE_ID"; do
+            [[ "$value" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]] || {
+              echo "Invalid Apple bundle identifier: $value" >&2
+              exit 1
+            }
+            [[ "$value" != com.example.* ]] || {
+              echo "Placeholder Apple bundle identifier is not allowed: $value" >&2
+              exit 1
+            }
+          done
+      - name: Build artifact
+        shell: bash
+        env:
+          QAYD_API_URL: ${{ env.QAYD_API_URL }}
+        run: |
+          set -euo pipefail
+          export DART_DEFINES="QAYD_API_URL=${QAYD_API_URL:-}"
+          ${{ matrix.command }} --dart-define="QAYD_API_URL=${QAYD_API_URL:-}"
+      - name: Archive artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          if [[ "${{ matrix.platform }}" == 'web' ]]; then
+            tar -czf "dist/qayd-${{ matrix.platform }}-${GITHUB_SHA}.tar.gz" -C build web
+          else
+            tar -czf "dist/qayd-${{ matrix.platform }}-${GITHUB_SHA}.tar.gz" -C "$(dirname '${{ matrix.artifact }}')" "$(basename '${{ matrix.artifact }}')"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qayd-${{ matrix.platform }}-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish cross-platform artifacts
+    if: ${{ github.event_name == 'push' || inputs.publish }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: qayd-*-${{ github.sha }}
+          path: dist
+          merge-multiple: true
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            version='${{ inputs.version }}'
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]] || {
+              echo 'Manual releases require a version such as 1.0.1+2.' >&2
+              exit 1
+            }
+            echo "tag=v${version%%+*}" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Qayd ${{ steps.tag.outputs.tag }}
+          make_latest: true
+          generate_release_notes: true
+          files: dist/*

@@ -1,1 +1,7 @@
 #include "Generated.xcconfig"
+
+// Registered Apple identifiers are supplied by the repository variable when signing.
+// This non-placeholder fallback keeps unsigned CI builds deterministic.
+QAYD_IOS_BUNDLE_ID = com.accsystem.qayd
+PRODUCT_BUNDLE_IDENTIFIER = $(QAYD_IOS_BUNDLE_ID)
+QAYD_APPLE_TEAM_ID =

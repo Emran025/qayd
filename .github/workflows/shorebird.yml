@@ -3,16 +3,8 @@ name: Shorebird — Qayd Single App
 # A single Qayd app is updated here. Dart-only changes become OTA patches;
 # native/dependency/asset changes require a new Shorebird release.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'lib/**'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - 'android/**'
-      - 'assets/**'
-      - 'shorebird.yaml'
+  # Shorebird is an optional OTA channel. Store releases use the independent
+  # release workflows and do not require a Shorebird app_id or token.
   workflow_dispatch:
     inputs:
       force_release:

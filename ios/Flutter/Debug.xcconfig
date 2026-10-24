@@ -1,1 +1,5 @@
 #include "Generated.xcconfig"
+
+QAYD_IOS_BUNDLE_ID = com.accsystem.qayd
+PRODUCT_BUNDLE_IDENTIFIER = $(QAYD_IOS_BUNDLE_ID)
+QAYD_APPLE_TEAM_ID =

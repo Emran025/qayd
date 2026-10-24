@@ -6,21 +6,35 @@ on:
     paths:
       - "lib/**"
       - "test/**"
+      - "android/**"
+      - "ios/**"
+      - "macos/**"
+      - "linux/**"
+      - "windows/**"
+      - "web/**"
       - "pubspec.yaml"
       - "pubspec.lock"
       - "analysis_options.yaml"
       - ".github/workflows/ci.yml"
       - ".github/workflows/build-release.yml"
+      - ".github/workflows/release-platforms.yml"
   pull_request:
     branches: [main]
     paths:
       - "lib/**"
       - "test/**"
+      - "android/**"
+      - "ios/**"
+      - "macos/**"
+      - "linux/**"
+      - "windows/**"
+      - "web/**"
       - "pubspec.yaml"
       - "pubspec.lock"
       - "analysis_options.yaml"
       - ".github/workflows/ci.yml"
       - ".github/workflows/build-release.yml"
+      - ".github/workflows/release-platforms.yml"
 
 permissions:
   contents: read
