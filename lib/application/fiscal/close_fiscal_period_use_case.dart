@@ -196,7 +196,7 @@ final class CloseFiscalPeriodUseCase {
         );
       }
       return const Success(null);
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

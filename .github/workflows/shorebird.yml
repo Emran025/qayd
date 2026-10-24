@@ -11,7 +11,6 @@ on:
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - 'android/**'
-      - 'ios/**'
       - 'assets/**'
       - 'shorebird.yaml'
   workflow_dispatch:
@@ -55,6 +54,12 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          if [[ ! -f shorebird.yaml ]] || grep -q 'REPLACE_WITH_QAYD_SHOREBIRD_APP_ID' shorebird.yaml; then
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          fi
+
           if [[ "$FORCE_RELEASE" == 'true' ]]; then
             echo 'native_changed=true' >> "$GITHUB_OUTPUT"
             exit 0
@@ -65,15 +70,9 @@ jobs:
             BASE='HEAD^'
           fi
 
-          if [[ ! -f shorebird.yaml ]] || grep -q 'REPLACE_WITH_QAYD_SHOREBIRD_APP_ID' shorebird.yaml; then
-            echo 'configured=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'configured=true' >> "$GITHUB_OUTPUT"
-          fi
-
           CHANGED_FILES="$(git diff --name-only "$BASE" "$SHA")"
           printf '%s\n' "$CHANGED_FILES"
-          if printf '%s\n' "$CHANGED_FILES" | grep -qE '^(android/|ios/|assets/|pubspec\.yaml$|pubspec\.lock$|shorebird\.yaml$)'; then
+          if printf '%s\n' "$CHANGED_FILES" | grep -qE '^(android/|assets/|pubspec\.yaml$|pubspec\.lock$|shorebird\.yaml$)'; then
             echo 'native_changed=true' >> "$GITHUB_OUTPUT"
             echo 'Native/dependency/asset change detected; a full release is required.'
           else
@@ -160,11 +159,26 @@ jobs:
         env:
           SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
           QAYD_API_URL: ${{ secrets.QAYD_API_URL }}
+          QAYD_ANDROID_APPLICATION_ID: ${{ vars.QAYD_ANDROID_APPLICATION_ID }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENABLED: ${{ vars.SENTRY_ENABLED }}
         run: |
           set -euo pipefail
           : "${SHOREBIRD_TOKEN:?Missing SHOREBIRD_TOKEN}"
           : "${QAYD_API_URL:?Missing QAYD_API_URL}"
+          : "${QAYD_ANDROID_APPLICATION_ID:?Missing QAYD_ANDROID_APPLICATION_ID}"
+          if [[ ! "$QAYD_API_URL" =~ ^https://[^[:space:]]+$ ]]; then
+            echo 'QAYD_API_URL must be a valid HTTPS URL.' >&2
+            exit 1
+          fi
+          if [[ ! "$QAYD_ANDROID_APPLICATION_ID" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]] || [[ "$QAYD_ANDROID_APPLICATION_ID" == 'com.example.qayd' ]]; then
+            echo 'Set a final, unique QAYD_ANDROID_APPLICATION_ID before enabling Shorebird.' >&2
+            exit 1
+          fi
+          if [[ "${SENTRY_ENABLED:-false}" == 'true' && -z "${SENTRY_DSN:-}" ]]; then
+            echo 'SENTRY_ENABLED=true requires the SENTRY_DSN secret.' >&2
+            exit 1
+          fi
           shorebird patch android \
             --release-version latest \
             --track stable \
@@ -175,7 +189,8 @@ jobs:
             --dart-define='SENTRY_ENV=production' \
             --dart-define="SENTRY_RELEASE=${GITHUB_SHA}" \
             --dart-define="SENTRY_DIST=${GITHUB_RUN_NUMBER}" \
-            --dart-define='SENTRY_ENABLED=false'
+            --dart-define="SENTRY_ENABLED=${SENTRY_ENABLED:-false}" \
+            -- -PqaydApplicationId="$QAYD_ANDROID_APPLICATION_ID"
 
   shorebird-release:
     name: Publish native Shorebird release
@@ -245,11 +260,26 @@ jobs:
         env:
           SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
           QAYD_API_URL: ${{ secrets.QAYD_API_URL }}
+          QAYD_ANDROID_APPLICATION_ID: ${{ vars.QAYD_ANDROID_APPLICATION_ID }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENABLED: ${{ vars.SENTRY_ENABLED }}
         run: |
           set -euo pipefail
           : "${SHOREBIRD_TOKEN:?Missing SHOREBIRD_TOKEN}"
           : "${QAYD_API_URL:?Missing QAYD_API_URL}"
+          : "${QAYD_ANDROID_APPLICATION_ID:?Missing QAYD_ANDROID_APPLICATION_ID}"
+          if [[ ! "$QAYD_API_URL" =~ ^https://[^[:space:]]+$ ]]; then
+            echo 'QAYD_API_URL must be a valid HTTPS URL.' >&2
+            exit 1
+          fi
+          if [[ ! "$QAYD_ANDROID_APPLICATION_ID" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]] || [[ "$QAYD_ANDROID_APPLICATION_ID" == 'com.example.qayd' ]]; then
+            echo 'Set a final, unique QAYD_ANDROID_APPLICATION_ID before enabling Shorebird.' >&2
+            exit 1
+          fi
+          if [[ "${SENTRY_ENABLED:-false}" == 'true' && -z "${SENTRY_DSN:-}" ]]; then
+            echo 'SENTRY_ENABLED=true requires the SENTRY_DSN secret.' >&2
+            exit 1
+          fi
           shorebird release android \
             --artifact apk \
             --flutter-version="${FLUTTER_VERSION}" \
@@ -261,4 +291,5 @@ jobs:
             --dart-define='SENTRY_ENV=production' \
             --dart-define="SENTRY_RELEASE=${GITHUB_SHA}" \
             --dart-define="SENTRY_DIST=${GITHUB_RUN_NUMBER}" \
-            --dart-define='SENTRY_ENABLED=false'
+            --dart-define="SENTRY_ENABLED=${SENTRY_ENABLED:-false}" \
+            -- -PqaydApplicationId="$QAYD_ANDROID_APPLICATION_ID"

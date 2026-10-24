@@ -2748,6 +2748,18 @@ class AppStrings {
   static String get posCatalogPurchasePrice => i.posCatalogPurchasePrice;
   static String get posCatalogPurchasePriceMinor =>
       i.posCatalogPurchasePriceMinor;
+  static String get posCatalogUnit => i.posCatalogUnit;
+  static String get posCatalogCategory => i.posCatalogCategory;
+  static String get posCatalogNoCategory => i.posCatalogNoCategory;
+  static String get posCatalogAddCategory => i.posCatalogAddCategory;
+  static String get posCatalogCreateCategory => i.posCatalogCreateCategory;
+  static String get posCatalogCategoryName => i.posCatalogCategoryName;
+  static String get posCatalogCategoryCode => i.posCatalogCategoryCode;
+  static String get posCatalogCategoryNameRequired =>
+      i.posCatalogCategoryNameRequired;
+  static String get posCatalogCategoryCodeRequired =>
+      i.posCatalogCategoryCodeRequired;
+  static String get posProductCategoryInUse => i.posProductCategoryInUse;
   static String get posCatalogQuantityScale => i.posCatalogQuantityScale;
   static String get posCatalogReorderLevel => i.posCatalogReorderLevel;
   static String get posCatalogBarcode => i.posCatalogBarcode;

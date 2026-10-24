@@ -26,7 +26,6 @@ import 'package:qayd/domain/value_objects/signable_receipt.dart';
 import 'package:qayd/data/security/license_vault.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 
-
 class ConfirmVoucherUseCase {
   ConfirmVoucherUseCase(
     this._voucherRepository,
@@ -86,22 +85,18 @@ class ConfirmVoucherUseCase {
         );
       }
 
-      // 2. Enforce signature agreement before ledger confirmation.
-      // Policy: Recording in the local ledger requires the user's own signature.
-      // We don't block local accounting just because the counterparty hasn't signed yet.
-      if (draft.senderStatus != AgreementStatus.accepted &&
-          draft.receiverStatus != AgreementStatus.accepted) {
-        // If it's not signed at all, we will sign it now as creator.
-      }
-
       var voucherToConfirm = draft;
 
       // §2.A: Digital Signing
-      if (_signingService != null && _getKeyPair != null && _licenseVault != null) {
+      if (_signingService != null &&
+          _getKeyPair != null &&
+          _licenseVault != null) {
         final keyPair = await _getKeyPair!();
         if (keyPair != null) {
           final licenseData = await _licenseVault!.readLicenseData();
-          final myPhone = (licenseData?['user']?['phone'] ?? licenseData?['phone']) as String? ?? '';
+          final myPhone = (licenseData?['user']?['phone'] ??
+                  licenseData?['phone']) as String? ??
+              '';
 
           String cpPhone = '';
           if (_accountRepository != null) {
@@ -132,10 +127,28 @@ class ConfirmVoucherUseCase {
             signerPhone: myPhone,
             // Freeze the canonical phones so verification can always reconstruct
             // the exact payload regardless of who opens the voucher details later.
-            canonicalSenderPhone: shouldSignAsSender ? myPhone : draft.canonicalSenderPhone ?? draft.signerPhone,
-            canonicalReceiverPhone: shouldSignAsSender ? cpPhone : (draft.canonicalReceiverPhone ?? myPhone),
+            canonicalSenderPhone: shouldSignAsSender
+                ? myPhone
+                : draft.canonicalSenderPhone ?? draft.signerPhone,
+            canonicalReceiverPhone: shouldSignAsSender
+                ? cpPhone
+                : (draft.canonicalReceiverPhone ?? myPhone),
           );
         }
+      }
+
+      // A local ledger write must be backed by at least one accepted signature.
+      // The configured signing path above may add the creator's signature; if
+      // it is unavailable or cannot sign, do not silently confirm an unsigned
+      // restored voucher.
+      if (voucherToConfirm.senderStatus != AgreementStatus.accepted &&
+          voucherToConfirm.receiverStatus != AgreementStatus.accepted) {
+        return FailureResult(
+          ValidationFailure(
+            messageAr: AppStrings.theBondCannotBe,
+            code: 'voucher_not_signed',
+          ),
+        );
       }
 
       final now = DateTime.now();
@@ -216,7 +229,7 @@ class ConfirmVoucherUseCase {
           stateCode: VoucherState.confirmed.name,
         ),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

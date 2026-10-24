@@ -108,7 +108,7 @@ class GetAccountStatementUseCase {
           lines: lines,
         ),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

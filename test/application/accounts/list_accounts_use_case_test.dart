@@ -73,8 +73,10 @@ void main() {
       createdAt: DateTime.now(),
     );
 
-    when(() => mockAccountRepo.getAll(activeOnly: any(named: 'activeOnly')))
-        .thenAnswer((_) async => Success([account]));
+    when(() => mockAccountRepo.getAll(
+          activeOnly: any(named: 'activeOnly'),
+          excludeArchived: any(named: 'excludeArchived'),
+        )).thenAnswer((_) async => Success([account]));
     when(() => mockLedgerRepo.getAllEntries())
         .thenAnswer((_) async => const Success([]));
     when(() => mockVoucherRepo.getAll())
@@ -124,8 +126,10 @@ void main() {
         status: AgreementStatus.accepted,
         signerPhone: '123');
 
-    when(() => mockAccountRepo.getAll(activeOnly: any(named: 'activeOnly')))
-        .thenAnswer((_) async => Success([account]));
+    when(() => mockAccountRepo.getAll(
+          activeOnly: any(named: 'activeOnly'),
+          excludeArchived: any(named: 'excludeArchived'),
+        )).thenAnswer((_) async => Success([account]));
     when(() => mockLedgerRepo.getAllEntries())
         .thenAnswer((_) async => const Success([]));
     when(() => mockVoucherRepo.getAll())

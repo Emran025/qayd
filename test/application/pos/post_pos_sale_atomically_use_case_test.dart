@@ -13,10 +13,13 @@ import 'package:qayd/domain/entities/voucher.dart';
 import 'package:qayd/domain/repositories/fiscal_period_repository.dart';
 import 'package:qayd/domain/repositories/governance_repository.dart';
 import 'package:qayd/domain/repositories/pos_sale_posting_repository.dart';
+import 'package:qayd/domain/services/entry_generator.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
+import 'package:qayd/domain/value_objects/entry_id.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/transaction_id.dart';
 import 'package:qayd/domain/value_objects/voucher_id.dart';
 import 'package:qayd/domain/value_objects/voucher_type.dart';
 import 'package:qayd/domain/value_objects/governance_status.dart';
@@ -103,7 +106,13 @@ PosAccountingPosting _posting({required String id, required String sourceId}) {
   return PosAccountingPosting(
     sourceId: sourceId,
     voucher: voucher,
-    entries: const [],
+    entries: EntryGenerator().generateForConfirmedVoucher(
+      voucher: voucher,
+      transactionId: TransactionId('$id-tx'),
+      debitEntryId: EntryId('$id-debit'),
+      creditEntryId: EntryId('$id-credit'),
+      ledgerCreatedAt: date,
+    ),
   );
 }
 

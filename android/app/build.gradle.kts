@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -24,10 +25,6 @@ android {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {
@@ -59,14 +56,28 @@ android {
 
     buildTypes {
         release {
-            if (!keystorePropertiesFile.exists()) {
-                throw GradleException(
-                    "Missing android/key.properties. Release builds must use a CI-injected signing keystore."
-                )
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
             }
-            signingConfig = signingConfigs.getByName("release")
         }
     }
+}
+
+// Gradle configures debug and release variants together. Enforce production
+// signing only when the selected task graph actually contains a release task.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
+val releaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.contains("release", ignoreCase = true)
+}
+if (releaseTaskRequested && !keystorePropertiesFile.exists()) {
+    throw GradleException(
+        "Missing android/key.properties. Release builds must use a CI-injected signing keystore."
+    )
 }
 
 dependencies {

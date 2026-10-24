@@ -14,7 +14,6 @@ import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/application/governance/audit_log_service.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 
-
 class DeactivateAccountUseCase {
   DeactivateAccountUseCase(
     this._accountRepository,
@@ -60,7 +59,7 @@ class DeactivateAccountUseCase {
         balanceCheck = Money.nonNegative(entry.value.abs(), entry.key);
       } else {
         balanceCheck = Money.zero(
-             CurrencyCode(code: 'SAR', nameAr: '﷼', symbol: AppStrings.rs));
+            CurrencyCode(code: 'SAR', nameAr: '﷼', symbol: AppStrings.rs));
       }
       final deactivated = account.deactivate(balance: balanceCheck);
       final saved = await _accountRepository.save(deactivated);
@@ -78,12 +77,12 @@ class DeactivateAccountUseCase {
         );
       }
 
-      return saved.fold(
+      return await saved.fold(
         (f) => FailureResult(f),
         (_) =>
             Success(DeactivateAccountOutput(accountId: deactivated.id.value)),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

@@ -3,8 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qayd/application/pos/create_pos_product_use_case.dart';
+import 'package:qayd/application/pos/create_pos_product_category_use_case.dart';
+import 'package:qayd/application/pos/list_pos_product_categories_use_case.dart';
+import 'package:qayd/core/result/result.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/entities/pos_product_category.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
@@ -22,25 +26,47 @@ class PosCatalogPage extends StatelessWidget {
     super.key,
     required this.currency,
     this.cubit,
+    this.listCategoriesUseCase,
+    this.createCategoryUseCase,
   });
 
   final CurrencyCode currency;
   final PosCatalogCubit? cubit;
+  final ListPosProductCategoriesUseCase? listCategoriesUseCase;
+  final CreatePosProductCategoryUseCase? createCategoryUseCase;
 
   @override
   Widget build(BuildContext context) {
     final catalogCubit = cubit ?? InjectionContainer.posCatalogCubit;
+    final categoriesUseCase = listCategoriesUseCase ??
+        (cubit == null
+            ? InjectionContainer.listPosProductCategoriesUseCase
+            : null);
+    final categoryCreationUseCase = createCategoryUseCase ??
+        (cubit == null
+            ? InjectionContainer.createPosProductCategoryUseCase
+            : null);
     return BlocProvider.value(
       value: catalogCubit,
-      child: _PosCatalogView(currency: currency),
+      child: _PosCatalogView(
+        currency: currency,
+        listCategoriesUseCase: categoriesUseCase,
+        createCategoryUseCase: categoryCreationUseCase,
+      ),
     );
   }
 }
 
 class _PosCatalogView extends StatefulWidget {
-  const _PosCatalogView({required this.currency});
+  const _PosCatalogView({
+    required this.currency,
+    required this.listCategoriesUseCase,
+    required this.createCategoryUseCase,
+  });
 
   final CurrencyCode currency;
+  final ListPosProductCategoriesUseCase? listCategoriesUseCase;
+  final CreatePosProductCategoryUseCase? createCategoryUseCase;
 
   @override
   State<_PosCatalogView> createState() => _PosCatalogViewState();
@@ -78,11 +104,20 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
   }
 
   Future<void> _openCreate() async {
+    final useCase = widget.listCategoriesUseCase;
+    final categoriesResult = useCase == null ? null : await useCase();
+    final categories =
+        categoriesResult?.valueOrNull ?? const <PosProductCategory>[];
+    if (!mounted) return;
     final input = await showModalBottomSheet<CreatePosProductInput>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => _CreateProductSheet(currency: widget.currency),
+      builder: (_) => _CreateProductSheet(
+        currency: widget.currency,
+        categories: categories,
+        createCategoryUseCase: widget.createCategoryUseCase,
+      ),
     );
     if (input == null || !mounted) return;
     await context.read<PosCatalogCubit>().create(input);
@@ -359,9 +394,15 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _CreateProductSheet extends StatefulWidget {
-  const _CreateProductSheet({required this.currency});
+  const _CreateProductSheet({
+    required this.currency,
+    required this.categories,
+    required this.createCategoryUseCase,
+  });
 
   final CurrencyCode currency;
+  final List<PosProductCategory> categories;
+  final CreatePosProductCategoryUseCase? createCategoryUseCase;
 
   @override
   State<_CreateProductSheet> createState() => _CreateProductSheetState();
@@ -373,11 +414,14 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
   final _name = TextEditingController();
   final _salePrice = TextEditingController();
   final _purchasePrice = TextEditingController();
+  final _unitName = TextEditingController(text: 'unit');
   final _quantityScale = TextEditingController(text: '0');
   final _reorderLevel = TextEditingController(text: '0');
   final _barcode = TextEditingController();
   final _description = TextEditingController();
   bool _expiryTracking = false;
+  String? _categoryId;
+  late final List<PosProductCategory> _categories = [...widget.categories];
 
   @override
   void dispose() {
@@ -385,6 +429,7 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
     _name.dispose();
     _salePrice.dispose();
     _purchasePrice.dispose();
+    _unitName.dispose();
     _quantityScale.dispose();
     _reorderLevel.dispose();
     _barcode.dispose();
@@ -410,6 +455,41 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
         : null;
   }
 
+  Future<void> _addCategory() async {
+    final useCase = widget.createCategoryUseCase;
+    if (useCase == null) return;
+
+    final draft = await showDialog<({String name, String code})>(
+      context: context,
+      builder: (_) => const _CreateProductCategoryDialog(),
+    );
+    if (draft == null || !mounted) return;
+
+    final result = await useCase(
+      CreatePosProductCategoryInput(name: draft.name, code: draft.code),
+    );
+    if (!mounted) return;
+    final category = result.valueOrNull;
+    if (category == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              result.failureOrNull?.messageAr ??
+                  AppStrings.posProductSaveFailed,
+            ),
+          ),
+        );
+      return;
+    }
+
+    setState(() {
+      _categories.add(category);
+      _categoryId = category.id;
+    });
+  }
+
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final scale = int.parse(_quantityScale.text.trim());
@@ -421,6 +501,8 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
         currencyCode: widget.currency.code,
         salePriceMinor: int.parse(_salePrice.text.trim()),
         purchasePriceMinor: int.parse(_purchasePrice.text.trim()),
+        unitName: _unitName.text.trim(),
+        categoryId: _categoryId,
         quantityScale: scale,
         reorderLevelScaled: int.parse(_reorderLevel.text.trim()),
         expiryTracking: _expiryTracking,
@@ -478,6 +560,48 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
                 validator: (value) => _nonNegativeInteger(
                     value, AppStrings.posProductPriceInvalid),
               ),
+              _field(
+                controller: _unitName,
+                label: AppStrings.posCatalogUnit,
+                validator: (value) =>
+                    _required(value, AppStrings.posProductUnitRequired),
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: _categoryId ?? '',
+                decoration: InputDecoration(
+                  labelText: AppStrings.posCatalogCategory,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(RadiusTokens.md),
+                  ),
+                  isDense: true,
+                ),
+                items: [
+                  DropdownMenuItem<String>(
+                    value: '',
+                    child: Text(AppStrings.posCatalogNoCategory),
+                  ),
+                  ..._categories.map(
+                    (category) => DropdownMenuItem<String>(
+                      value: category.id,
+                      child: Text('${category.name} (${category.code})'),
+                    ),
+                  ),
+                ],
+                onChanged: (value) => setState(
+                  () => _categoryId =
+                      value == null || value.isEmpty ? null : value,
+                ),
+              ),
+              if (widget.createCategoryUseCase != null)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    onPressed: _addCategory,
+                    icon: const Icon(Icons.add_rounded),
+                    label: Text(AppStrings.posCatalogAddCategory),
+                  ),
+                ),
+              const SizedBox(height: SpacingTokens.sm),
               _field(
                 controller: _quantityScale,
                 label: AppStrings.posCatalogQuantityScale,
@@ -558,6 +682,84 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
       ),
     );
   }
+}
+
+class _CreateProductCategoryDialog extends StatefulWidget {
+  const _CreateProductCategoryDialog();
+
+  @override
+  State<_CreateProductCategoryDialog> createState() =>
+      _CreateProductCategoryDialogState();
+}
+
+class _CreateProductCategoryDialogState
+    extends State<_CreateProductCategoryDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _codeController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _codeController.dispose();
+    super.dispose();
+  }
+
+  String? _required(String? value, String message) =>
+      value == null || value.trim().isEmpty ? message : null;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text(AppStrings.posCatalogCreateCategory),
+        content: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _nameController,
+                autofocus: true,
+                textInputAction: TextInputAction.next,
+                decoration: InputDecoration(
+                  labelText: AppStrings.posCatalogCategoryName,
+                ),
+                validator: (value) => _required(
+                  value,
+                  AppStrings.posCatalogCategoryNameRequired,
+                ),
+              ),
+              const SizedBox(height: SpacingTokens.sm),
+              TextFormField(
+                controller: _codeController,
+                textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(
+                  labelText: AppStrings.posCatalogCategoryCode,
+                ),
+                validator: (value) => _required(
+                  value,
+                  AppStrings.posCatalogCategoryCodeRequired,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(AppStrings.actionCancel),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (!(_formKey.currentState?.validate() ?? false)) return;
+              Navigator.of(context).pop((
+                name: _nameController.text.trim(),
+                code: _codeController.text.trim(),
+              ));
+            },
+            child: Text(AppStrings.posCatalogAddCategory),
+          ),
+        ],
+      );
 }
 
 // Kept as a local reference for navigation callers that want the standard Qayd

@@ -4194,11 +4194,13 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get appUpdateAvailableTitle => 'An app update is available';
   @override
-  String get appUpdateAvailableBody => 'Flutter improvements can be downloaded without waiting for a store update.';
+  String get appUpdateAvailableBody =>
+      'Flutter improvements can be downloaded without waiting for a store update.';
   @override
   String get appUpdateInstallAction => 'Download update';
   @override
-  String get appUpdateRestartBody => 'The update is ready. Close and reopen the app to activate it.';
+  String get appUpdateRestartBody =>
+      'The update is ready. Close and reopen the app to activate it.';
   @override
   String get appUpdateInstalling => 'Downloading update…';
   @override
@@ -5356,6 +5358,27 @@ class AppStringsEn extends AppStringsBase {
   String get posCatalogPurchasePrice => 'Purchase price';
   @override
   String get posCatalogPurchasePriceMinor => 'Purchase price (minor units)';
+  @override
+  String get posCatalogUnit => 'Unit of measure';
+  @override
+  String get posCatalogCategory => 'Product category';
+  @override
+  String get posCatalogNoCategory => 'No category';
+  @override
+  String get posCatalogAddCategory => 'Add category';
+  @override
+  String get posCatalogCreateCategory => 'Create a category';
+  @override
+  String get posCatalogCategoryName => 'Category name';
+  @override
+  String get posCatalogCategoryCode => 'Category code';
+  @override
+  String get posCatalogCategoryNameRequired => 'Enter a category name.';
+  @override
+  String get posCatalogCategoryCodeRequired => 'Enter a category code.';
+  @override
+  String get posProductCategoryInUse =>
+      'A category used by products cannot be deactivated.';
   @override
   String get posCatalogQuantityScale => 'Quantity scale (0 to 6)';
   @override

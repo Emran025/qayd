@@ -73,7 +73,7 @@ class GenerateBalanceSheetUseCase {
           currencySections: currencySections,
         ),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

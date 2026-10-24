@@ -231,7 +231,9 @@ final class BuildPosSalePostingUseCase {
         if (settlement.advanceMinorUnits < 0 ||
             settlement.advanceMinorUnits > invoice.total.minorUnits ||
             (settlement.paymentMethod == PosPaymentMethod.credit &&
-                settlement.advanceMinorUnits != 0)) {
+                settlement.advanceMinorUnits != 0) ||
+            (settlement.advanceMinorUnits == 0 &&
+                settlement.paymentMethod != PosPaymentMethod.credit)) {
           return _invalid('pos_sale_payment_invalid');
         }
         final advance = Money.fromMinorUnits(

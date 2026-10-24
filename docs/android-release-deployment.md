@@ -1,79 +1,63 @@
-# Qayd Android Release Deployment
+# إصدار Qayd على Android
 
-هذا المشروع يبني APK Android موقّعاً من خلال `.github/workflows/build-release.yml` عند دفع Git tag بصيغة `v1.2.3` أو `v1.2.3+45`. لا تُحفظ مادة التوقيع أو كلمات المرور في Git؛ يقوم workflow بإنشاء ملفات signing مؤقتة داخل runner ثم ينتهي عمرها بانتهاء job.
+ينشئ مسار الإصدار ملفات Android عند دفع Git tag بصيغة `v1.2.3` أو `v1.2.3+45`. قبل البناء، يشغّل التحليل الثابت وكل اختبارات Flutter. ثم يبني APK وAAB موقّعين، ويتحقق من توقيع APK ومعرّف الحزمة ورقم الإصدار قبل نشر GitHub Release. لا تنفّذ عملية نشر فعلية بمجرد تعديل الشيفرة؛ النشر يبدأ فقط عند دفع tag.
 
-## إعداد هوية التطبيق
+يعمل إصدار التطبيق فقط في المستودع المستقل `Emran025/qayd` عبر `.github/workflows/build-release.yml`. المستودع المجمّع `Emran025/qayd_app` مخصص لاختبارات Flutter وبناء smoke، ولا ينشر التطبيق أو الـAPI. نشر الـAPI منفصل في `Emran025/qayd_api` عبر `.github/workflows/deploy.yml` عند الدفع إلى `main`.
 
-قبل أول إصدار عام، يجب اختيار Android application ID نهائي وفريد، مثل `com.yourcompany.qayd`. لا تستخدم `com.example.qayd` في الإصدار العام؛ تغيير application ID بعد النشر ينشئ تطبيقاً مختلفاً ولا يُعد ترقية للتطبيق المنشور سابقاً.
+## الهوية ورقم الإصدار
 
-أضف متغير Repository Variable باسم `QAYD_ANDROID_APPLICATION_ID`، وقيمته application ID النهائي. يتحقق workflow من الصيغة ويمررها إلى Gradle عبر `-PqaydApplicationId`.
+يجب ضبط Repository Variable باسم `QAYD_ANDROID_APPLICATION_ID` على معرّف نهائي وفريد، مثل `com.company.qayd`. يرفض workflow القيمة الافتراضية `com.example.qayd` ويفرض تمرير المعرّف نفسه إلى Gradle. تغيير معرّف التطبيق بعد نشره يكوّن تطبيقاً جديداً ولا يحدّث النسخة المنشورة.
 
-## إنشاء Android release keystore
+يأتي `versionName` من Git tag. في `v1.2.3` يستخدم `versionCode` رقم تشغيل GitHub Actions، وفي `v1.2.3+45` يستخدم الرقم `45`. يجب اختيار رقم أعلى من أي `versionCode` سبق نشره خارج GitHub، خصوصاً إذا سبق توزيع التطبيق عبر Google Play.
 
-نفّذ الأمر التالي على جهاز آمن خارج المستودع، واستبدل القيم بمعلوماتك الفعلية:
+## إعداد GitHub Actions
 
-```bash
-keytool -genkeypair \
-  -v \
-  -keystore qayd-release.jks \
-  -alias qayd-release \
-  -keyalg RSA \
-  -keysize 4096 \
-  -validity 10000
-```
+أضف الأسرار والمتغيرات أدناه في مستودع التطبيق المستقل `Emran025/qayd`، لا في المستودع المجمّع.
 
-احفظ نسخة offline مشفرة من ملف `qayd-release.jks`، وكلمات المرور، واسم alias. فقدان keystore أو تغيير alias/password بعد نشر التطبيق قد يمنع تحديث التطبيق المنشور.
+### Secrets المطلوبة
 
-حوّل نسخة keystore إلى Base64 على جهازك فقط، ثم ألصق الناتج مباشرة في GitHub Secret:
+| الاسم | الاستخدام |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | النسخة المشفرة Base64 من keystore الإنتاج |
+| `ANDROID_KEYSTORE_PASSWORD` | كلمة مرور keystore |
+| `ANDROID_KEY_ALIAS` | اسم alias الخاص بمفتاح التوقيع |
+| `ANDROID_KEY_PASSWORD` | كلمة مرور المفتاح |
+| `QAYD_API_URL` | عنوان API الإنتاج، ويجب أن يبدأ بـ`https://` |
 
-```bash
-base64 --wrap=0 qayd-release.jks > qayd-release.jks.base64
-```
+إذا كان `SENTRY_ENABLED=true`، يلزم أيضاً Secret باسم `SENTRY_DSN`. `REVERB_APP_KEY` اختياري إذا كان مفتاح WebSocket مطلوباً للإنتاج.
 
-لا ترفع `qayd-release.jks` أو `qayd-release.jks.base64` إلى Git أو إلى issue أو chat. قواعد `.gitignore` تمنع ملفات keystore و`android/key.properties` من التتبع.
+### Variables الاختيارية
 
-## GitHub Secrets المطلوبة
+| الاسم | الاستخدام |
+|---|---|
+| `QAYD_ANDROID_APPLICATION_ID` | إلزامي: معرّف Android النهائي والفريد |
+| `SENTRY_ENABLED` | `true` أو `false`؛ الافتراضي `false` |
+| `SENTRY_ENV` | بيئة Sentry، الافتراضي `production` |
+| `SENTRY_RELEASE` | معرّف إصدار اختياري لـSentry |
+| `SENTRY_DIST` | معرّف توزيع اختياري لـSentry |
 
-| الاسم | النوع | مطلوب؟ | المحتوى |
-|---|---|---:|---|
-| `ANDROID_KEYSTORE_BASE64` | Repository Secret | نعم | محتوى Base64 الكامل لملف `qayd-release.jks` |
-| `ANDROID_KEYSTORE_PASSWORD` | Repository Secret | نعم | كلمة مرور keystore |
-| `ANDROID_KEY_ALIAS` | Repository Secret | نعم | alias الذي أُنشئ به المفتاح |
-| `ANDROID_KEY_PASSWORD` | Repository Secret | نعم | كلمة مرور المفتاح |
-| `QAYD_API_URL` | Repository Secret | نعم للإصدار production | عنوان API الإنتاج مثل `https://api.example.com` |
-| `REVERB_APP_KEY` | Repository Secret | اختياري | مفتاح WebSocket إذا كان مختلفاً عن default المضمن في التطبيق |
-| `SENTRY_DSN` | Repository Secret | اختياري | DSN الخاص ببيئة Sentry، إذا كان Sentry مفعلاً |
+يولد workflow ملفات التوقيع مؤقتاً داخل runner، يتحقق من keystore قبل البناء، ويحذف الملفات المؤقتة بعده. احتفظ بنسخة مشفرة خارج المستودع من keystore وكلمات المرور؛ فقدانها قد يمنع تحديث التطبيق.
 
-القيم التالية ليست أسراراً تشفيرية، ولذلك يستخدمها workflow كـRepository Variables:
+## الملفات الناتجة
 
-| الاسم | النوع | القيمة المعتادة |
-|---|---|---|
-| `QAYD_ANDROID_APPLICATION_ID` | Repository Variable | application ID النهائي، وليس `com.example.qayd` |
-| `SENTRY_ENV` | Repository Variable | `production` |
-| `SENTRY_RELEASE` | Repository Variable | اتركه فارغاً لاستخدام versionName أو حدده صراحةً |
-| `SENTRY_DIST` | Repository Variable | اتركه فارغاً لاستخدام versionCode أو حدده صراحةً |
-| `SENTRY_ENABLED` | Repository Variable | `true` فقط بعد ضبط DSN والتحقق من سياسة الخصوصية، وإلا `false` |
+ينشر GitHub Release:
 
-`GITHUB_TOKEN` لا يحتاج إلى إضافة يدوية؛ يوفره GitHub تلقائياً للـworkflow بصلاحية `contents: write` المطلوبة لإنشاء GitHub Release. لا تضع Personal Access Token في YAML أو Secrets لهذا الغرض.
+- `qayd-vX.Y.Z.apk`: APK مرتبط بالنسخة.
+- `qayd.apk`: اسم ثابت لأحدث APK.
+- `qayd-vX.Y.Z.aab`: Android App Bundle صالح للرفع إلى Google Play.
+- `qayd-debug-info-vX.Y.Z.zip`: رموز فك التعتيم اللازمة لتحليل أعطال النسخة.
+- `signing-certificate.txt` و`SHA256SUMS`: معلومات شهادة التوقيع وبصمات SHA-256 للملفات.
 
-## إنشاء إصدار
+تُرفع الرموز الخام أيضاً كـGitHub Actions artifact لمدة 90 يوماً. احتفظ بنسخة مناسبة من الرموز لكل إصدار إنتاجي.
 
-بعد ضبط القيم السابقة، ادفع tag annotated من فرع الإصدار:
+## ما لا ينشره المسار تلقائياً
 
-```bash
-git tag -a v1.0.0 -m "Qayd Android v1.0.0"
-git push origin v1.0.0
-```
+لا يرفع workflow الـAAB إلى Google Play؛ يلزم قرار منفصل وحساب Play Console ومسار نشر محمي قبل إضافة ذلك. كما لا توجد حالياً مسارات إنتاج موقّعة لـiOS أو macOS؛ ففحوص تلك المنصات في CI هي فحوص بناء فقط. وميزة Shorebird تحتاج `app_id` حقيقياً و`SHOREBIRD_TOKEN` وإعدادات التوقيع نفسها قبل أن تعمل.
 
-ينشئ workflow ملفين في GitHub Release:
+## قبل أول tag إنتاجي
 
-- `qayd-v1.0.0.apk`: الملف المرتبط بالإصدار.
-- `qayd.apk`: الاسم الثابت المستخدم لرابط أحدث إصدار.
-
-كما يرفع debug symbols لمدة 90 يوماً كـworkflow artifact. عند تفعيل obfuscation أو Sentry، احتفظ بهذه symbols لكل إصدار بما يتوافق مع سياسة الاحتفاظ المعتمدة.
-
-## فحوصات ما قبل النشر
-
-يجب التأكد من أن application ID النهائي، API production URL، توقيع keystore، سياسة الخصوصية، وصلاحيات Android مثل Camera وNotifications معتمدة قبل دفع tag. يجب تثبيت APK الناتج على جهاز اختبار، اختبار تسجيل الدخول والمزامنة وقاعدة البيانات المشفرة، اختبار barcode camera وfront/back switching، ثم التحقق من توقيع APK قبل التوزيع.
-
-لا يثبت نجاح GitHub Actions وحده أن اختبار الكاميرا أو كل تدفقات التطبيق نجحت على جهاز فعلي. كما أن هذا workflow يبني APK وGitHub Release فقط؛ النشر إلى Google Play يحتاج لاحقاً إلى مسار منفصل يتضمن Google Play service-account JSON أو OIDC، وليس من الآمن إضافته قبل تحديد حساب Play Console وpackage ID النهائي.
+1. ثبّت معرّف Android النهائي وتأكد أنه يطابق التطبيق الموجود إن كان قد نُشر سابقاً.
+2. أضف الأسرار والمتغيرات المطلوبة في المستودع الصحيح، ولا تضع مفاتيح التوقيع في Git أو في ملفات إعداد متتبعة.
+3. تأكد أن API يعمل عبر HTTPS، وأن الإعدادات ونسخة keystore تخص التطبيق نفسه.
+4. راجع نجاح فحوص PR، ثم أنشئ tag جديداً ورقم بناء غير مستخدم.
+5. ثبّت APK على جهاز اختبار قبل التوزيع، وتحقق من تسجيل الدخول والمزامنة وقاعدة البيانات المشفرة والكاميرا والإشعارات.

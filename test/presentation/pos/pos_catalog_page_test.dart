@@ -2,15 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/application/governance/check_governance_status_use_case.dart';
 import 'package:qayd/application/governance/governance_write_guard.dart';
+import 'package:qayd/application/pos/create_pos_product_category_use_case.dart';
 import 'package:qayd/application/pos/create_pos_product_use_case.dart';
 import 'package:qayd/application/pos/deactivate_pos_product_use_case.dart';
+import 'package:qayd/application/pos/list_pos_product_categories_use_case.dart';
 import 'package:qayd/application/pos/list_pos_products_use_case.dart';
 import 'package:qayd/application/pos/save_pos_product_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/entities/pos_product_category.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
 import 'package:qayd/domain/repositories/governance_repository.dart';
+import 'package:qayd/domain/repositories/pos_product_category_repository.dart';
 import 'package:qayd/domain/repositories/pos_product_repository.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/governance_status.dart';
@@ -25,6 +29,11 @@ import 'package:qayd/presentation/theme/app_theme.dart';
 final class _WidgetIdGenerator implements IdGenerator {
   @override
   String next() => 'widget-product-id';
+}
+
+final class _WidgetCategoryIdGenerator implements IdGenerator {
+  @override
+  String next() => 'widget-category-id';
 }
 
 final class _WidgetCurrencyRepository implements CurrencyRepository {
@@ -120,6 +129,29 @@ final class _WidgetProductRepository implements PosProductRepository {
   }
 }
 
+final class _WidgetCategoryRepository implements PosProductCategoryRepository {
+  final categories = <PosProductCategory>[];
+
+  @override
+  Future<Result<List<PosProductCategory>>> list(
+      {bool activeOnly = true}) async {
+    return Success(
+      categories
+          .where((category) => !activeOnly || category.isActive)
+          .toList(growable: false),
+    );
+  }
+
+  @override
+  Future<Result<void>> save(PosProductCategory category) async {
+    categories.add(category);
+    return const Success(null);
+  }
+
+  @override
+  Future<Result<void>> deactivate(String id) async => const Success(null);
+}
+
 CurrencyCode _currency() => CurrencyCode(
       code: 'SAR',
       nameAr: 'ريال',
@@ -158,13 +190,27 @@ void main() {
   testWidgets('shows empty state and creates a product from the form',
       (tester) async {
     final repository = _WidgetProductRepository();
+    final categoryRepository = _WidgetCategoryRepository();
+    final categoryWriteGuard = GovernanceWriteGuard(
+      CheckGovernanceStatusUseCase(_WidgetGovernanceRepository()),
+    );
     final cubit = _createCubit(repository);
     addTearDown(cubit.close);
 
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light(),
-        home: PosCatalogPage(currency: _currency(), cubit: cubit),
+        home: PosCatalogPage(
+          currency: _currency(),
+          cubit: cubit,
+          listCategoriesUseCase:
+              ListPosProductCategoriesUseCase(categoryRepository),
+          createCategoryUseCase: CreatePosProductCategoryUseCase(
+            categoryRepository,
+            categoryWriteGuard,
+            _WidgetCategoryIdGenerator(),
+          ),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -173,18 +219,38 @@ void main() {
     await tester.tap(find.text(AppStrings.posCatalogAddProduct).first);
     await tester.pumpAndSettle();
 
+    await tester.tap(find.text(AppStrings.posCatalogAddCategory));
+    await tester.pumpAndSettle();
+    final categoryFields = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextFormField),
+    );
+    await tester.enterText(categoryFields.at(0), 'Beverages');
+    await tester.enterText(categoryFields.at(1), 'drinks');
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text(AppStrings.posCatalogAddCategory),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Beverages (DRINKS)'), findsOneWidget);
+
     final fields = find.byType(TextFormField);
-    expect(fields, findsNWidgets(8));
+    expect(fields, findsNWidgets(9));
     await tester.enterText(fields.at(0), 'New Coffee');
     await tester.enterText(fields.at(1), 'SKU-NEW');
     await tester.enterText(fields.at(2), '1250');
     await tester.enterText(fields.at(3), '900');
-    await tester.enterText(fields.at(6), '628000000002');
+    await tester.enterText(fields.at(7), '628000000002');
+    await tester.ensureVisible(find.text(AppStrings.save));
     await tester.tap(find.text(AppStrings.save));
     await tester.pumpAndSettle();
 
     expect(find.text('New Coffee'), findsOneWidget);
     expect(repository.products.single.salePrice.minorUnits, 1250);
+    expect(repository.products.single.categoryId, 'widget-category-id');
+    expect(categoryRepository.categories.single.code, 'DRINKS');
   });
 
   testWidgets('searches and deactivates an existing product', (tester) async {

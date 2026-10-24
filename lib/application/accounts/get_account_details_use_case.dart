@@ -82,7 +82,7 @@ class GetAccountDetailsUseCase {
           defaultCostCenters: defaultCCs,
         ),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

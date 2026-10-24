@@ -14,6 +14,8 @@ void main() {
   setUp(() {
     mockRepo = MockCurrencyRepository();
     useCase = SetBaseCurrencyUseCase(mockRepo);
+    when(() => mockRepo.getBaseCurrencyCode())
+        .thenAnswer((_) async => const Success('USD'));
   });
 
   group('SetBaseCurrencyUseCase', () {

@@ -11,7 +11,6 @@ import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/application/governance/audit_log_service.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 
-
 class ArchiveAccountUseCase {
   ArchiveAccountUseCase(
     this._accountRepository,
@@ -53,7 +52,7 @@ class ArchiveAccountUseCase {
         balanceCheck = Money.nonNegative(entry.value.abs(), entry.key);
       } else {
         balanceCheck = Money.zero(
-             CurrencyCode(code: 'SAR', nameAr: '﷼', symbol: AppStrings.rs));
+            CurrencyCode(code: 'SAR', nameAr: '﷼', symbol: AppStrings.rs));
       }
 
       final archived = account.archive(balance: balanceCheck);
@@ -69,11 +68,11 @@ class ArchiveAccountUseCase {
         );
       }
 
-      return saved.fold(
+      return await saved.fold(
         (f) => FailureResult(f),
         (_) => Success(archived.id.value),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

@@ -157,7 +157,7 @@ class ListAccountsUseCase {
       }
 
       return Success(ListAccountsOutput(accounts: summaries));
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

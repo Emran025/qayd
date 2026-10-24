@@ -79,9 +79,10 @@ class SecurityCubit extends Cubit<SecurityState> {
     // 2. License check (Returns persisted settings from the vault).
     final (licenseStatus, ownerAcc, payInstr, updUrl, bReason) =
         await _resolveLicenseStatus();
-    
+
     // Only show trial days if we are actually in a trial state.
-    final trialDays = (licenseStatus == LicenseStatus.trial || licenseStatus == LicenseStatus.trialExpired)
+    final trialDays = (licenseStatus == LicenseStatus.trial ||
+            licenseStatus == LicenseStatus.trialExpired)
         ? await trialDaysRemaining()
         : null;
 
@@ -198,11 +199,23 @@ class SecurityCubit extends Cubit<SecurityState> {
 
       // Hard admin revoke (FORCE_REVOKE) or deactivated account → panic wipe.
       if (status == 'FORCE_REVOKE' || status == 'revoked') {
-        return (LicenseStatus.revoked, ownerAcc, payInstr, updateUrl, banReason);
+        return (
+          LicenseStatus.revoked,
+          ownerAcc,
+          payInstr,
+          updateUrl,
+          banReason
+        );
       }
       // Admin deactivated the user account (not a payment issue) → revoke.
       if (!isActive) {
-        return (LicenseStatus.revoked, ownerAcc, payInstr, updateUrl, banReason);
+        return (
+          LicenseStatus.revoked,
+          ownerAcc,
+          payInstr,
+          updateUrl,
+          banReason
+        );
       }
       // Trial ended without a formal license → hard lock (NO panic wipe).
       if (accountClosed) {
@@ -282,7 +295,6 @@ class SecurityCubit extends Cubit<SecurityState> {
       return (
         success: false,
         errorAr: AppStrings.waitSecondsBeforeRetry(waitSecs),
-
       );
     }
 
@@ -361,14 +373,16 @@ class SecurityCubit extends Cubit<SecurityState> {
 
       await _licenseVault.writeLicenseData(existingData);
 
-      final (ls, ownerAcc, payInstr, updUrl, bReason) = await _resolveLicenseStatus();
-      
+      final (ls, ownerAcc, payInstr, updUrl, bReason) =
+          await _resolveLicenseStatus();
+
       // Only show trial days if we are actually in a trial state.
-      final trialDays = (ls == LicenseStatus.trial || ls == LicenseStatus.trialExpired)
-          ? _licenseVault.daysRemainingInTrial(
-              await _licenseVault.readTrialStart() ?? DateTime.now(),
-            )
-          : null;
+      final trialDays =
+          (ls == LicenseStatus.trial || ls == LicenseStatus.trialExpired)
+              ? _licenseVault.daysRemainingInTrial(
+                  await _licenseVault.readTrialStart() ?? DateTime.now(),
+                )
+              : null;
 
       if (ls != LicenseStatus.active && ls != LicenseStatus.trial) {
         emit(SecurityLocked(
@@ -409,7 +423,8 @@ class SecurityCubit extends Cubit<SecurityState> {
       return (success: true, errorAr: null);
     } on AuthException catch (e) {
       if (e.retryAfterSeconds != null) {
-        _blockedUntil = DateTime.now().add(Duration(seconds: e.retryAfterSeconds!));
+        _blockedUntil =
+            DateTime.now().add(Duration(seconds: e.retryAfterSeconds!));
       }
       return (success: false, errorAr: e.messageAr);
     } catch (e) {
@@ -550,7 +565,7 @@ class SecurityCubit extends Cubit<SecurityState> {
         deviceId: hardwareId,
       );
 
-      return _handleAuthResponse(result, hardwareId);
+      return await _handleAuthResponse(result, hardwareId);
     } on AuthException catch (e) {
       return ProvisioningResult.failure(e.messageAr);
     } catch (e, stack) {
@@ -579,7 +594,7 @@ class SecurityCubit extends Cubit<SecurityState> {
         deviceId: hardwareId,
       );
 
-      return _handleAuthResponse(result, hardwareId);
+      return await _handleAuthResponse(result, hardwareId);
     } on AuthException catch (e) {
       return ProvisioningResult.failure(e.messageAr);
     } catch (e, stack) {

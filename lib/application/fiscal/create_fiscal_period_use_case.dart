@@ -77,7 +77,7 @@ final class CreateFiscalPeriodUseCase {
         return FailureResult(ins.failureOrNull!);
       }
       return Success(id);
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

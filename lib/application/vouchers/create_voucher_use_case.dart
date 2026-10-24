@@ -41,7 +41,6 @@ import 'package:qayd/domain/value_objects/collateral_status.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 
-
 class CreateVoucherUseCase {
   final VoucherRepository _voucherRepository;
   final CurrencyRepository _currencyRepository;
@@ -282,8 +281,12 @@ class CreateVoucherUseCase {
               status: AgreementStatus.accepted,
               signerPhone: myPhone,
               // Freeze canonical phones at point of signing.
-              canonicalSenderPhone: shouldSignAsSender ? myPhone : (voucher.canonicalSenderPhone ?? voucher.signerPhone),
-              canonicalReceiverPhone: shouldSignAsSender ? cpPhone : (voucher.canonicalReceiverPhone ?? myPhone),
+              canonicalSenderPhone: shouldSignAsSender
+                  ? myPhone
+                  : (voucher.canonicalSenderPhone ?? voucher.signerPhone),
+              canonicalReceiverPhone: shouldSignAsSender
+                  ? cpPhone
+                  : (voucher.canonicalReceiverPhone ?? myPhone),
             );
           }
         }
@@ -479,7 +482,8 @@ class CreateVoucherUseCase {
           if (input.confirm &&
               _syncEventDispatcher != null &&
               saveResult.isSuccess) {
-            final collateralToSync = collateralWithImages ?? collateralWithoutImages;
+            final collateralToSync =
+                collateralWithImages ?? collateralWithoutImages;
             _syncEventDispatcher!
                 .dispatchCollateralSync(voucher, collateralToSync)
                 .ignore();
@@ -510,7 +514,7 @@ class CreateVoucherUseCase {
         );
       }
 
-      return saved.fold(
+      return await saved.fold(
         (f) => FailureResult(f),
         (_) => Success(
           CreateVoucherOutput(
@@ -519,7 +523,7 @@ class CreateVoucherUseCase {
           ),
         ),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

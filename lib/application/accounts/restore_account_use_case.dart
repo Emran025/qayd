@@ -22,10 +22,9 @@ class RestoreAccountUseCase {
       final gate = await _writeGuard.assertWritesPermitted();
       if (gate.isFailure) return FailureResult(gate.failureOrNull!);
 
-      final loaded =
-          await _accountRepository.getById(AccountId(accountIdRaw));
+      final loaded = await _accountRepository.getById(AccountId(accountIdRaw));
       if (loaded.isFailure) return FailureResult(loaded.failureOrNull!);
-      
+
       final account = loaded.valueOrNull!;
       final restored = account.unarchive();
       final saved = await _accountRepository.save(restored);
@@ -40,11 +39,11 @@ class RestoreAccountUseCase {
         );
       }
 
-      return saved.fold(
+      return await saved.fold(
         (f) => FailureResult(f),
         (_) => Success(restored.id.value),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

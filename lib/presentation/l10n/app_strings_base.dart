@@ -2154,9 +2154,11 @@ abstract class AppStringsBase {
   String get updateAccountStatus => 'تحديث حالة الحساب';
   String get updateError => 'خطأ في التحديث';
   String get appUpdateAvailableTitle => 'يتوفر تحديث للتطبيق';
-  String get appUpdateAvailableBody => 'يمكن تنزيل تحسينات Flutter الآن دون انتظار تحديث المتجر.';
+  String get appUpdateAvailableBody =>
+      'يمكن تنزيل تحسينات Flutter الآن دون انتظار تحديث المتجر.';
   String get appUpdateInstallAction => 'تنزيل التحديث';
-  String get appUpdateRestartBody => 'تم تنزيل التحديث. أغلق التطبيق وافتحه مجدداً لتفعيله.';
+  String get appUpdateRestartBody =>
+      'تم تنزيل التحديث. أغلق التطبيق وافتحه مجدداً لتفعيله.';
   String get appUpdateInstalling => 'جاري تنزيل التحديث…';
   String get updateOnTheBond => 'تحديث على السند';
   String get updateOnTheTransfer => 'تحديث على الحوالة';
@@ -2929,6 +2931,17 @@ abstract class AppStringsBase {
   String get posCatalogSalePriceMinor => 'سعر البيع (الوحدات الصغرى)';
   String get posCatalogPurchasePrice => 'سعر الشراء';
   String get posCatalogPurchasePriceMinor => 'سعر الشراء (الوحدات الصغرى)';
+  String get posCatalogUnit => 'وحدة القياس';
+  String get posCatalogCategory => 'تصنيف المنتج';
+  String get posCatalogNoCategory => 'بدون تصنيف';
+  String get posCatalogAddCategory => 'إضافة تصنيف';
+  String get posCatalogCreateCategory => 'إنشاء تصنيف جديد';
+  String get posCatalogCategoryName => 'اسم التصنيف';
+  String get posCatalogCategoryCode => 'رمز التصنيف';
+  String get posCatalogCategoryNameRequired => 'يرجى إدخال اسم التصنيف.';
+  String get posCatalogCategoryCodeRequired => 'يرجى إدخال رمز التصنيف.';
+  String get posProductCategoryInUse =>
+      'لا يمكن تعطيل تصنيف مستخدم في المنتجات.';
   String get posCatalogQuantityScale => 'مقياس الكمية (0 إلى 6)';
   String get posCatalogReorderLevel => 'حد إعادة الطلب بوحدات القياس';
   String get posCatalogBarcode => 'الباركود';

@@ -16,7 +16,6 @@ import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/application/governance/audit_log_service.dart';
 import 'package:qayd/domain/entities/audit_entry.dart';
 
-
 class UpdateDraftVoucherUseCase {
   UpdateDraftVoucherUseCase(
     this._voucherRepository,
@@ -116,7 +115,7 @@ class UpdateDraftVoucherUseCase {
           },
         );
       }
-      return saved.fold(
+      return await saved.fold(
         (f) => FailureResult(f),
         (_) => Success(
           UpdateDraftVoucherOutput(
@@ -125,7 +124,7 @@ class UpdateDraftVoucherUseCase {
           ),
         ),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

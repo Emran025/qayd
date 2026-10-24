@@ -209,7 +209,7 @@ class UpdateAccountUseCase {
           name: updated.name,
         ),
       );
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

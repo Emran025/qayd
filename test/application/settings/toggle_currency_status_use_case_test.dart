@@ -14,6 +14,8 @@ void main() {
   setUp(() {
     mockRepo = MockCurrencyRepository();
     useCase = ToggleCurrencyStatusUseCase(mockRepo);
+    when(() => mockRepo.getByCode(any()))
+        .thenAnswer((_) async => const Success(null));
   });
 
   group('ToggleCurrencyStatusUseCase', () {

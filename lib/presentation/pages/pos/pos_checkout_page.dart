@@ -105,6 +105,7 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
 
   void _onChanged(String value) {
     _searchDebounce?.cancel();
+    if (value.trim().isEmpty) return;
     _searchDebounce = Timer(const Duration(milliseconds: 250), () {
       if (mounted) context.read<PosCheckoutCubit>().search(value);
     });
@@ -145,6 +146,8 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
   }
 
   void _onBarcode(String value) {
+    _searchDebounce?.cancel();
+    _inputController.clear();
     if (mounted) setState(() => _scannerError = null);
     unawaited(HapticFeedback.selectionClick());
     unawaited(context.read<PosCheckoutCubit>().resolveAndAdd(value));
@@ -153,10 +156,12 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
   Future<void> _submitInput() async {
     final value = _inputController.text.trim();
     if (value.isEmpty) return;
+    // Hardware scanners commonly emit the value through onChanged followed by
+    // an Enter/Tab suffix. Resolve the scan exactly once through the canonical
+    // command instead of letting the delayed search race with it.
+    _searchDebounce?.cancel();
+    _inputController.clear();
     await context.read<PosCheckoutCubit>().resolveAndAdd(value);
-    if (mounted) {
-      _inputController.clear();
-    }
   }
 
   @override

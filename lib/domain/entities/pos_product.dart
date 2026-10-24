@@ -12,6 +12,7 @@ final class PosProduct {
     required this.id,
     required this.sku,
     required this.name,
+    required this.categoryId,
     required this.description,
     required this.unitName,
     required this.currency,
@@ -37,6 +38,7 @@ final class PosProduct {
     PosQuantity? reorderLevel,
     bool expiryTracking = false,
     List<PosBarcode> barcodes = const <PosBarcode>[],
+    String? categoryId,
     String? description,
     String unitName = 'unit',
     DateTime? now,
@@ -77,6 +79,7 @@ final class PosProduct {
       id: trimmedId,
       sku: trimmedSku,
       name: trimmedName,
+      categoryId: categoryId?.trim().isEmpty == true ? null : categoryId?.trim(),
       description: description?.trim(),
       unitName: trimmedUnit,
       currency: currency,
@@ -105,6 +108,7 @@ final class PosProduct {
     required bool expiryTracking,
     required bool isActive,
     required List<PosBarcode> barcodes,
+    String? categoryId,
     String? description,
     String unitName = 'unit',
     required DateTime createdAt,
@@ -121,6 +125,7 @@ final class PosProduct {
       reorderLevel: reorderLevel,
       expiryTracking: expiryTracking,
       barcodes: barcodes,
+      categoryId: categoryId,
       description: description,
       unitName: unitName,
       now: createdAt,
@@ -129,6 +134,7 @@ final class PosProduct {
       id: created.id,
       sku: created.sku,
       name: created.name,
+      categoryId: created.categoryId,
       description: created.description,
       unitName: created.unitName,
       currency: created.currency,
@@ -147,6 +153,7 @@ final class PosProduct {
   final String id;
   final String sku;
   final String name;
+  final String? categoryId;
   final String? description;
   final String unitName;
   final CurrencyCode currency;
@@ -191,6 +198,7 @@ final class PosProduct {
       id: id,
       sku: sku,
       name: name,
+      categoryId: categoryId,
       description: description,
       unitName: unitName,
       currency: currency,

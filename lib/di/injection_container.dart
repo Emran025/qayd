@@ -20,9 +20,11 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:qayd/application/accounts/batch_import_accounts_from_csv_use_case.dart';
 import 'package:qayd/application/pos/activate_pos_feature_use_case.dart';
 import 'package:qayd/application/pos/create_pos_product_use_case.dart';
+import 'package:qayd/application/pos/create_pos_product_category_use_case.dart';
 import 'package:qayd/application/pos/deactivate_pos_product_use_case.dart';
 import 'package:qayd/application/pos/find_pos_product_by_barcode_use_case.dart';
 import 'package:qayd/application/pos/list_pos_products_use_case.dart';
+import 'package:qayd/application/pos/list_pos_product_categories_use_case.dart';
 import 'package:qayd/application/pos/resolve_pos_product_for_checkout_use_case.dart';
 import 'package:qayd/application/pos/get_pos_stock_balance_use_case.dart';
 import 'package:qayd/application/pos/record_pos_stock_movement_use_case.dart';
@@ -42,6 +44,7 @@ import 'package:qayd/data/pdf/cairo_pos_invoice_pdf_generator.dart';
 import 'package:qayd/data/repositories/sqlite_pos_invoice_read_repository.dart';
 import 'package:qayd/domain/services/pos_invoice_pdf_generator.dart';
 import 'package:qayd/application/pos/save_pos_product_use_case.dart';
+import 'package:qayd/data/repositories/sqlite_pos_product_category_repository.dart';
 import 'package:qayd/application/import_export/legacy_migration_use_case.dart';
 import 'package:qayd/application/accounts/create_account_use_case.dart';
 import 'package:qayd/application/accounts/deactivate_account_use_case.dart';
@@ -136,6 +139,7 @@ import 'package:qayd/domain/repositories/notification_message_repository.dart';
 import 'package:qayd/domain/repositories/transaction_fee_settings_repository.dart';
 import 'package:qayd/domain/repositories/pos_activation_repository.dart';
 import 'package:qayd/domain/repositories/pos_product_repository.dart';
+import 'package:qayd/domain/repositories/pos_product_category_repository.dart';
 import 'package:qayd/domain/repositories/pos_stock_movement_repository.dart';
 import 'package:qayd/domain/repositories/pos_template_installation_repository.dart';
 import 'package:qayd/domain/repositories/pos_accounting_posting_repository.dart';
@@ -377,6 +381,8 @@ abstract final class InjectionContainer {
   static late ActivatePosFeatureUseCase activatePosFeatureUseCase;
   static late PosFeatureCubit posFeatureCubit;
   static late PosProductRepository posProductRepository;
+  static late PosProductCategoryRepository posProductCategoryRepository;
+  static late CreatePosProductCategoryUseCase createPosProductCategoryUseCase;
   static late PosStockMovementRepository posStockMovementRepository;
   static late PosAccountingPostingRepository posAccountingPostingRepository;
   static late PosSalePostingRepository posSalePostingRepository;
@@ -392,6 +398,7 @@ abstract final class InjectionContainer {
   static late CreatePosProductUseCase createPosProductUseCase;
   static late SavePosProductUseCase savePosProductUseCase;
   static late ListPosProductsUseCase listPosProductsUseCase;
+  static late ListPosProductCategoriesUseCase listPosProductCategoriesUseCase;
   static late ResolvePosProductForCheckoutUseCase
       resolvePosProductForCheckoutUseCase;
   static late PosCheckoutCubit posCheckoutCubit;
@@ -1049,6 +1056,16 @@ abstract final class InjectionContainer {
     posProductRepository = SqlitePosProductRepository(
       database,
       currencyRepository,
+    );
+    posProductCategoryRepository =
+        SqlitePosProductCategoryRepository(database);
+    listPosProductCategoriesUseCase = ListPosProductCategoriesUseCase(
+      posProductCategoryRepository,
+    );
+    createPosProductCategoryUseCase = CreatePosProductCategoryUseCase(
+      posProductCategoryRepository,
+      governanceWriteGuard,
+      _idGenerator,
     );
     final sqliteStockMovementRepository =
         SqlitePosStockMovementRepository(database, currencyRepository);

@@ -1,31 +1,29 @@
-# Shorebird OTA for the single Qayd app
+# Shorebird OTA لتطبيق Qayd
 
-يستخدم Qayd Shorebird كتطبيق واحد فقط. لا توجد مدرسة أو tenant أو build matrix في هذه الآلية، ولا تُحقن أي قيم `SCHOOL_ID` أو `SCHOOL_CODE` أو `SCHOOL_NAME` في البناء.
+يستخدم Qayd Shorebird كتطبيق واحد. ملف `shorebird.yaml` يحتوي حالياً على قيمة placeholder، لذلك Shorebird غير مهيأ ولا تصدر مسارات CI أي patch أو release حتى يوضع `app_id` الحقيقي الذي ينشئه Shorebird. لا يجوز اختلاق هذا المعرّف أو استخدام معرّف تطبيق آخر. قيمة `app_id` تعريف عام وليست سراً.
 
-ملف `shorebird.yaml` موجود في جذر المشروع، ويجب أن يحتوي على `app_id` الذي ينشئه Shorebird لحساب Qayd. قيمة `app_id` تعريف عام وليست سراً، لكن لا يجوز اختلاقها أو استخدام معرف تطبيق آخر. بعد تشغيل `shorebird init --display-name "Qayd"` بنجاح على جهاز مصادق عليه، انقل القيمة الناتجة إلى `shorebird.yaml` ثم راجع التغيير قبل commit. الملف مضبوط على `auto_update: false` حتى يتحكم Qayd في التحديث ويعرض للمستخدم حالة واضحة بدلاً من تنزيل صامت أثناء عمليات الإقلاع الحساسة.
+تطبيق Qayd مضبوط على `auto_update: false` حتى يعرض حالة التحديث للمستخدم ويطلب منه إعادة فتح التطبيق بدلاً من تنزيل تحديث صامت أثناء عمليات حساسة.
 
-أُضيفت حزمة `shorebird_code_push` وطبقات Domain/Application/Data/Presentation. يفحص `AppUpdateCubit` الحالة بعد ظهور authenticated Qayd shell ولا يحجب splash أو فتح قاعدة البيانات. إذا وجد patch يعرض Banner مترجماً، ويتيح تنزيله، ثم يوضح أن إغلاق التطبيق وفتحه مطلوبان لتفعيل النسخة. إذا لم يكن التطبيق مبنياً بواسطة Shorebird، أو لم يكن المحرك متاحاً على المنصة، تكون الحالة `unavailable` ولا يؤثر ذلك في تشغيل Qayd.
+## أين يعمل workflow؟
 
-## سياسة CI
+يعمل `.github/workflows/shorebird.yml` في المستودع المستقل `Emran025/qayd` فقط عند تغييرات Flutter على فرع `main`. المستودع المجمّع `Emran025/qayd_app` مخصص للاختبارات ولا ينشر التطبيق أو يطلق OTA. أما الـAPI فينشر بشكل مستقل من `Emran025/qayd_api`.
 
-يعمل `.github/workflows/shorebird.yml` على تطبيق Qayd واحد فقط. عند تغيير Dart/Flutter دون تغيير native أو dependencies أو assets، ينفذ `shorebird patch android --release-version latest` وينشر إلى stable. أما تغييرات `android/` أو `ios/` أو `pubspec.yaml` أو `pubspec.lock` أو `assets/` أو `shorebird.yaml` فتتطلب `shorebird release android` كاملاً. هذا التصنيف مقصود لأن Shorebird لا ي patch native code أو تغييرات assets وفق قائمة التحقق الرسمية.
+في المستودع المستقل، تغييرات Dart فقط مرشحة لـ`shorebird patch android --release-version latest`، أما تغييرات Android أو الأصول أو الاعتماديات أو `shorebird.yaml` فتتطلب `shorebird release android`. خيار التشغيل اليدوي `force_release` يفرض المسار الأصلي عند الحاجة. هذه الأوامر تسجل baseline أو patch لدى Shorebird؛ لا ترفع AAB إلى Google Play. مسار GitHub Release المنفصل يبني APK وAAB عند دفع tag.
 
-كل من patch وrelease يحتاج إلى Android signing material في runner. يُعاد استخدام نفس keystore الخاص بـGitHub Release، ولا يجوز إنشاء keystore جديد لكل patch.
+## الإعداد المطلوب قبل تشغيله
 
-## مفاتيح هذا المسار
+1. أنشئ تطبيق Shorebird باسم Qayd من حساب مخوّل، ثم ضع `app_id` الناتج في `shorebird.yaml`.
+2. أضف GitHub Secret باسم `SHOREBIRD_TOKEN`.
+3. أضف أسرار `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, و`QAYD_API_URL` إلى مستودع `qayd`.
+4. أضف Repository Variable باسم `QAYD_ANDROID_APPLICATION_ID` نفسه المستخدم في GitHub Android Release. يجب أن يكون معرّفاً نهائياً وفريداً، لا `com.example.qayd`.
+5. إذا فُعّل Sentry بمتغير `SENTRY_ENABLED=true`، أضف `SENTRY_DSN` كـSecret.
+6. أنشئ baseline Shorebird أصلياً أولاً؛ لا يمكن إرسال patch إلى `latest` قبل وجود release مطابق للتطبيق ومعرّف الحزمة والتوقيع.
 
-| الاسم | النوع | الاستخدام |
-|---|---|---|
-| `SHOREBIRD_TOKEN` | GitHub Secret | مصادقة إنشاء release/patch من CI |
-| `ANDROID_KEYSTORE_BASE64` | GitHub Secret | keystore release نفسه |
-| `ANDROID_KEYSTORE_PASSWORD` | GitHub Secret | كلمة مرور keystore |
-| `ANDROID_KEY_ALIAS` | GitHub Secret | alias المفتاح |
-| `ANDROID_KEY_PASSWORD` | GitHub Secret | كلمة مرور المفتاح |
-| `QAYD_API_URL` | GitHub Secret | عنوان API الذي يجب أن يطابق build الإنتاج |
+استخدم keystore الإنتاج نفسه لكل إصدار وpatch؛ لا تنشئ مفتاح توقيع جديداً لكل تحديث. لا تُرسل `SHOREBIRD_TOKEN` أو ملفات keystore أو كلمات المرور في Git أو في محادثة.
 
-لا يحتاج هذا workflow إلى `BUILD_API_PRIVATE_KEY` أو `BUILD_API_BASE_URL` أو أي secrets خاصة بالمدارس؛ أزيل منطقها عمداً. كما لا يحتاج إلى GitHub Variables. `GITHUB_TOKEN` تلقائي من GitHub ويُستخدم فقط لقراءة المستودع.
+## التحديث داخل التطبيق
 
-يجب إضافة `app_id` الحقيقي إلى `shorebird.yaml` قبل أول `shorebird release`. كما يجب إضافة secrets إلى GitHub Actions قبل تشغيل workflow. لا ترسل `SHOREBIRD_TOKEN` أو keystore أو كلمات المرور في المحادثة أو issues.
+يفحص `AppUpdateCubit` الحالة بعد ظهور واجهة Qayd المسجلة الدخول ولا يحجب splash أو فتح قاعدة البيانات. إذا توفر patch يعرض التطبيق Banner مترجماً، ويتيح تنزيله، ثم يوضح أن إغلاق التطبيق وإعادة فتحه مطلوبان لتفعيله. إذا لم يكن التطبيق مبنياً بواسطة Shorebird أو لم يكن المحرك متاحاً على المنصة، تكون الحالة `unavailable` ولا تمنع تشغيل التطبيق.
 
 ## مراجع
 

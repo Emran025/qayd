@@ -466,7 +466,7 @@ final class ListAccountStatementChatUseCase {
         broughtForwardByCurrency: broughtForwardByCurrency,
         finalBalanceByCurrency: runningBalances,
       ));
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

@@ -142,7 +142,7 @@ final class CreateReversalVoucherUseCase {
       }
 
       return Success(newId.value);
-    } catch (e, _) {
+    } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
   }

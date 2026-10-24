@@ -158,6 +158,24 @@ final class SqlitePosSalePostingRepository implements PosSalePostingRepository {
       }
     }
 
+    final sourceVoucherRows = await executor.query(
+      'vouchers',
+      columns: ['id'],
+      where: 'reference_number = ?',
+      whereArgs: [posting.invoice.id],
+    );
+    final expectedVoucherIds = posting.postings
+        .map((accountingPosting) => accountingPosting.voucher.id.value)
+        .toSet();
+    final actualVoucherIds = sourceVoucherRows
+        .map((row) => row['id'] as String)
+        .toSet();
+    if (sourceVoucherRows.isNotEmpty &&
+        (actualVoucherIds.length != expectedVoucherIds.length ||
+            !actualVoucherIds.containsAll(expectedVoucherIds))) {
+      return _SaleState.conflict;
+    }
+
     var postingState = _SaleState.exact;
     for (final accountingPosting in posting.postings) {
       final voucherRows = await executor.query(
