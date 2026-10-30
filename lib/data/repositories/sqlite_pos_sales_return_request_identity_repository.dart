@@ -24,13 +24,18 @@ final class SqlitePosSalesReturnRequestIdentityRepository
     if (!_validHash(hash) ||
         candidate.invoiceId.trim().isEmpty ||
         candidate.idempotencyKey.trim().isEmpty) {
-      return _validation();
+      return _validation<PosSalesReturnRequestIdentity>();
     }
     try {
       final identity = await _database.transaction((txn) async {
         final key = '$_keyPrefix$hash';
-        final rows = await txn.query('app_settings', columns: ['value'],
-            where: 'key = ?', whereArgs: [key], limit: 1);
+        final rows = await txn.query(
+          'app_settings',
+          columns: ['value'],
+          where: 'key = ?',
+          whereArgs: [key],
+          limit: 1,
+        );
         if (rows.isNotEmpty) {
           final value = jsonDecode(rows.single['value']! as String)
               as Map<String, dynamic>;
@@ -56,13 +61,13 @@ final class SqlitePosSalesReturnRequestIdentityRepository
       });
       return Success(identity);
     } on DatabaseException {
-      return _databaseFailure();
+      return _databaseFailure<PosSalesReturnRequestIdentity>();
     } on FormatException {
-      return _databaseFailure();
+      return _databaseFailure<PosSalesReturnRequestIdentity>();
     } on TypeError {
-      return _databaseFailure();
+      return _databaseFailure<PosSalesReturnRequestIdentity>();
     } catch (_) {
-      return _databaseFailure();
+      return _databaseFailure<PosSalesReturnRequestIdentity>();
     }
   }
 
@@ -75,13 +80,18 @@ final class SqlitePosSalesReturnRequestIdentityRepository
     if (!_validHash(hash) ||
         identity.invoiceId.trim().isEmpty ||
         identity.idempotencyKey.trim().isEmpty) {
-      return _validation();
+      return _validation<void>();
     }
     try {
       final matched = await _database.transaction((txn) async {
         final key = '$_keyPrefix$hash';
-        final rows = await txn.query('app_settings', columns: ['value'],
-            where: 'key = ?', whereArgs: [key], limit: 1);
+        final rows = await txn.query(
+          'app_settings',
+          columns: ['value'],
+          where: 'key = ?',
+          whereArgs: [key],
+          limit: 1,
+        );
         if (rows.isEmpty) return true;
         final value = jsonDecode(rows.single['value']! as String)
             as Map<String, dynamic>;
@@ -92,23 +102,26 @@ final class SqlitePosSalesReturnRequestIdentityRepository
         await txn.delete('app_settings', where: 'key = ?', whereArgs: [key]);
         return true;
       });
-      return matched ? const Success(null) : _validation();
+      return matched ? const Success<void>(null) : _validation<void>();
     } on DatabaseException {
-      return _databaseFailure();
+      return _databaseFailure<void>();
     } on FormatException {
-      return _databaseFailure();
+      return _databaseFailure<void>();
     } on TypeError {
-      return _databaseFailure();
+      return _databaseFailure<void>();
     } catch (_) {
-      return _databaseFailure();
+      return _databaseFailure<void>();
     }
   }
 
-  static bool _validHash(String value) => RegExp(r'^[0-9a-f]{64}$').hasMatch(value);
+  static bool _validHash(String value) =>
+      RegExp(r'^[0-9a-f]{64}$').hasMatch(value);
 
-  static FailureResult<PosSalesReturnRequestIdentity> _validation() =>
-      FailureResult(ValidationFailure(messageAr: AppStrings.posInvoiceInvalid));
+  static FailureResult<T> _validation<T>() => FailureResult(
+        ValidationFailure(messageAr: AppStrings.posInvoiceInvalid),
+      );
 
-  static FailureResult<void> _databaseFailure() =>
-      FailureResult(DatabaseFailure(messageAr: AppStrings.posInvoiceInvalid));
+  static FailureResult<T> _databaseFailure<T>() => FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posInvoiceInvalid),
+      );
 }

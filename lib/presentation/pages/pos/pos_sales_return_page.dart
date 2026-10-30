@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:qayd/application/pos/build_pos_sales_return_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_sales_return_use_case.dart';
+import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/value_objects/pos_document_status.dart';
