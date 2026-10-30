@@ -115,9 +115,9 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
       whereArgs: [invoiceId],
       orderBy: 'occurred_at ASC, id ASC',
     );
-    final lines = lineRows
-        .map((line) => _lineFromRow(line, currency))
-        .toList(growable: false);
+    final lines = (await Future.wait(
+      lineRows.map((line) => _lineFromRow(line, currency)),
+    )).toList(growable: false);
     final invoice = PosInvoice.fromPersistence(
       id: invoiceId,
       invoiceNumber: _string(row, 'invoice_number'),
@@ -147,10 +147,17 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
     return PosInvoiceDetails(invoice: invoice, payments: payments);
   }
 
-  PosInvoiceLine _lineFromRow(
+  Future<PosInvoiceLine> _lineFromRow(
     Map<String, Object?> row,
     CurrencyCode currency,
-  ) {
+  ) async {
+    final costCode = row['unit_cost_currency_code'] as String?;
+    final costCurrency = costCode == null || costCode.isEmpty
+        ? currency
+        : (await _currencyRepository.getByCode(costCode)).valueOrNull;
+    if (costCurrency == null) {
+      throw FormatException('Missing currency for POS invoice line cost');
+    }
     return PosInvoiceLine.fromPersistence(
       id: _string(row, 'id'),
       invoiceId: _string(row, 'invoice_id'),
@@ -162,7 +169,11 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
         scale: _int(row, 'quantity_scale'),
       ),
       unitPrice: _money(row, 'unit_price_minor', currency),
-      unitCost: _money(row, 'unit_cost_minor', currency),
+      unitCost: _money(
+        row,
+        'unit_cost_minor',
+        costCurrency,
+      ),
       discount: _money(row, 'discount_minor', currency),
       tax: _money(row, 'tax_minor', currency),
       lineTotal: _money(row, 'line_total_minor', currency),

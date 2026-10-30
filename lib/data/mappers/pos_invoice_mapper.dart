@@ -41,6 +41,7 @@ abstract final class PosInvoiceMapper {
       'quantity_scale': line.quantity.scale,
       'unit_price_minor': line.unitPrice.minorUnits,
       'unit_cost_minor': line.unitCost.minorUnits,
+      'unit_cost_currency_code': line.unitCost.currency.code,
       'discount_minor': line.discount.minorUnits,
       'tax_minor': line.tax.minorUnits,
       'line_total_minor': line.lineTotal.minorUnits,

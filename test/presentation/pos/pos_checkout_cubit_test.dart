@@ -103,4 +103,25 @@ void main() {
     expect(cubit.state.searchResults, hasLength(1));
     expect(cubit.state.lines, isEmpty);
   });
+
+  test('requires an explicit sale-currency price without converting catalog price', () {
+    final cubit = createCubit();
+    addTearDown(cubit.close);
+    const usd = CurrencyCode(code: 'USD', nameAr: 'دولار', symbol: r'$');
+
+    cubit.setSaleCurrency(usd);
+    cubit.addProduct(product);
+
+    expect(cubit.state.lines.single.unitPrice, isNull);
+    expect(cubit.state.subtotalMinorUnits, 0);
+    cubit.setUnitPrice('product-1', Money.fromMinorUnits(725, usd));
+    expect(cubit.state.lines.single.unitPrice, Money.fromMinorUnits(725, usd));
+    expect(cubit.state.subtotalMinorUnits, 725);
+
+    cubit.setUnitPrice('product-1', Money.fromMinorUnits(900, currency));
+    expect(cubit.state.lines.single.unitPrice, Money.fromMinorUnits(725, usd));
+
+    cubit.setSaleCurrency(currency);
+    expect(cubit.state.lines.single.unitPrice, product.salePrice);
+  });
 }

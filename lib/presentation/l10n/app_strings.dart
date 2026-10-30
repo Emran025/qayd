@@ -2662,6 +2662,11 @@ class AppStrings {
   static String get posCheckoutInputHint => i.posCheckoutInputHint;
   static String get posCheckoutSearchResults => i.posCheckoutSearchResults;
   static String get posCheckoutCartEmpty => i.posCheckoutCartEmpty;
+  static String get posCheckoutCurrencyLabel => i.posCheckoutCurrencyLabel;
+  static String get posCheckoutPricePerUnit => i.posCheckoutPricePerUnit;
+  static String get posCheckoutCatalogReference =>
+      i.posCheckoutCatalogReference;
+  static String get posCheckoutPriceRequired => i.posCheckoutPriceRequired;
   static String get posCheckoutSubtotal => i.posCheckoutSubtotal;
   static String get posCheckoutClearCart => i.posCheckoutClearCart;
   static String get posCheckoutCameraActive => i.posCheckoutCameraActive;
@@ -2683,6 +2688,25 @@ class AppStrings {
   static String get posInvoiceDueLabel => i.posInvoiceDueLabel;
   static String get posInvoiceExportPdf => i.posInvoiceExportPdf;
   static String get posInvoicePdfFailed => i.posInvoicePdfFailed;
+  static String get posSalesReturnAction => i.posSalesReturnAction;
+  static String get posSalesReturnTitle => i.posSalesReturnTitle;
+  static String get posSalesReturnDescription => i.posSalesReturnDescription;
+  static String get posSalesReturnQuantity => i.posSalesReturnQuantity;
+  static String get posSalesReturnMaximum => i.posSalesReturnMaximum;
+  static String get posSalesReturnReason => i.posSalesReturnReason;
+  static String get posSalesReturnSubmit => i.posSalesReturnSubmit;
+  static String get posSalesReturnSucceeded => i.posSalesReturnSucceeded;
+  static String get posSalesReturnFailed => i.posSalesReturnFailed;
+  static String get posSalesReturnQuantityInvalid =>
+      i.posSalesReturnQuantityInvalid;
+  static String get posSalesReturnNothingSelected =>
+      i.posSalesReturnNothingSelected;
+  static String get posSalesReturnUnavailable =>
+      i.posSalesReturnUnavailable;
+  static String get posSalesVoidAction => i.posSalesVoidAction;
+  static String get posSalesVoidConfirm => i.posSalesVoidConfirm;
+  static String get posSalesVoidSucceeded => i.posSalesVoidSucceeded;
+  static String get posSalesVoidFailed => i.posSalesVoidFailed;
   static String get posDailySalesReportTitle => i.posDailySalesReportTitle;
   static String get posDailySalesReportFailed => i.posDailySalesReportFailed;
   static String get posDailySalesInvoiceCount => i.posDailySalesInvoiceCount;

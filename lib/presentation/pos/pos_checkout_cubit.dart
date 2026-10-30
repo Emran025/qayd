@@ -11,6 +11,7 @@ import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
+import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 
@@ -26,21 +27,38 @@ enum PosCheckoutStatus {
 }
 
 final class PosCheckoutLineState {
-  const PosCheckoutLineState({required this.product, required this.quantity});
+  const PosCheckoutLineState({
+    required this.product,
+    required this.quantity,
+    required this.unitPrice,
+  });
 
   final PosProduct product;
   final PosQuantity quantity;
+  final Money? unitPrice;
 
-  int get totalMinorUnits =>
-      PosMoneyMath.multiply(quantity, product.salePrice).minorUnits;
+  int get totalMinorUnits => unitPrice == null
+      ? 0
+      : PosMoneyMath.multiply(quantity, unitPrice!).minorUnits;
 
   PosCheckoutLineState withQuantity(PosQuantity value) =>
-      PosCheckoutLineState(product: product, quantity: value);
+      PosCheckoutLineState(
+        product: product,
+        quantity: value,
+        unitPrice: unitPrice,
+      );
+
+  PosCheckoutLineState withUnitPrice(Money? value) => PosCheckoutLineState(
+        product: product,
+        quantity: quantity,
+        unitPrice: value,
+      );
 }
 
 final class PosCheckoutState {
   const PosCheckoutState({
     this.status = PosCheckoutStatus.initial,
+    this.currency,
     this.lines = const <PosCheckoutLineState>[],
     this.searchResults = const <PosProduct>[],
     this.searchQuery,
@@ -49,6 +67,7 @@ final class PosCheckoutState {
   });
 
   final PosCheckoutStatus status;
+  final CurrencyCode? currency;
   final List<PosCheckoutLineState> lines;
   final List<PosProduct> searchResults;
   final String? searchQuery;
@@ -67,6 +86,7 @@ final class PosCheckoutState {
 
   PosCheckoutState copyWith({
     PosCheckoutStatus? status,
+    CurrencyCode? currency,
     List<PosCheckoutLineState>? lines,
     List<PosProduct>? searchResults,
     String? searchQuery,
@@ -77,6 +97,7 @@ final class PosCheckoutState {
   }) {
     return PosCheckoutState(
       status: status ?? this.status,
+      currency: currency ?? this.currency,
       lines: lines ?? this.lines,
       searchResults: searchResults ?? this.searchResults,
       searchQuery: clearSearch ? null : searchQuery ?? this.searchQuery,
@@ -140,6 +161,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
           .map((line) => BuildPosSaleLineInput(
                 productId: line.product.id,
                 quantity: line.quantity,
+                unitPrice: line.unitPrice,
               ))
           .toList(growable: false),
       idempotencyKey: idempotencyKey,
@@ -221,12 +243,21 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
       PosMoneyMath.scaleFactor(product.quantityScale) * units,
       scale: product.quantityScale,
     );
+    final saleCurrency = state.currency ?? product.currency;
 
     final index =
         state.lines.indexWhere((line) => line.product.id == product.id);
     final next = [...state.lines];
     if (index < 0) {
-      next.add(PosCheckoutLineState(product: product, quantity: quantity));
+      next.add(
+        PosCheckoutLineState(
+          product: product,
+          quantity: quantity,
+          unitPrice: product.salePrice.currency == saleCurrency
+              ? product.salePrice
+              : null,
+        ),
+      );
     } else {
       final existing = next[index];
       next[index] = existing.withQuantity(existing.quantity + quantity);
@@ -234,6 +265,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
     emit(
       state.copyWith(
         status: PosCheckoutStatus.ready,
+        currency: saleCurrency,
         lines: List.unmodifiable(next),
         searchResults: const [],
         clearSearch: true,
@@ -256,6 +288,43 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
     final next = [...state.lines];
     next[index] = next[index].withQuantity(quantity);
     emit(state.copyWith(lines: List.unmodifiable(next)));
+  }
+
+  void setSaleCurrency(CurrencyCode currency) {
+    if (state.currency == currency) return;
+    _clearPendingSale();
+    emit(
+      state.copyWith(
+        currency: currency,
+        status: PosCheckoutStatus.ready,
+        lines: List.unmodifiable(
+          state.lines.map(
+            (line) => line.withUnitPrice(
+              line.product.salePrice.currency == currency
+                  ? line.product.salePrice
+                  : null,
+            ),
+          ),
+        ),
+        clearFailure: true,
+      ),
+    );
+  }
+
+  void setUnitPrice(String productId, Money? unitPrice) {
+    final currency = state.currency;
+    if (unitPrice != null &&
+        (currency == null ||
+            unitPrice.currency != currency ||
+            unitPrice.isNegative)) {
+      return;
+    }
+    final index = state.lines.indexWhere((line) => line.product.id == productId);
+    if (index < 0) return;
+    _clearPendingSale();
+    final next = [...state.lines];
+    next[index] = next[index].withUnitPrice(unitPrice);
+    emit(state.copyWith(lines: List.unmodifiable(next), clearFailure: true));
   }
 
   void removeProduct(String productId) {

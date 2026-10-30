@@ -2853,6 +2853,11 @@ abstract class AppStringsBase {
   String get posCheckoutSearchResults => 'نتائج البحث';
   String get posCheckoutCartEmpty =>
       'السلة فارغة. امسح باركوداً أو ابحث عن منتج.';
+  String get posCheckoutCurrencyLabel => 'عملة الفاتورة';
+  String get posCheckoutPricePerUnit => 'سعر الوحدة';
+  String get posCheckoutCatalogReference => 'سعر الكتالوج بعملته الأصلية';
+  String get posCheckoutPriceRequired =>
+      'أدخل السعر بهذه العملة؛ لا يحدث تحويل تلقائي.';
   String get posCheckoutSubtotal => 'الإجمالي الفرعي';
   String get posCheckoutClearCart => 'تفريغ السلة';
   String get posCheckoutCameraActive => 'المسح الخلفي مفعّل';
@@ -2875,6 +2880,22 @@ abstract class AppStringsBase {
   String get posInvoiceDueLabel => 'المتبقي';
   String get posInvoiceExportPdf => 'تصدير ومشاركة PDF';
   String get posInvoicePdfFailed => 'تعذر إنشاء PDF الفاتورة.';
+  String get posSalesReturnAction => 'إرجاع أصناف';
+  String get posSalesReturnTitle => 'مرتجع مبيعات';
+  String get posSalesReturnDescription => 'حدد الكميات المرتجعة. سيُسجل رد المبلغ محاسبياً مع إعادة الأصناف للمخزون.';
+  String get posSalesReturnQuantity => 'الكمية المراد إرجاعها';
+  String get posSalesReturnMaximum => 'المباع';
+  String get posSalesReturnReason => 'سبب الإرجاع (اختياري)';
+  String get posSalesReturnSubmit => 'ترحيل المرتجع ذرياً';
+  String get posSalesReturnSucceeded => 'تم ترحيل المرتجع وإعادة المخزون.';
+  String get posSalesReturnFailed => 'تعذر ترحيل المرتجع.';
+  String get posSalesReturnQuantityInvalid => 'أدخل كمية صحيحة لا تتجاوز الكمية المباعة.';
+  String get posSalesReturnNothingSelected => 'حدد كمية واحدة على الأقل للإرجاع.';
+  String get posSalesReturnUnavailable => 'لا يمكن إرجاع هذه الفاتورة في حالتها الحالية.';
+  String get posSalesVoidAction => 'إلغاء الفاتورة';
+  String get posSalesVoidConfirm => 'سيُنشأ مرتجع كامل وتُعكس حركة المخزون والقيود المحاسبية في معاملة واحدة. هل تريد المتابعة؟';
+  String get posSalesVoidSucceeded => 'تم إلغاء الفاتورة وترحيل عكسها الذري.';
+  String get posSalesVoidFailed => 'تعذر إلغاء الفاتورة.';
   String get posDailySalesReportTitle => 'تقرير المبيعات اليومي';
   String get posDailySalesReportFailed => 'تعذر إنشاء تقرير المبيعات اليومي.';
   String get posDailySalesInvoiceCount => 'فاتورة';

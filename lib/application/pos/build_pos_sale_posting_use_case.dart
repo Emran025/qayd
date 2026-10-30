@@ -71,11 +71,15 @@ final class PosSaleSettlementInput {
 }
 
 final class BuildPosSaleLineInput {
-  const BuildPosSaleLineInput(
-      {required this.productId, required this.quantity});
+  const BuildPosSaleLineInput({
+    required this.productId,
+    required this.quantity,
+    this.unitPrice,
+  });
 
   final String productId;
   final PosQuantity quantity;
+  final Money? unitPrice;
 }
 
 /// Builds a sale payload without writing anything to SQLite.
@@ -122,7 +126,7 @@ final class BuildPosSalePostingUseCase {
 
       final invoiceLines = <PosInvoiceLine>[];
       final movements = <PosStockMovement>[];
-      var cogsMinor = 0;
+      final cogsByCurrency = <CurrencyCode, int>{};
       for (final request in input.lines) {
         final productResult =
             await _productRepository.getById(request.productId);
@@ -131,7 +135,6 @@ final class BuildPosSalePostingUseCase {
         }
         final product = productResult.valueOrNull!;
         if (!product.isActive ||
-            product.currency != input.currency ||
             request.quantity.scale != product.quantityScale ||
             request.quantity.isZero) {
           return _invalid('pos_sale_product_invalid');
@@ -150,6 +153,13 @@ final class BuildPosSalePostingUseCase {
         }
         final lineId = _idGenerator.next();
         final unitCost = balance.averageUnitCost;
+        final unitPrice = request.unitPrice ??
+            (product.salePrice.currency == input.currency ? product.salePrice : null);
+        if (unitPrice == null ||
+            unitPrice.currency != input.currency ||
+            unitPrice.isNegative) {
+          return _invalid('pos_sale_manual_price_required');
+        }
         final line = PosInvoiceLine.create(
           id: lineId,
           invoiceId: input.invoiceId,
@@ -157,15 +167,16 @@ final class BuildPosSalePostingUseCase {
           productNameSnapshot: product.name,
           barcodeSnapshot: product.primaryBarcode?.value,
           quantity: request.quantity,
-          unitPrice: product.salePrice,
+          unitPrice: unitPrice,
           unitCost: unitCost,
           discount: Money.zero(input.currency),
           tax: Money.zero(input.currency),
           createdAt: input.createdAt,
         );
         invoiceLines.add(line);
-        cogsMinor +=
-            PosMoneyMath.multiply(request.quantity, unitCost).minorUnits;
+        final cogs = PosMoneyMath.multiply(request.quantity, unitCost);
+        cogsByCurrency[cogs.currency] =
+            (cogsByCurrency[cogs.currency] ?? 0) + cogs.minorUnits;
         movements.add(
           PosStockMovement.create(
             id: _idGenerator.next(),
@@ -309,36 +320,42 @@ final class BuildPosSalePostingUseCase {
         }
       }
 
-      final cogsVoucher = Voucher.draft(
-        id: VoucherId(_idGenerator.next()),
-        type: VoucherType.payment,
-        date: input.invoiceDate,
-        amount: Money.fromMinorUnits(cogsMinor, input.currency),
-        currency: input.currency,
-        counterpartyId: accounts.cogs,
-        affectedAccountId: accounts.inventory,
-        referenceNumber: invoice.id,
-        description: 'POS COGS ${invoice.invoiceNumber}',
-        createdAt: input.createdAt,
-      ).confirm(input.createdAt);
-      final cogsEntries = _entryGenerator.generateForConfirmedVoucher(
-        voucher: cogsVoucher,
-        transactionId: TransactionId(_idGenerator.next()),
-        debitEntryId: EntryId(_idGenerator.next()),
-        creditEntryId: EntryId(_idGenerator.next()),
-        ledgerCreatedAt: input.createdAt,
-      );
+      final cogsPostings = <PosAccountingPosting>[];
+      for (final cost in cogsByCurrency.entries) {
+        if (cost.value <= 0) continue;
+        final cogsVoucher = Voucher.draft(
+          id: VoucherId(_idGenerator.next()),
+          type: VoucherType.payment,
+          date: input.invoiceDate,
+          amount: Money.fromMinorUnits(cost.value, cost.key),
+          currency: cost.key,
+          counterpartyId: accounts.cogs,
+          affectedAccountId: accounts.inventory,
+          referenceNumber: invoice.id,
+          description: 'POS COGS ${invoice.invoiceNumber}',
+          createdAt: input.createdAt,
+        ).confirm(input.createdAt);
+        cogsPostings.add(
+          PosAccountingPosting(
+            sourceId: invoice.id,
+            voucher: cogsVoucher,
+            entries: _entryGenerator.generateForConfirmedVoucher(
+              voucher: cogsVoucher,
+              transactionId: TransactionId(_idGenerator.next()),
+              debitEntryId: EntryId(_idGenerator.next()),
+              creditEntryId: EntryId(_idGenerator.next()),
+              ledgerCreatedAt: input.createdAt,
+            ),
+          ),
+        );
+      }
       return Success(
         PosSalePosting(
           invoice: invoice,
           movements: movements,
           postings: [
             ...commercialPostings,
-            PosAccountingPosting(
-              sourceId: invoice.id,
-              voucher: cogsVoucher,
-              entries: cogsEntries,
-            ),
+            ...cogsPostings,
           ],
           payments: payments,
         ),

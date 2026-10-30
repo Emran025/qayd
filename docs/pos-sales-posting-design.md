@@ -20,11 +20,17 @@ Return persistence is one local SQLCipher transaction containing the return invo
 
 Partial-return rounding is cumulative in minor currency units. Line discounts and tax follow cumulative returned quantities; any invoice-level discount or tax is distributed by cumulative returned gross subtotal. The last return therefore receives any rounding remainder, so a complete return exactly reverses the original invoice totals instead of losing or creating minor units. Zero-value returns do not invent a zero payment or refund voucher, but still reverse inventory cost when applicable.
 
-The application and SQLite posting boundary plus focused unit/integration tests now exist for this slice. The invoice-history UI, explicit return/void review flow, durable request-identity recovery across an app restart, and end-to-end signer/governance presentation are not yet connected; do not describe the user-facing return feature as complete until those are implemented and validated.
+The invoice-history UI now exposes partial return and confirmed full void, and the return completion use case retains a hashed request identity in SQLCipher until the commit is acknowledged. Focused unit and repository tests cover the accounting boundary; CI and end-to-end UI validation remain acceptance gates.
 
 ## Exact totals
 
 Quantities are `PosQuantity` scaled integers. Unit prices, unit costs, discounts, tax, paid, and due values are `Money` minor units. No `double` participates in validation, persistence, signatures, or replay fingerprints. Invoice lines store product name and barcode snapshots so historical PDFs remain stable after catalog changes.
+
+## Currency handling
+
+Checkout may select an active invoice currency. If a product's catalog sale-price currency differs, its catalog price is not copied or converted: the operator must enter the line price explicitly in the invoice currency. The invoice, payment, receivable, and revenue voucher use that selected currency.
+
+Inventory cost remains in the stock valuation currency captured on each invoice line. Sale COGS is posted as a separate balanced voucher per cost currency; a return refunds in invoice currency and reverses inventory/COGS in the original cost currency. Schema v43 stores this cost-currency snapshot and backfills older lines from their invoice currency. No exchange rate, FX gain/loss, or automatic translation is inferred. Daily reporting currently refuses to combine invoices from different currencies, so consolidated multi-currency profitability remains out of scope until an explicit rate snapshot and reporting policy are designed.
 
 ## Fast checkout input
 
@@ -42,4 +48,4 @@ Invoice and report generators reuse Qayd's Cairo font, header configuration, bra
 
 ## Acceptance gates
 
-The sale slice cannot be connected to the visible checkout UI until focused tests prove exact totals, governance and fiscal-period rejection before writes, missing template-account rejection, insufficient stock rollback, invoice/voucher/ledger rollback, payment idempotency, exact replay without ledger mutation, signature verification, and stable PDF snapshot content. The return slice additionally requires integration tests for partial/full return totals, invoice-level discount/tax rounding, payment-method refund allocation, full void, replay and rollback; and UI tests for review, confirmation, and recovery. Camera behavior additionally requires real-device Android/iOS validation because the sandbox cannot provide physical camera hardware.
+Acceptance still requires passing CI for exact totals, governance/fiscal-period rejection, rollback and replay; return/void rounding, refund allocation and durable recovery; signature verification; and stable PDF snapshots. The new currency tests verify explicit sale prices, separate COGS currencies, and return reversals. Camera behavior still requires real-device Android/iOS validation because the sandbox cannot provide physical camera hardware.

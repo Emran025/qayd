@@ -5,10 +5,10 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
 import 'package:qayd/domain/entities/account.dart';
 import 'package:qayd/domain/entities/pos_activation_result.dart';
+import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/entities/pos_template_definition.dart';
-import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/repositories/account_repository.dart';
 import 'package:qayd/domain/repositories/pos_product_repository.dart';
 import 'package:qayd/domain/repositories/pos_stock_movement_repository.dart';
@@ -72,6 +72,8 @@ void main() {
   BuildPosSalePostingUseCase createUseCase({
     Map<String, String>? accountIds,
     PosStockBalance? stockBalance,
+    PosProduct? secondProduct,
+    PosStockBalance? secondStockBalance,
   }) {
     final products = _Products();
     final stock = _Stock();
@@ -83,6 +85,14 @@ void main() {
           productId: 'product-1',
           warehouseId: 'warehouse-1',
         )).thenAnswer((_) async => Success(stockBalance ?? balance));
+    if (secondProduct != null) {
+      when(() => products.getById(secondProduct.id))
+          .thenAnswer((_) async => Success(secondProduct));
+      when(() => stock.getBalance(
+            productId: secondProduct.id,
+            warehouseId: 'warehouse-1',
+          )).thenAnswer((_) async => Success(secondStockBalance!));
+    }
     when(() => installation.getEnabledInstallation(
           template: any(named: 'template'),
         )).thenAnswer(
@@ -118,13 +128,15 @@ void main() {
   BuildPosSalePostingInput input({
     AccountId? customerAccountId,
     PosSaleSettlementInput? settlement,
+    CurrencyCode? invoiceCurrency,
+    List<BuildPosSaleLineInput>? lines,
   }) =>
       BuildPosSalePostingInput(
         invoiceId: 'sale-1',
         invoiceNumber: 'S-1',
         warehouseId: 'warehouse-1',
-        currency: currency,
-        lines: [
+        currency: invoiceCurrency ?? currency,
+        lines: lines ?? [
           BuildPosSaleLineInput(
             productId: 'product-1',
             quantity: PosQuantity.whole(2),
@@ -220,5 +232,101 @@ void main() {
     )(input());
 
     expect(result.isFailure, isTrue);
+  });
+
+  test('requires an explicit invoice-currency price without FX conversion',
+      () async {
+    const usd = CurrencyCode(code: 'USD', nameAr: 'دولار', symbol: r'$');
+    final missing = await createUseCase()(input(invoiceCurrency: usd));
+    expect(missing.isFailure, isTrue);
+
+    final wrongCurrency = await createUseCase()(input(
+      invoiceCurrency: usd,
+      lines: [
+        BuildPosSaleLineInput(
+          productId: 'product-1',
+          quantity: PosQuantity.whole(2),
+          unitPrice: Money.fromMinorUnits(500, currency),
+        ),
+      ],
+    ));
+    expect(wrongCurrency.isFailure, isTrue);
+
+    final result = await createUseCase()(input(
+      invoiceCurrency: usd,
+      lines: [
+        BuildPosSaleLineInput(
+          productId: 'product-1',
+          quantity: PosQuantity.whole(2),
+          unitPrice: Money.fromMinorUnits(700, usd),
+        ),
+      ],
+    ));
+    expect(result.isSuccess, isTrue);
+    final sale = result.valueOrNull!;
+    expect(sale.invoice.total, Money.fromMinorUnits(1400, usd));
+    expect(sale.invoice.lines.single.unitCost.currency, currency);
+    expect(sale.payments.single.amount, Money.fromMinorUnits(1400, usd));
+    final cogs = sale.postings.singleWhere(
+      (posting) => posting.voucher.type.name == 'payment',
+    );
+    expect(cogs.voucher.currency, currency);
+    expect(cogs.voucher.amount, Money.fromMinorUnits(200, currency));
+    final commercial = sale.postings.singleWhere(
+      (posting) => posting.voucher.type.name == 'receipt',
+    );
+    expect(commercial.voucher.currency, usd);
+    expect(commercial.voucher.amount, Money.fromMinorUnits(1400, usd));
+  });
+
+  test('creates separate balanced COGS postings for each product cost currency',
+      () async {
+    const usd = CurrencyCode(code: 'USD', nameAr: 'دولار', symbol: r'$');
+    const eur = CurrencyCode(code: 'EUR', nameAr: 'يورو', symbol: '€');
+    final secondProduct = PosProduct.create(
+      id: 'product-2',
+      sku: 'SKU-2',
+      name: 'Tea',
+      currency: eur,
+      salePrice: Money.fromMinorUnits(600, eur),
+      purchasePrice: Money.fromMinorUnits(300, eur),
+    );
+    final result = await createUseCase(
+      secondProduct: secondProduct,
+      secondStockBalance: PosStockBalance(
+        quantity: PosQuantity.whole(4),
+        valuation: Money.fromMinorUnits(300, eur),
+      ),
+    )(input(
+      invoiceCurrency: usd,
+      lines: [
+        BuildPosSaleLineInput(
+          productId: 'product-1',
+          quantity: PosQuantity.whole(1),
+          unitPrice: Money.fromMinorUnits(700, usd),
+        ),
+        BuildPosSaleLineInput(
+          productId: 'product-2',
+          quantity: PosQuantity.whole(1),
+          unitPrice: Money.fromMinorUnits(800, usd),
+        ),
+      ],
+    ));
+
+    expect(result.isSuccess, isTrue);
+    final sale = result.valueOrNull!;
+    expect(sale.invoice.total, Money.fromMinorUnits(1500, usd));
+    final costPostings = sale.postings
+        .where((posting) => posting.voucher.type.name == 'payment')
+        .toList();
+    expect(costPostings, hasLength(2));
+    expect(
+      costPostings.map((posting) => posting.voucher.currency.code).toSet(),
+      {'SAR', 'EUR'},
+    );
+    expect(
+      costPostings.map((posting) => posting.voucher.amount.minorUnits).toSet(),
+      {500, 300},
+    );
   });
 }

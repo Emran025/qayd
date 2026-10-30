@@ -31,6 +31,7 @@ void main() {
 
   PosInvoice sourceInvoice({
     int unitCost = 100,
+    CurrencyCode? costCurrency,
     int globalDiscount = 0,
     int globalTax = 0,
     bool includeFreeLine = false,
@@ -42,7 +43,7 @@ void main() {
       productNameSnapshot: 'Coffee',
       quantity: PosQuantity.whole(2),
       unitPrice: Money.fromMinorUnits(500, currency),
-      unitCost: Money.fromMinorUnits(unitCost, currency),
+      unitCost: Money.fromMinorUnits(unitCost, costCurrency ?? currency),
       discount: Money.zero(currency),
       tax: Money.zero(currency),
       createdAt: at,
@@ -56,7 +57,7 @@ void main() {
               productNameSnapshot: 'Free sample',
               quantity: PosQuantity.whole(1),
               unitPrice: Money.fromMinorUnits(500, currency),
-              unitCost: Money.fromMinorUnits(unitCost, currency),
+              unitCost: Money.fromMinorUnits(unitCost, costCurrency ?? currency),
               discount: Money.fromMinorUnits(500, currency),
               tax: Money.zero(currency),
               createdAt: at,
@@ -68,7 +69,7 @@ void main() {
               productNameSnapshot: 'Paid item',
               quantity: PosQuantity.whole(1),
               unitPrice: Money.fromMinorUnits(500, currency),
-              unitCost: Money.fromMinorUnits(unitCost, currency),
+              unitCost: Money.fromMinorUnits(unitCost, costCurrency ?? currency),
               discount: Money.zero(currency),
               tax: Money.zero(currency),
               createdAt: at,
@@ -118,6 +119,7 @@ void main() {
     List<PosInvoicePayment>? payments,
     List<PosInvoiceDetails> priorReturns = const [],
     int unitCost = 100,
+    CurrencyCode? costCurrency,
     int globalDiscount = 0,
     int globalTax = 0,
     bool includeFreeLine = false,
@@ -126,6 +128,7 @@ void main() {
     final installation = _Installation();
     final source = sourceInvoice(
       unitCost: unitCost,
+      costCurrency: costCurrency,
       globalDiscount: globalDiscount,
       globalTax: globalTax,
       includeFreeLine: includeFreeLine,
@@ -216,8 +219,43 @@ void main() {
     final cogs = posting.postings.singleWhere(
       (item) => item.voucher.id.value.contains('cogs-reversal'),
     );
+    expect(cogs.voucher.type.name, 'receipt');
     expect(cogs.voucher.affectedAccountId.value, 'inventory');
     expect(cogs.voucher.counterpartyId.value, 'cogs');
+    expect(
+      cogs.entries.singleWhere((entry) => entry.isDebit).accountId.value,
+      'inventory',
+    );
+    expect(
+      cogs.entries.singleWhere((entry) => entry.isCredit).accountId.value,
+      'cogs',
+    );
+  });
+
+  test('reverses COGS in source cost currency while refund stays in invoice currency',
+      () async {
+    const usd = CurrencyCode(code: 'USD', nameAr: 'دولار', symbol: r'$');
+    final result = await createUseCase(costCurrency: usd)(input(
+      lines: [
+        BuildPosSalesReturnLineInput(
+          sourceLineId: 'sale-line-1',
+          quantity: PosQuantity.whole(1),
+        ),
+      ],
+    ));
+
+    expect(result.isSuccess, isTrue);
+    final posting = result.valueOrNull!;
+    expect(posting.invoice.currency, currency);
+    expect(posting.refundPayments.single.amount.currency, currency);
+    expect(posting.movements.single.unitCost.currency, usd);
+    expect(posting.invoice.lines.single.unitCost.currency, usd);
+    final cogs = posting.postings.singleWhere(
+      (item) => item.voucher.id.value.contains('cogs-reversal'),
+    );
+    expect(cogs.voucher.type.name, 'receipt');
+    expect(cogs.voucher.currency, usd);
+    expect(cogs.voucher.amount, Money.fromMinorUnits(100, usd));
     expect(
       cogs.entries.singleWhere((entry) => entry.isDebit).accountId.value,
       'inventory',

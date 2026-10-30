@@ -52,7 +52,7 @@ final class PosInvoiceLine {
     if (productNameSnapshot.trim().isEmpty || quantity.isZero) {
       throw InvalidPosInvoiceException.invalidLine();
     }
-    _assertCurrency(unitPrice, unitCost, discount, tax);
+    _assertCurrency(unitPrice, discount, tax);
     if (unitPrice.isNegative ||
         unitCost.isNegative ||
         discount.isNegative ||
@@ -133,13 +133,11 @@ final class PosInvoiceLine {
 
   static void _assertCurrency(
     Money unitPrice,
-    Money unitCost,
     Money discount,
     Money tax,
   ) {
     final currency = unitPrice.currency;
-    if (unitCost.currency != currency ||
-        discount.currency != currency ||
+    if (discount.currency != currency ||
         tax.currency != currency) {
       throw InvalidPosInvoiceException.currencyMismatch();
     }

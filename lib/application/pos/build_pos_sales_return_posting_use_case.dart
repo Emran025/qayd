@@ -14,6 +14,7 @@ import 'package:qayd/domain/repositories/pos_template_installation_repository.da
 import 'package:qayd/domain/services/entry_generator.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
+import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/entry_id.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_document_status.dart';
@@ -355,21 +356,23 @@ final class BuildPosSalesReturnPostingUseCase {
           ),
         );
       }
-      final cogsAmount = returnLines.fold<int>(
-        0,
-        (sum, line) =>
-            sum + PosMoneyMath.multiply(line.quantity, line.unitCost).minorUnits,
-      );
-      if (cogsAmount > 0) {
+      final cogsByCurrency = <CurrencyCode, int>{};
+      for (final line in returnLines) {
+        final cogs = PosMoneyMath.multiply(line.quantity, line.unitCost);
+        cogsByCurrency[cogs.currency] =
+            (cogsByCurrency[cogs.currency] ?? 0) + cogs.minorUnits;
+      }
+      for (final cost in cogsByCurrency.entries) {
+        if (cost.value <= 0) continue;
         postings.add(
           _posting(
             invoice: invoice,
-            amount: Money.fromMinorUnits(cogsAmount, source.currency),
+            amount: Money.fromMinorUnits(cost.value, cost.key),
             affectedAccount: inventoryAccount,
             counterpartyAccount: cogsAccount,
             description: 'POS COGS reversal ${source.invoiceNumber}',
             createdAt: input.createdAt,
-            postingKey: 'cogs-reversal',
+            postingKey: 'cogs-reversal:${cost.key.code}',
           ),
         );
       }
@@ -453,7 +456,7 @@ final class BuildPosSalesReturnPostingUseCase {
       type: VoucherType.receipt,
       date: invoice.invoiceDate,
       amount: amount,
-      currency: invoice.currency,
+      currency: amount.currency,
       counterpartyId: counterpartyAccount,
       affectedAccountId: affectedAccount,
       referenceNumber: invoice.id,

@@ -5204,6 +5204,15 @@ class AppStringsEn extends AppStringsBase {
   String get posCheckoutCartEmpty =>
       'The cart is empty. Scan or search for a product.';
   @override
+  String get posCheckoutCurrencyLabel => 'Invoice currency';
+  @override
+  String get posCheckoutPricePerUnit => 'Sale price per unit';
+  @override
+  String get posCheckoutCatalogReference => 'Catalog price in product currency';
+  @override
+  String get posCheckoutPriceRequired =>
+      'Enter the price in this currency; no automatic conversion is applied.';
+  @override
   String get posCheckoutSubtotal => 'Subtotal';
   @override
   String get posCheckoutClearCart => 'Clear cart';
@@ -5246,6 +5255,38 @@ class AppStringsEn extends AppStringsBase {
   String get posInvoiceExportPdf => 'Export and share PDF';
   @override
   String get posInvoicePdfFailed => 'Could not create the invoice PDF.';
+  @override
+  String get posSalesReturnAction => 'Return items';
+  @override
+  String get posSalesReturnTitle => 'Sales return';
+  @override
+  String get posSalesReturnDescription => 'Select returned quantities. The refund and stock receipt are posted atomically.';
+  @override
+  String get posSalesReturnQuantity => 'Quantity to return';
+  @override
+  String get posSalesReturnMaximum => 'Sold';
+  @override
+  String get posSalesReturnReason => 'Return reason (optional)';
+  @override
+  String get posSalesReturnSubmit => 'Post return atomically';
+  @override
+  String get posSalesReturnSucceeded => 'Return posted and stock restored.';
+  @override
+  String get posSalesReturnFailed => 'Could not post the return.';
+  @override
+  String get posSalesReturnQuantityInvalid => 'Enter a valid quantity no greater than the sold quantity.';
+  @override
+  String get posSalesReturnNothingSelected => 'Select at least one quantity to return.';
+  @override
+  String get posSalesReturnUnavailable => 'This invoice cannot be returned in its current state.';
+  @override
+  String get posSalesVoidAction => 'Void invoice';
+  @override
+  String get posSalesVoidConfirm => 'A full return will reverse inventory and accounting entries in one transaction. Continue?';
+  @override
+  String get posSalesVoidSucceeded => 'Invoice voided with an atomic reversal.';
+  @override
+  String get posSalesVoidFailed => 'Could not void the invoice.';
   @override
   String get posDailySalesReportTitle => 'Daily sales report';
   @override

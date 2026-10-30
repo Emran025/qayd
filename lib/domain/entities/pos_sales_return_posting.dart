@@ -7,6 +7,7 @@ import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/exceptions/invalid_pos_invoice_exception.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
+import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/pos_document_status.dart';
 import 'package:qayd/domain/value_objects/voucher_type.dart';
 
@@ -72,7 +73,7 @@ final class PosSalesReturnPosting {
           movement.quantity.scaledUnits != line.quantity.scaledUnits ||
           movement.quantity.scale != line.quantity.scale ||
           movement.unitCost.minorUnits != line.unitCost.minorUnits ||
-          movement.unitCost.currency != invoice.currency) {
+          movement.unitCost.currency != line.unitCost.currency) {
         throw InvalidPosInvoiceException.invalidLine();
       }
     }
@@ -102,24 +103,28 @@ final class PosSalesReturnPosting {
       throw InvalidPosInvoiceException.invalidPayment();
     }
 
-    final cogsAmount = movements.fold<int>(
-      0,
-      (sum, movement) =>
-          sum + PosMoneyMath.multiply(movement.quantity, movement.unitCost).minorUnits,
-    );
-    final expectedPostingCount = refundPayments.length + (cogsAmount > 0 ? 1 : 0);
+    final cogsByCurrency = <CurrencyCode, int>{};
+    for (final movement in movements) {
+      final cogs = PosMoneyMath.multiply(movement.quantity, movement.unitCost);
+      cogsByCurrency[cogs.currency] =
+          (cogsByCurrency[cogs.currency] ?? 0) + cogs.minorUnits;
+    }
+    final expectedPostingCount = refundPayments.length +
+        cogsByCurrency.values.where((amount) => amount > 0).length;
     if (postings.length != expectedPostingCount) {
       throw InvalidPosInvoiceException.invalidTotals();
     }
 
     final voucherIds = <String>{};
     final ledgerEntryIds = <String>{};
-    var allVoucherAmounts = 0;
-    for (final posting in postings) {
+    var allCommercialVoucherAmounts = 0;
+    final cogsPostingByCurrency = <CurrencyCode, PosAccountingPosting>{};
+    for (var postingIndex = 0; postingIndex < postings.length; postingIndex++) {
+      final posting = postings[postingIndex];
       final voucher = posting.voucher;
       if (posting.sourceId != invoice.id ||
           voucher.referenceNumber != invoice.id ||
-          voucher.currency != invoice.currency ||
+          voucher.amount.currency != voucher.currency ||
           voucher.amount.isZero ||
           voucher.amount.isNegative ||
           !voucher.state.isConfirmed ||
@@ -127,8 +132,8 @@ final class PosSalesReturnPosting {
           posting.entries.length != 2 ||
           posting.entries.any((entry) =>
               entry.voucherId != voucher.id ||
-              entry.currency != invoice.currency ||
-              entry.amount.currency != invoice.currency ||
+              entry.currency != voucher.currency ||
+              entry.amount.currency != voucher.currency ||
               !ledgerEntryIds.add(entry.id.value))) {
         throw InvalidPosInvoiceException.invalidTotals();
       }
@@ -139,7 +144,19 @@ final class PosSalesReturnPosting {
           credits.single.amount.minorUnits != voucher.amount.minorUnits) {
         throw InvalidPosInvoiceException.invalidTotals();
       }
-      allVoucherAmounts += voucher.amount.minorUnits;
+      if (postingIndex < refundPayments.length) {
+        if (voucher.type != VoucherType.receipt ||
+            voucher.currency != invoice.currency) {
+          throw InvalidPosInvoiceException.invalidTotals();
+        }
+        allCommercialVoucherAmounts += voucher.amount.minorUnits;
+      } else if (voucher.type == VoucherType.receipt &&
+          (cogsByCurrency[voucher.currency] ?? 0) > 0 &&
+          !cogsPostingByCurrency.containsKey(voucher.currency)) {
+        cogsPostingByCurrency[voucher.currency] = posting;
+      } else {
+        throw InvalidPosInvoiceException.invalidTotals();
+      }
     }
 
     for (var index = 0; index < refundPayments.length; index++) {
@@ -158,13 +175,16 @@ final class PosSalesReturnPosting {
       }
     }
 
-    if (cogsAmount > 0) {
-      final posting = postings.last;
+    for (final cost in cogsByCurrency.entries) {
+      if (cost.value <= 0) continue;
+      final posting = cogsPostingByCurrency[cost.key];
+      if (posting == null) throw InvalidPosInvoiceException.invalidTotals();
       final voucher = posting.voucher;
       final debit = posting.entries.singleWhere((entry) => entry.isDebit);
       final credit = posting.entries.singleWhere((entry) => entry.isCredit);
       if (voucher.type != VoucherType.receipt ||
-          voucher.amount.minorUnits != cogsAmount ||
+          voucher.amount.minorUnits != cost.value ||
+          voucher.currency != cost.key ||
           voucher.affectedAccountId != inventoryAccountId ||
           voucher.counterpartyId != costOfGoodsSoldAccountId ||
           debit.accountId != inventoryAccountId ||
@@ -172,7 +192,7 @@ final class PosSalesReturnPosting {
         throw InvalidPosInvoiceException.invalidTotals();
       }
     }
-    if (allVoucherAmounts != invoice.total.minorUnits + cogsAmount) {
+    if (allCommercialVoucherAmounts != invoice.total.minorUnits) {
       throw InvalidPosInvoiceException.invalidTotals();
     }
   }

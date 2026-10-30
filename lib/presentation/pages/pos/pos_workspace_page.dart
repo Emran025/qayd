@@ -79,6 +79,7 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
           cubit: InjectionContainer.posCheckoutCubit,
           warehouseId: state.warehouseId!,
           currency: state.currency!,
+          listCurrenciesUseCase: InjectionContainer.listCurrenciesUseCase,
         ),
       ),
     );
@@ -111,6 +112,8 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
           ),
           detailsUseCase: InjectionContainer.getPosInvoiceDetailsUseCase,
           pdfUseCase: InjectionContainer.buildPosInvoicePdfUseCase,
+          completeReturnUseCase:
+              InjectionContainer.completePosSalesReturnUseCase,
         ),
       ),
     );

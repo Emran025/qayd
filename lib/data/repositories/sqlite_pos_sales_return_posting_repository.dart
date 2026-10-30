@@ -512,7 +512,9 @@ final class SqlitePosSalesReturnPostingRepository
           line.barcodeSnapshot != sourceLine['barcode_snapshot'] ||
           line.quantity.scale != _asInt(sourceLine['quantity_scale']) ||
           line.unitPrice.currency != posting.invoice.currency ||
-          line.unitCost.currency != posting.invoice.currency ||
+          line.unitCost.currency.code !=
+              ((sourceLine['unit_cost_currency_code'] as String?) ??
+                  (sources.single['currency_code'] as String)) ||
           line.unitPrice.minorUnits != _asInt(sourceLine['unit_price_minor']) ||
           line.unitCost.minorUnits != _asInt(sourceLine['unit_cost_minor'])) {
         throw _ReturnWriteFailure(

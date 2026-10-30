@@ -40,6 +40,7 @@ import 'package:qayd/data/database/migrations/migration_039_backfill_default_acc
 import 'package:qayd/data/database/migrations/migration_040_pos_foundation.dart';
 import 'package:qayd/data/database/migrations/migration_041_pos_invoice_metadata.dart';
 import 'package:qayd/data/database/migrations/migration_042_pos_product_categories.dart';
+import 'package:qayd/data/database/migrations/migration_043_pos_line_cost_currency.dart';
 import 'package:qayd/data/database/migrations/schema_migration.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
@@ -90,6 +91,7 @@ final class MigrationRegistry {
     Migration040PosFoundation(),
     Migration041PosInvoiceMetadata(),
     Migration042PosProductCategories(),
+    Migration043PosLineCostCurrency(),
   ];
 
   static List<SchemaMigration> get ordered {
