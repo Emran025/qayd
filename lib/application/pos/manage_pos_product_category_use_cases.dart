@@ -1,5 +1,4 @@
 import 'package:qayd/application/governance/governance_write_guard.dart';
-import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_product_category.dart';
 import 'package:qayd/domain/repositories/pos_product_category_repository.dart';

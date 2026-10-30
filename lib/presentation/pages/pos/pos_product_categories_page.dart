@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:qayd/application/pos/create_pos_product_category_use_case.dart';
 import 'package:qayd/application/pos/list_pos_product_categories_use_case.dart';
 import 'package:qayd/application/pos/manage_pos_product_category_use_cases.dart';
+import 'package:qayd/core/result/result.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/domain/entities/pos_product_category.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';

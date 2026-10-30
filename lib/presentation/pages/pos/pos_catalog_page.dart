@@ -831,7 +831,18 @@ class _EditProductSheetState extends State<_EditProductSheet> {
   void initState() { super.initState(); _categoryId = widget.product.categoryId; }
   @override
   void dispose() {
-    for (final c in [_name, _sku, _sale, _purchase, _unit, _reorder, _barcodes, _description]) c.dispose();
+    for (final c in [
+      _name,
+      _sku,
+      _sale,
+      _purchase,
+      _unit,
+      _reorder,
+      _barcodes,
+      _description,
+    ]) {
+      c.dispose();
+    }
     super.dispose();
   }
   String? _required(String? value, String message) => value == null || value.trim().isEmpty ? message : null;
@@ -871,7 +882,7 @@ class _EditProductSheetState extends State<_EditProductSheet> {
         _field(_purchase, AppStrings.posCatalogPurchasePriceMinor, (v) => _nonNegative(v, AppStrings.posProductPriceInvalid), keyboardType: TextInputType.number),
         _field(_unit, AppStrings.posCatalogUnit, (v) => _required(v, AppStrings.posProductUnitRequired)),
         DropdownButtonFormField<String?>(
-          value: _categoryId,
+          initialValue: _categoryId,
           decoration: InputDecoration(labelText: AppStrings.posCatalogCategory),
           items: [DropdownMenuItem<String?>(value: null, child: Text(AppStrings.posCatalogNoCategory)), ...widget.categories.map((c) => DropdownMenuItem<String?>(value: c.id, child: Text('${c.name} (${c.code})')))],
           onChanged: (value) => setState(() => _categoryId = value),
