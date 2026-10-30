@@ -460,6 +460,45 @@ void main() {
       expect(source.single['status'], 'voided');
     });
 
+    test('rejects exact full-void replay when source status is not voided', () async {
+      final posting = _returnPosting(
+        invoiceId: 'return-void',
+        idempotencyKey: 'return-void-key',
+        quantity: 2,
+        voidSource: true,
+      );
+      expect((await repository.saveAtomically(posting)).isSuccess, isTrue);
+      await db.update(
+        'pos_invoices',
+        {'status': 'fullyReturned'},
+        where: 'id = ?',
+        whereArgs: ['sale-1'],
+      );
+
+      final replay = await repository.saveAtomically(posting);
+
+      expect(replay.isFailure, isTrue);
+    });
+
+    test('rejects return replay when source status exceeds returned quantities', () async {
+      final posting = _returnPosting(
+        invoiceId: 'return-partial',
+        idempotencyKey: 'return-partial-key',
+        quantity: 1,
+      );
+      expect((await repository.saveAtomically(posting)).isSuccess, isTrue);
+      await db.update(
+        'pos_invoices',
+        {'status': 'fullyReturned'},
+        where: 'id = ?',
+        whereArgs: ['sale-1'],
+      );
+
+      final replay = await repository.saveAtomically(posting);
+
+      expect(replay.isFailure, isTrue);
+    });
+
     test('allocates invoice-level discount and tax across sequential returns', () async {
       await db.delete('pos_payments', where: 'invoice_id = ?', whereArgs: ['sale-1']);
       await db.delete('pos_invoice_lines', where: 'invoice_id = ?', whereArgs: ['sale-1']);

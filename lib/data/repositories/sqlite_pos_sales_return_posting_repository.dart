@@ -295,14 +295,11 @@ final class SqlitePosSalesReturnPostingRepository
     if (allExact) {
       final source = await executor.query(
         'pos_invoices',
-        columns: ['status'],
         where: 'id = ?',
         whereArgs: [posting.sourceInvoiceId],
         limit: 1,
       );
-      if (source.length != 1 ||
-          !const {'partiallyReturned', 'fullyReturned', 'voided'}
-              .contains(source.first['status'])) {
+      if (source.length != 1) {
         return _ReturnState.partial;
       }
       final sourceLines = await executor.query(
@@ -319,6 +316,22 @@ final class SqlitePosSalesReturnPostingRepository
         final sourceLineIds = sourceLines.map((line) => line['id']).toSet();
         if (quantities.keys.any((lineId) => !sourceLineIds.contains(lineId))) {
           return _ReturnState.conflict;
+        }
+        final allReturned = sourceLines.isNotEmpty && sourceLines.every((line) {
+          final lineId = line['id'] as String;
+          return (quantities[lineId] ?? 0) ==
+              _asInt(line['quantity_scaled']);
+        });
+        final storedStatus = source.first['status'];
+        if (posting.voidSource) {
+          if (!allReturned || storedStatus != 'voided') {
+            return _ReturnState.conflict;
+          }
+        } else {
+          if (storedStatus == 'voided') return _ReturnState.conflict;
+          final expectedStatus =
+              allReturned ? 'fullyReturned' : 'partiallyReturned';
+          if (storedStatus != expectedStatus) return _ReturnState.conflict;
         }
       } on _ReturnWriteFailure {
         return _ReturnState.conflict;
