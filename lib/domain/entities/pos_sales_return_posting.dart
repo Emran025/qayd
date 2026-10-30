@@ -8,7 +8,6 @@ import 'package:qayd/domain/exceptions/invalid_pos_invoice_exception.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/pos_document_status.dart';
-import 'package:qayd/domain/value_objects/voucher_state.dart';
 import 'package:qayd/domain/value_objects/voucher_type.dart';
 
 /// Complete, immutable payload for one sales-return transaction.

@@ -4,7 +4,6 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_activation_result.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
-import 'package:qayd/domain/entities/pos_invoice_details.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_sales_return_posting.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
