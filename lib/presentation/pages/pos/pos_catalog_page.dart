@@ -173,7 +173,20 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
         }
       },
       child: Scaffold(
-        appBar: QaydAppBar(title: AppStrings.posCatalogTitle, actions: [IconButton(icon: const Icon(Icons.category_outlined), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PosProductCategoriesPage())))]),
+        appBar: QaydAppBar(
+          title: AppStrings.posCatalogTitle,
+          actions: [
+            IconButton(
+              tooltip: AppStrings.posCatalogManageCategories,
+              icon: const Icon(Icons.category_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const PosProductCategoriesPage(),
+                ),
+              ),
+            ),
+          ],
+        ),
         floatingActionButton: FloatingActionButton.extended(
           heroTag: 'fab_pos_catalog_add',
           onPressed: _openCreate,

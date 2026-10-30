@@ -18,6 +18,7 @@ import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/domain/value_objects/transaction_id.dart';
 import 'package:qayd/domain/value_objects/voucher_id.dart';
 import 'package:qayd/application/pos/build_pos_opening_balance_posting_use_case.dart';
+import 'package:qayd/application/pos/build_pos_stock_adjustment_posting_use_case.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 final class _CurrencyRepository implements CurrencyRepository {
@@ -132,6 +133,7 @@ Future<void> _seed(Database db, CurrencyCode currency) async {
   for (final account in [
     ('inventory-account', 'POS Inventory', 'debit'),
     ('clearing-account', 'POS Opening Clearing', 'credit'),
+    ('variance-account', 'POS Inventory Variance', 'debit'),
   ]) {
     await db.insert('accounts', <String, Object?>{
       'id': account.$1,
@@ -209,6 +211,54 @@ Future<PosAccountingPosting> _buildPosting(
       currency: currency,
       date: postingDate,
       createdAt: postingDate,
+    ),
+  );
+  return result.valueOrNull!;
+}
+
+PosStockMovement _adjustmentMovement(
+  CurrencyCode currency, {
+  String key = 'adjustment-key',
+  String sourceId = 'adjustment-source-1',
+}) {
+  final date = DateTime.utc(2026, 1, 1, 11);
+  return PosStockMovement.create(
+    id: 'movement-$key',
+    productId: 'product-1',
+    warehouseId: 'warehouse-1',
+    type: PosStockMovementType.adjustment,
+    direction: PosStockMovementDirection.outbound,
+    quantity: PosQuantity.whole(2),
+    unitCost: Money.fromMinorUnits(100, currency),
+    sourceType: 'manual_adjustment',
+    sourceId: sourceId,
+    occurredAt: date,
+    idempotencyKey: key,
+    createdAt: date,
+  );
+}
+
+Future<PosAccountingPosting> _buildAdjustmentPosting(
+  CurrencyCode currency, {
+  String voucherId = 'adjustment-voucher-1',
+  String sourceId = 'adjustment-source-1',
+}) async {
+  final date = DateTime.utc(2026, 1, 1, 11);
+  final result = await const BuildPosStockAdjustmentPostingUseCase()(
+    BuildPosStockAdjustmentPostingInput(
+      sourceId: sourceId,
+      voucherId: voucherId,
+      transactionId: 'transaction-$voucherId',
+      debitEntryId: 'debit-$voucherId',
+      creditEntryId: 'credit-$voucherId',
+      inventoryAccountId: 'inventory-account',
+      counterAccountId: 'variance-account',
+      direction: PosStockMovementDirection.outbound,
+      amountMinorUnits: 200,
+      currency: currency,
+      reason: 'Stock count variance',
+      date: date,
+      createdAt: date,
     ),
   );
   return result.valueOrNull!;
@@ -394,6 +444,56 @@ void main() {
       expect((await db.query('pos_stock_movements')), isEmpty);
       expect((await db.query('vouchers')), isEmpty);
       expect((await db.query('ledger_entries')), isEmpty);
+    });
+
+    test('commits a stock-count adjustment and balanced ledger atomically',
+        () async {
+      await repository.saveOpeningBalance(
+        movement: _movement(currency),
+        posting: await _buildPosting(currency),
+      );
+      final result = await repository.saveStockAdjustmentAtomically(
+        movement: _adjustmentMovement(currency),
+        posting: await _buildAdjustmentPosting(currency),
+      );
+
+      expect(result.isSuccess, isTrue);
+      expect((await db.query('pos_stock_movements')), hasLength(2));
+      expect((await db.query('vouchers')), hasLength(2));
+      final adjustmentEntries = await db.query(
+        'ledger_entries',
+        where: 'voucher_id = ?',
+        whereArgs: ['adjustment-voucher-1'],
+      );
+      expect(adjustmentEntries, hasLength(2));
+      expect(
+        adjustmentEntries.map((row) => row['amount_minor']).toSet(),
+        {200},
+      );
+    });
+
+    test('replays the same adjustment without duplicate rows', () async {
+      await repository.saveOpeningBalance(
+        movement: _movement(currency),
+        posting: await _buildPosting(currency),
+      );
+      final movement = _adjustmentMovement(currency);
+      final posting = await _buildAdjustmentPosting(currency);
+      await repository.saveStockAdjustmentAtomically(
+        movement: movement,
+        posting: posting,
+      );
+      final before = await db.query('ledger_entries', orderBy: 'id ASC');
+
+      final replay = await repository.saveStockAdjustmentAtomically(
+        movement: movement,
+        posting: posting,
+      );
+
+      expect(replay.isSuccess, isTrue);
+      expect((await db.query('pos_stock_movements')), hasLength(2));
+      expect((await db.query('vouchers')), hasLength(2));
+      expect(await db.query('ledger_entries', orderBy: 'id ASC'), before);
     });
   });
 }

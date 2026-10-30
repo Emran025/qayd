@@ -158,8 +158,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(AppStrings.posWorkspaceWelcome), findsOneWidget);
+    expect(find.text(AppStrings.posWorkspaceInventorySection), findsOneWidget);
+    expect(find.text(AppStrings.posWorkspaceSalesSection), findsOneWidget);
     expect(find.text(AppStrings.posCatalogTitle), findsOneWidget);
     expect(find.text(AppStrings.posPurchaseTitle), findsOneWidget);
+    expect(find.text(AppStrings.posStockMovementsTitle), findsOneWidget);
     expect(find.text(AppStrings.posWorkspacePurchaseSubtitle), findsOneWidget);
   });
 }

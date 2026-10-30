@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:qayd/core/result/result.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/navigation/qayd_page_route.dart';
@@ -9,6 +10,9 @@ import 'package:qayd/presentation/pages/pos/pos_checkout_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_invoice_history_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_daily_sales_report_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_purchase_receiving_page.dart';
+import 'package:qayd/presentation/pages/pos/pos_stock_movements_page.dart';
+import 'package:qayd/domain/entities/pos_template_definition.dart';
+import 'package:qayd/presentation/pages/settings/pos_feature_settings_page.dart';
 import 'package:qayd/presentation/pos/pos_invoice_history_cubit.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/presentation/pos/pos_workspace_cubit.dart';
@@ -87,6 +91,8 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
           listProducts: InjectionContainer.listPosProductsUseCase,
           listAccounts: InjectionContainer.listAccountsUseCase,
           completePurchase: InjectionContainer.completePosPurchaseUseCase,
+          requestIdentityRepository:
+              InjectionContainer.posPurchaseRequestIdentityRepository,
         ),
       ),
     );
@@ -102,6 +108,49 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
           ),
           detailsUseCase: InjectionContainer.getPosInvoiceDetailsUseCase,
           pdfUseCase: InjectionContainer.buildPosInvoicePdfUseCase,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openStockMovements(PosWorkspaceState state) async {
+    if (!state.isReady || !mounted) return;
+    final installation =
+        await InjectionContainer.posTemplateInstallationRepository
+            .getEnabledInstallation(template: PosTemplateDefinition.current());
+    if (!mounted) return;
+    if (installation.isFailure) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            installation.failureOrNull?.messageAr ??
+                AppStrings.posAccountingAccountsRequired,
+          ),
+        ),
+      );
+      return;
+    }
+    final inventoryAccountId = installation.valueOrNull?.accountIdsByKey[
+      PosTemplateAccountKey.inventoryAsset.value
+    ];
+    if (inventoryAccountId == null || inventoryAccountId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.posAccountingAccountsRequired)),
+      );
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      QaydPageRoute.slideFromStart<void>(
+        builder: (_) => PosStockMovementsPage(
+          warehouseId: state.warehouseId!,
+          currency: state.currency!,
+          listMovements: InjectionContainer.listPosStockMovementsUseCase,
+          listProducts: InjectionContainer.listPosProductsUseCase,
+          listAccounts: InjectionContainer.listAccountsUseCase,
+          getBalance: InjectionContainer.getPosStockBalanceUseCase,
+          submitAdjustment: InjectionContainer
+              .postPosStockAdjustmentAtomicallyUseCase.call,
+          inventoryAccountId: inventoryAccountId,
         ),
       ),
     );
@@ -130,6 +179,18 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
     );
   }
 
+  Future<void> _openPosFeatureSettings() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => PosFeatureSettingsPage(
+          cubit: InjectionContainer.posFeatureCubit,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    context.read<PosWorkspaceCubit>().load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<PosWorkspaceCubit, PosWorkspaceState>(
@@ -141,7 +202,7 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
             PosWorkspaceStatus.loading =>
               const Center(child: CircularProgressIndicator()),
             PosWorkspaceStatus.disabled => _DisabledWorkspace(
-                onOpenSettings: () => Navigator.of(context).maybePop(),
+                onOpenSettings: _openPosFeatureSettings,
               ),
             PosWorkspaceStatus.failure => _WorkspaceFailure(
                 message: state.failure?.messageAr ??
@@ -153,6 +214,7 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
                 onOpenCatalog: () => _openCatalog(state),
                 onOpenOpeningBalance: () => _openOpeningBalance(state),
                 onOpenPurchaseReceiving: () => _openPurchaseReceiving(state),
+                onOpenStockMovements: () => _openStockMovements(state),
                 onOpenCheckout: () => _openCheckout(state),
                 onOpenInvoiceHistory: () => _openInvoiceHistory(state),
                 onOpenDailySalesReport: () => _openDailySalesReport(state),
@@ -170,6 +232,7 @@ class _ReadyWorkspace extends StatelessWidget {
     required this.onOpenCatalog,
     required this.onOpenOpeningBalance,
     required this.onOpenPurchaseReceiving,
+    required this.onOpenStockMovements,
     required this.onOpenCheckout,
     required this.onOpenInvoiceHistory,
     required this.onOpenDailySalesReport,
@@ -179,6 +242,7 @@ class _ReadyWorkspace extends StatelessWidget {
   final VoidCallback onOpenCatalog;
   final VoidCallback onOpenOpeningBalance;
   final VoidCallback onOpenPurchaseReceiving;
+  final VoidCallback onOpenStockMovements;
   final VoidCallback onOpenCheckout;
   final VoidCallback onOpenInvoiceHistory;
   final VoidCallback onOpenDailySalesReport;
@@ -195,6 +259,11 @@ class _ReadyWorkspace extends StatelessWidget {
         const SizedBox(height: SpacingTokens.sm),
         Text(AppStrings.posWorkspaceDescription),
         const SizedBox(height: SpacingTokens.lg),
+        Text(
+          AppStrings.posWorkspaceInventorySection,
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: SpacingTokens.sm),
         Card(
           child: ListTile(
             leading: const Icon(Icons.inventory_2_outlined),
@@ -225,6 +294,21 @@ class _ReadyWorkspace extends StatelessWidget {
           ),
         ),
         const SizedBox(height: SpacingTokens.md),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.history_rounded),
+            title: Text(AppStrings.posStockMovementsTitle),
+            subtitle: Text(AppStrings.posStockMovementsDescription),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onOpenStockMovements,
+          ),
+        ),
+        const SizedBox(height: SpacingTokens.lg),
+        Text(
+          AppStrings.posWorkspaceSalesSection,
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: SpacingTokens.sm),
         Card(
           child: ListTile(
             leading: const Icon(Icons.point_of_sale_outlined),
@@ -288,7 +372,7 @@ class _DisabledWorkspace extends StatelessWidget {
             FilledButton.icon(
               onPressed: onOpenSettings,
               icon: const Icon(Icons.settings_outlined),
-              label: Text(AppStrings.actionCancel),
+              label: Text(AppStrings.posWorkspaceOpenSettings),
             ),
           ],
         ),

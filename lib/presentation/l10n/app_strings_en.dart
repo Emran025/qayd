@@ -5182,6 +5182,9 @@ class AppStringsEn extends AppStringsBase {
   String get posPurchaseSaved =>
       'Purchase, stock, and accounting entry posted successfully.';
   @override
+  String get posPurchaseAcknowledgeFailed =>
+      'The purchase was posted, but its local confirmation could not be recorded. Submit the same form again to verify before entering a new purchase.';
+  @override
   String get posPurchaseCartEmpty => 'Add at least one product.';
   @override
   String get posPurchaseExpiryNotice =>
@@ -5295,7 +5298,79 @@ class AppStringsEn extends AppStringsBase {
   String get posStockProductInactive =>
       'Cannot record a movement for an inactive product.';
   @override
-  String get posOpeningBalanceTitle => 'Opening stock balance';
+  String get posStockMovementsTitle => 'Inventory movements';
+  @override
+  String get posStockMovementsDescription =>
+      'A ledger of stock increases and decreases from purchases, sales, opening stock, and adjustments.';
+  @override
+  String get posStockMovementsEmpty => 'No inventory movements yet.';
+  @override
+  String get posStockMovementsLoadMore => 'Load more';
+  @override
+  String get posStockMovementAllProducts => 'All products';
+  @override
+  String get posStockMovementAllTypes => 'All movement types';
+  @override
+  String posStockMovementTypeLabel(String type) => switch (type) {
+        'opening' => 'Opening stock',
+        'purchase' => 'Purchase receipt',
+        'sale' => 'Sale',
+        'salesReturn' => 'Sales return',
+        'purchaseReturn' => 'Purchase return',
+        'adjustment' => 'Stock count adjustment',
+        'damage' => 'Damaged stock',
+        'expiry' => 'Expired stock',
+        _ => 'Inventory movement',
+      };
+  @override
+  String get posStockMovementInbound => 'Increase';
+  @override
+  String get posStockMovementOutbound => 'Decrease';
+  @override
+  String get posStockAdjustmentTitle => 'Adjust stock count';
+  @override
+  String get posStockAdjustmentDescription =>
+      'Record the count variance as a new movement with a balanced accounting entry. Previous movements stay unchanged.';
+  @override
+  String get posStockAdjustmentDirection => 'Adjustment direction';
+  @override
+  String get posStockAdjustmentIncrease => 'Increase stock';
+  @override
+  String get posStockAdjustmentDecrease => 'Decrease stock';
+  @override
+  String get posStockAdjustmentQuantity => 'Quantity in scaled units';
+  @override
+  String get posStockAdjustmentUnitCost => 'Unit cost in minor currency units';
+  @override
+  String get posStockAdjustmentCounterAccount => 'Counter-account for variance';
+  @override
+  String get posStockAdjustmentSelectAccount => 'Choose counter-account';
+  @override
+  String get posStockAdjustmentReason => 'Reason for adjustment';
+  @override
+  String get posStockAdjustmentReasonRequired =>
+      'Enter a reason for the adjustment.';
+  @override
+  String get posStockAdjustmentValueRequired =>
+      'The adjustment value must be greater than zero; review the stock cost.';
+  @override
+  String get posStockAdjustmentSave => 'Record adjustment';
+  @override
+  String get posStockAdjustmentSaved =>
+      'Stock adjustment and accounting entry recorded.';
+  @override
+  String posStockAdjustmentVoucherDescription(String reason) =>
+      'POS stock adjustment: $reason';
+  @override
+  String get posWorkspaceInventorySection => 'Products and inventory';
+  @override
+  String get posWorkspaceSalesSection => 'Sales and reports';
+  @override
+  String get posWorkspaceOpenSettings => 'Open POS settings';
+  @override
+  String get posCatalogManageCategories => 'Manage categories';
+  @override
+  String get posOpeningBalanceTitle => 'Enter opening stock';
   @override
   String get posOpeningBalanceDescription =>
       'Enter opening quantity and cost. The entry is saved as an auditable new movement.';
@@ -5310,12 +5385,12 @@ class AppStringsEn extends AppStringsBase {
   String get posOpeningBalanceQuantity => 'Quantity in scaled units';
   @override
   String posOpeningBalanceQuantityHint(int scale) =>
-      'Enter an integer scaled quantity (current scale: $scale).';
+      'Enter the quantity as an integer in scaled units (product scale: $scale).';
   @override
   String get posOpeningBalanceUnitCost => 'Unit cost in minor units';
   @override
   String posOpeningBalanceCostHint(String currency) =>
-      'Enter an integer minor-unit value ($currency), without decimals.';
+      'Enter a whole number in minor currency units ($currency), without decimals.';
   @override
   String get posOpeningBalancePositiveInteger => 'Enter a positive integer.';
   @override

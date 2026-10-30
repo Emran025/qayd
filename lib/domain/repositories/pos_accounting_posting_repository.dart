@@ -8,4 +8,9 @@ abstract interface class PosAccountingPostingRepository {
     required PosStockMovement movement,
     required PosAccountingPosting posting,
   });
+
+  Future<Result<void>> saveStockAdjustmentAtomically({
+    required PosStockMovement movement,
+    required PosAccountingPosting posting,
+  });
 }

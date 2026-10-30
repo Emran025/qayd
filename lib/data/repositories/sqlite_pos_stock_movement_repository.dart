@@ -81,6 +81,76 @@ final class SqlitePosStockMovementRepository
   }
 
   @override
+  Future<Result<List<PosStockMovement>>> listMovements({
+    required String warehouseId,
+    String? productId,
+    PosStockMovementType? type,
+    DateTime? fromInclusive,
+    DateTime? untilExclusive,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final normalizedWarehouseId = warehouseId.trim();
+    final normalizedProductId = productId?.trim();
+    if (normalizedWarehouseId.isEmpty ||
+        (normalizedProductId != null && normalizedProductId.isEmpty)) {
+      return _invalidMovementListFailure();
+    }
+    if (fromInclusive != null &&
+        untilExclusive != null &&
+        !fromInclusive.isBefore(untilExclusive)) {
+      return _invalidMovementListFailure();
+    }
+
+    final clauses = <String>['warehouse_id = ?'];
+    final args = <Object?>[normalizedWarehouseId];
+    if (normalizedProductId != null) {
+      clauses.add('product_id = ?');
+      args.add(normalizedProductId);
+    }
+    if (type != null) {
+      clauses.add('movement_type = ?');
+      args.add(_typeToDb(type));
+    }
+    if (fromInclusive != null) {
+      clauses.add('occurred_at >= ?');
+      args.add(fromInclusive.toUtc().toIso8601String());
+    }
+    if (untilExclusive != null) {
+      clauses.add('occurred_at < ?');
+      args.add(untilExclusive.toUtc().toIso8601String());
+    }
+
+    try {
+      final rows = await _db.query(
+        'pos_stock_movements',
+        where: clauses.join(' AND '),
+        whereArgs: args,
+        orderBy: 'occurred_at DESC, created_at DESC, id DESC',
+        limit: limit.clamp(1, 500).toInt(),
+        offset: offset.clamp(0, 0x7fffffff).toInt(),
+      );
+      final movements = <PosStockMovement>[];
+      for (final row in rows) {
+        try {
+          final mapped = await _mapRow(row);
+          if (mapped.isFailure) return FailureResult(mapped.failureOrNull!);
+          movements.add(mapped.valueOrNull!);
+        } catch (_) {
+          return _invalidMovementListFailure();
+        }
+      }
+      return Success(movements);
+    } on DatabaseException {
+      return _readMovementListFailure();
+    } on InvalidPosStockException catch (error) {
+      return FailureResult(ValidationFailure(messageAr: error.messageAr));
+    } catch (_) {
+      return _readMovementListFailure();
+    }
+  }
+
+  @override
   Future<Result<void>> append(PosStockMovement movement) async {
     try {
       await _db.transaction((txn) async {
@@ -407,6 +477,16 @@ final class SqlitePosStockMovementRepository
       );
 
   FailureResult<PosStockMovement?> _readNullableFailure() => FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posStockReadFailed),
+      );
+
+  FailureResult<List<PosStockMovement>> _invalidMovementListFailure() =>
+      FailureResult(
+        ValidationFailure(messageAr: AppStrings.posStockInvalidMovement),
+      );
+
+  FailureResult<List<PosStockMovement>> _readMovementListFailure() =>
+      FailureResult(
         DatabaseFailure(messageAr: AppStrings.posStockReadFailed),
       );
 }

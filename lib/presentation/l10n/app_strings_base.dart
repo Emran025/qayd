@@ -2841,6 +2841,8 @@ abstract class AppStringsBase {
   String get posPurchaseTotal => 'إجمالي الشراء';
   String get posPurchaseSubmit => 'ترحيل استلام الشراء';
   String get posPurchaseSaved => 'تم ترحيل الشراء والمخزون والقيد بنجاح.';
+  String get posPurchaseAcknowledgeFailed =>
+      'تم ترحيل الشراء، لكن تعذر تأكيد النتيجة محلياً. أعد إرسال النموذج نفسه للتحقق قبل إدخال شراء جديد.';
   String get posPurchaseCartEmpty => 'أضف صنفاً واحداً على الأقل.';
   String get posPurchaseExpiryNotice =>
       'الأصناف التي تتطلب تتبع الصلاحية غير متاحة للاستلام حتى تكتمل إدارة الدفعات.';
@@ -2896,7 +2898,49 @@ abstract class AppStringsBase {
   String get posStockReadFailed => 'تعذر قراءة رصيد المخزون.';
   String get posStockAppendFailed => 'تعذر تسجيل حركة المخزون.';
   String get posStockProductInactive => 'لا يمكن تسجيل حركة لمنتج غير نشط.';
-  String get posOpeningBalanceTitle => 'الرصيد الافتتاحي للمخزون';
+  String get posStockMovementsTitle => 'حركات المخزون';
+  String get posStockMovementsDescription =>
+      'سجل للزيادات والنقص الناتجة عن الشراء والبيع والإدخال والتسويات.';
+  String get posStockMovementsEmpty => 'لا توجد حركات مخزون بعد.';
+  String get posStockMovementsLoadMore => 'تحميل المزيد';
+  String get posStockMovementAllProducts => 'كل المنتجات';
+  String get posStockMovementAllTypes => 'كل أنواع الحركات';
+  String posStockMovementTypeLabel(String type) => switch (type) {
+        'opening' => 'مخزون افتتاحي',
+        'purchase' => 'استلام شراء',
+        'sale' => 'بيع',
+        'salesReturn' => 'مرتجع بيع',
+        'purchaseReturn' => 'مرتجع شراء',
+        'adjustment' => 'تسوية جرد',
+        'damage' => 'تالف',
+        'expiry' => 'منتهي الصلاحية',
+        _ => 'حركة مخزون',
+      };
+  String get posStockMovementInbound => 'زيادة';
+  String get posStockMovementOutbound => 'نقص';
+  String get posStockAdjustmentTitle => 'تسوية جرد المخزون';
+  String get posStockAdjustmentDescription =>
+      'سجّل فرق الجرد كحركة جديدة مع قيد محاسبي متوازن. لا تُعدّل الحركات السابقة.';
+  String get posStockAdjustmentDirection => 'اتجاه التسوية';
+  String get posStockAdjustmentIncrease => 'زيادة المخزون';
+  String get posStockAdjustmentDecrease => 'نقص المخزون';
+  String get posStockAdjustmentQuantity => 'الكمية بوحدات القياس';
+  String get posStockAdjustmentUnitCost => 'تكلفة الوحدة بوحدة العملة الصغرى';
+  String get posStockAdjustmentCounterAccount => 'الحساب المقابل لفرق الجرد';
+  String get posStockAdjustmentSelectAccount => 'اختر الحساب المقابل';
+  String get posStockAdjustmentReason => 'سبب التسوية';
+  String get posStockAdjustmentReasonRequired => 'يرجى توضيح سبب التسوية.';
+  String get posStockAdjustmentValueRequired =>
+      'يجب أن تكون قيمة التسوية أكبر من صفر؛ راجع تكلفة المخزون.';
+  String get posStockAdjustmentSave => 'تسجيل التسوية';
+  String get posStockAdjustmentSaved => 'تم تسجيل التسوية والقيد معاً.';
+  String posStockAdjustmentVoucherDescription(String reason) =>
+      'تسوية مخزون نقطة البيع: $reason';
+  String get posWorkspaceInventorySection => 'الأصناف والمخزون';
+  String get posWorkspaceSalesSection => 'المبيعات والتقارير';
+  String get posWorkspaceOpenSettings => 'فتح إعدادات نقطة البيع';
+  String get posCatalogManageCategories => 'إدارة التصنيفات';
+  String get posOpeningBalanceTitle => 'إدخال مخزون افتتاحي';
   String get posOpeningBalanceDescription =>
       'أدخل الكمية والتكلفة الافتتاحية. سيُحفظ الإدخال كحركة جديدة قابلة للتدقيق.';
   String get posOpeningBalanceProduct => 'المنتج';
@@ -2904,10 +2948,10 @@ abstract class AppStringsBase {
   String get posOpeningBalanceNoProducts => 'أضف منتجاً إلى الكتالوج أولاً.';
   String get posOpeningBalanceQuantity => 'الكمية بوحدات القياس';
   String posOpeningBalanceQuantityHint(int scale) =>
-      'أدخل العدد الصحيح scaled units (المقياس الحالي: $scale).';
+      'أدخل الكمية كعدد صحيح بوحدات القياس المصغّرة (مقياس المنتج: $scale).';
   String get posOpeningBalanceUnitCost => 'تكلفة الوحدة بالوحدات الصغرى';
   String posOpeningBalanceCostHint(String currency) =>
-      'أدخل قيمة صحيحة بالوحدات الصغرى ($currency)، دون فاصلة عشرية.';
+      'أدخل قيمة صحيحة بوحدة العملة الصغرى ($currency)، دون فاصلة عشرية.';
   String get posOpeningBalancePositiveInteger => 'أدخل عدداً صحيحاً موجباً.';
   String get posOpeningBalanceNonNegativeInteger =>
       'أدخل صفراً أو عدداً صحيحاً موجباً.';

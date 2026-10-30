@@ -110,6 +110,98 @@ final class SqlitePosAccountingPostingRepository
     }
   }
 
+  @override
+  Future<Result<void>> saveStockAdjustmentAtomically({
+    required PosStockMovement movement,
+    required PosAccountingPosting posting,
+  }) async {
+    if (movement.type != PosStockMovementType.adjustment ||
+        movement.sourceType != 'manual_adjustment') {
+      return FailureResult(
+        ValidationFailure(messageAr: AppStrings.posAccountingSourceMismatch),
+      );
+    }
+    if (!_sameUtcCalendarDate(posting.voucher.date, movement.occurredAt)) {
+      return FailureResult(
+        ValidationFailure(messageAr: AppStrings.posAccountingDateMismatch),
+      );
+    }
+    if (movement.sourceId?.trim() != posting.sourceId.trim() ||
+        posting.voucher.referenceNumber?.trim() != posting.sourceId.trim()) {
+      return FailureResult(
+        ValidationFailure(messageAr: AppStrings.posAccountingSourceMismatch),
+      );
+    }
+    try {
+      await _transactionRunner.run<void>((txn) async {
+        final stockResult =
+            await _stockRepository.getByIdempotencyKeyInTransaction(
+          txn,
+          movement.idempotencyKey,
+        );
+        if (stockResult.isFailure) {
+          throw _AtomicPostingFailure(stockResult.failureOrNull!);
+        }
+        final existingMovement = stockResult.valueOrNull;
+        final postingState = await _inspectPosting(txn, posting);
+
+        if (existingMovement != null &&
+            postingState == _PostingState.exact &&
+            _sameMovement(existingMovement, movement)) {
+          return;
+        }
+        if (existingMovement != null || postingState != _PostingState.absent) {
+          throw _AtomicPostingFailure(
+            ValidationFailure(messageAr: _failureMessage(postingState)),
+          );
+        }
+
+        final duplicateSource = await txn.query(
+          'vouchers',
+          columns: ['id'],
+          where: 'reference_number = ?',
+          whereArgs: [posting.sourceId],
+          limit: 1,
+        );
+        if (duplicateSource.isNotEmpty) {
+          throw _AtomicPostingFailure(
+            ValidationFailure(
+              messageAr: AppStrings.posAccountingDuplicateSource,
+            ),
+          );
+        }
+
+        final appendResult = await _stockRepository.appendInTransaction(
+          txn,
+          movement,
+        );
+        if (appendResult.isFailure) {
+          throw _AtomicPostingFailure(appendResult.failureOrNull!);
+        }
+        final voucherResult = await _voucherRepository
+            .saveWithLedgerEntriesInTransaction(
+          txn,
+          voucher: posting.voucher,
+          ledgerEntries: posting.entries,
+        );
+        if (voucherResult.isFailure) {
+          throw _AtomicPostingFailure(voucherResult.failureOrNull!);
+        }
+      });
+      return const Success(null);
+    } on _AtomicPostingFailure catch (error) {
+      return FailureResult(error.failure);
+    } on DatabaseException {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posAccountingTransactionFailed),
+      );
+    } catch (_) {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posAccountingTransactionFailed),
+      );
+    }
+  }
+
   Future<_PostingState> _inspectPosting(
     DatabaseExecutor executor,
     PosAccountingPosting posting,

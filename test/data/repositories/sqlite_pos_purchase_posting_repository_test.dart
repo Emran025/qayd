@@ -5,11 +5,13 @@ import 'package:qayd/data/database/migrations/migration_041_pos_invoice_metadata
 import 'package:qayd/data/database/transaction_runner.dart';
 import 'package:qayd/data/mappers/pos_invoice_mapper.dart';
 import 'package:qayd/data/repositories/sqlite_pos_purchase_posting_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_purchase_request_identity_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_stock_movement_repository.dart';
 import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_purchase_posting.dart';
+import 'package:qayd/domain/entities/pos_purchase_request_identity.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/entities/voucher.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
@@ -61,6 +63,12 @@ final _currency = CurrencyCode(
 );
 
 Future<void> _createSchema(Database db) async {
+  await db.execute('''
+    CREATE TABLE app_settings (
+      key TEXT NOT NULL PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  ''');
   await db.execute('''
     CREATE TABLE accounts (
       id TEXT PRIMARY KEY,
@@ -251,6 +259,36 @@ void main() {
       expect(await db.query('pos_stock_movements'), hasLength(1));
       expect(await db.query('vouchers'), hasLength(1));
       expect(await db.query('ledger_entries'), hasLength(2));
+    });
+
+    test('retains retry identity through commit until UI acknowledges success',
+        () async {
+      final fingerprint = List.filled(64, 'a').join();
+      final identity = PosPurchaseRequestIdentity(
+        invoiceId: 'purchase-1',
+        idempotencyKey: 'purchase-key-1',
+        createdAt: DateTime.utc(2026, 1, 10, 10),
+      );
+      await db.insert('app_settings', {
+        'key': 'pos_purchase_request:$fingerprint',
+        'value':
+            '{"invoice_id":"purchase-1","idempotency_key":"purchase-key-1","created_at":"2026-01-10T10:00:00.000Z"}',
+      });
+
+      final result = await repository.saveAtomically(_purchase());
+
+      expect(result.isSuccess, isTrue);
+      expect(await db.query('app_settings'), hasLength(1));
+      expect(await db.query('pos_invoices'), hasLength(1));
+
+      final acknowledged =
+          await SqlitePosPurchaseRequestIdentityRepository(db)
+              .acknowledgeCommitted(
+        fingerprintHash: fingerprint,
+        identity: identity,
+      );
+      expect(acknowledged.isSuccess, isTrue);
+      expect(await db.query('app_settings'), isEmpty);
     });
 
     test('exact replay does not duplicate or mutate ledger rows', () async {

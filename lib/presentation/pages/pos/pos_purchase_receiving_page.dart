@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qayd/application/accounts/list_accounts_use_case.dart';
@@ -7,6 +10,8 @@ import 'package:qayd/application/pos/list_pos_products_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
+import 'package:qayd/domain/entities/pos_purchase_request_identity.dart';
+import 'package:qayd/domain/repositories/pos_purchase_request_identity_repository.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
@@ -29,6 +34,7 @@ class PosPurchaseReceivingPage extends StatefulWidget {
     required this.listProducts,
     required this.listAccounts,
     required this.completePurchase,
+    required this.requestIdentityRepository,
   });
 
   final String warehouseId;
@@ -36,6 +42,7 @@ class PosPurchaseReceivingPage extends StatefulWidget {
   final ListPosProductsUseCase listProducts;
   final ListAccountsUseCase listAccounts;
   final CompletePosPurchaseUseCase completePurchase;
+  final PosPurchaseRequestIdentityRepository requestIdentityRepository;
 
   @override
   State<PosPurchaseReceivingPage> createState() =>
@@ -202,20 +209,43 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
     }
 
     final fingerprint = _purchaseFingerprint(purchaseLines);
-    if (_pendingFingerprint != fingerprint ||
-        _pendingInvoiceId == null ||
-        _pendingIdempotencyKey == null ||
-        _pendingCreatedAt == null) {
-      _pendingFingerprint = fingerprint;
-      _pendingInvoiceId = _uuid.v4();
-      _pendingIdempotencyKey = _uuid.v4();
-      _pendingCreatedAt = DateTime.now().toUtc();
+    final fingerprintHash = sha256.convert(utf8.encode(fingerprint)).toString();
+    setState(() => _submitting = true);
+    final identityResult = await widget.requestIdentityRepository.getOrCreate(
+      fingerprintHash: fingerprintHash,
+      candidate: PosPurchaseRequestIdentity(
+        invoiceId: _pendingFingerprint == fingerprint &&
+                _pendingInvoiceId != null
+            ? _pendingInvoiceId!
+            : _uuid.v4(),
+        idempotencyKey: _pendingFingerprint == fingerprint &&
+                _pendingIdempotencyKey != null
+            ? _pendingIdempotencyKey!
+            : _uuid.v4(),
+        createdAt: _pendingFingerprint == fingerprint &&
+                _pendingCreatedAt != null
+            ? _pendingCreatedAt!
+            : DateTime.now().toUtc(),
+      ),
+    );
+    if (!mounted) return;
+    if (identityResult.isFailure) {
+      setState(() => _submitting = false);
+      _showMessage(
+        identityResult.failureOrNull?.messageAr ??
+            AppStrings.posPurchaseSubmitFailed,
+      );
+      return;
     }
+    final identity = identityResult.valueOrNull!;
+    _pendingFingerprint = fingerprint;
+    _pendingInvoiceId = identity.invoiceId;
+    _pendingIdempotencyKey = identity.idempotencyKey;
+    _pendingCreatedAt = identity.createdAt.toUtc();
     final now = _pendingCreatedAt!;
     final invoiceId = _pendingInvoiceId!;
     final invoiceNumber = 'POS-P-${invoiceId.toUpperCase()}';
 
-    setState(() => _submitting = true);
     final result = await widget.completePurchase(
       BuildPosPurchasePostingInput(
         invoiceId: invoiceId,
@@ -240,6 +270,17 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
       _showMessage(
         result.failureOrNull?.messageAr ?? AppStrings.posPurchaseSubmitFailed,
       );
+      return;
+    }
+
+    final acknowledgement =
+        await widget.requestIdentityRepository.acknowledgeCommitted(
+      fingerprintHash: fingerprintHash,
+      identity: identity,
+    );
+    if (!mounted) return;
+    if (acknowledgement.isFailure) {
+      _showMessage(AppStrings.posPurchaseAcknowledgeFailed);
       return;
     }
 

@@ -98,6 +98,16 @@ final class _PostingRepository implements PosAccountingPostingRepository {
     this.posting = posting;
     return result;
   }
+
+  @override
+  Future<Result<void>> saveStockAdjustmentAtomically({
+    required PosStockMovement movement,
+    required PosAccountingPosting posting,
+  }) async {
+    this.movement = movement;
+    this.posting = posting;
+    return result;
+  }
 }
 
 final class _Ids implements IdGenerator {
