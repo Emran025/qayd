@@ -3,6 +3,7 @@ import 'package:qayd/application/accounts/list_accounts_use_case.dart';
 import 'package:qayd/application/pos/get_pos_stock_balance_use_case.dart';
 import 'package:qayd/application/pos/list_pos_products_use_case.dart';
 import 'package:qayd/application/pos/list_pos_stock_movements_use_case.dart';
+import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
