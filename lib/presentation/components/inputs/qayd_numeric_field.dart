@@ -22,6 +22,7 @@ class QaydNumericField extends StatelessWidget {
     this.focusNode,
     this.prefixIcon,
     this.suffixIcon,
+    this.suffixText,
     this.isDecimal = false,
     this.isSigned = false,
     this.maxLength,
@@ -46,6 +47,7 @@ class QaydNumericField extends StatelessWidget {
   final FocusNode? focusNode;
   final Widget? prefixIcon;
   final Widget? suffixIcon;
+  final String? suffixText;
   final bool isDecimal;
   final bool isSigned;
   final int? maxLength;
@@ -87,6 +89,7 @@ class QaydNumericField extends StatelessWidget {
           errorText: errorText,
           prefixIcon: prefixIcon,
           suffixIcon: suffixIcon,
+          suffixText: suffixText,
           counterText: '', // Hide default counter for compact look
         ),
       ),

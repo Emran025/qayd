@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:qayd/application/accounts/list_accounts_use_case.dart';
 import 'package:qayd/application/pos/build_pos_purchase_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_purchase_use_case.dart';
@@ -18,6 +17,9 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/components/inputs/qayd_amount_field.dart';
+import 'package:qayd/presentation/components/inputs/qayd_numeric_field.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
@@ -317,7 +319,7 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
   @override
   Widget build(BuildContext context) {
     final total = _totalMinorUnits();
-    return Scaffold(
+    return QaydScaffold(
       appBar: QaydAppBar(title: AppStrings.posPurchaseTitle),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -447,6 +449,42 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
   }
 
   Widget _lineCard(_PurchaseLineDraft line) {
+    final quantityLabel =
+        '${AppStrings.posPurchaseQuantity} (${line.product.unitName})';
+    final quantityHint =
+        '0${line.product.quantityScale > 0 ? '.0' : ''}';
+    final quantityField = line.product.quantityScale == 0
+        ? QaydNumericField(
+            controller: line.quantityController,
+            enabled: !_submitting,
+            label: quantityLabel,
+            hint: quantityHint,
+            onChanged: (_) => setState(() {}),
+          )
+        : QaydAmountField(
+            controller: line.quantityController,
+            enabled: !_submitting,
+            label: quantityLabel,
+            hint: quantityHint,
+            fractionalDigits: line.product.quantityScale,
+            onChanged: (_) => setState(() {}),
+          );
+    final costField = widget.currency.fractionalDigits == 0
+        ? QaydNumericField(
+            controller: line.unitCostController,
+            enabled: !_submitting,
+            label: AppStrings.posPurchaseUnitCost,
+            suffixText: widget.currency.symbol,
+            onChanged: (_) => setState(() {}),
+          )
+        : QaydAmountField(
+            controller: line.unitCostController,
+            enabled: !_submitting,
+            label: AppStrings.posPurchaseUnitCost,
+            suffixText: widget.currency.symbol,
+            fractionalDigits: widget.currency.fractionalDigits,
+            onChanged: (_) => setState(() {}),
+          );
     return Card(
       key: ValueKey('purchase-line-${line.product.id}'),
       child: Padding(
@@ -471,34 +509,9 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
                 ),
               ],
             ),
-            TextField(
-              controller: line.quantityController,
-              enabled: !_submitting,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-              ],
-              decoration: InputDecoration(
-                labelText:
-                    '${AppStrings.posPurchaseQuantity} (${line.product.unitName})',
-                hintText: '0${line.product.quantityScale > 0 ? '.0' : ''}',
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
+            quantityField,
             const SizedBox(height: SpacingTokens.sm),
-            TextField(
-              controller: line.unitCostController,
-              enabled: !_submitting,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-              ],
-              decoration: InputDecoration(
-                labelText: AppStrings.posPurchaseUnitCost,
-                suffixText: widget.currency.symbol,
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
+            costField,
           ],
         ),
       ),

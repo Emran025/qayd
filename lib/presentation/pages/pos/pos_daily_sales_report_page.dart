@@ -5,6 +5,7 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_sales_report.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
@@ -25,7 +26,7 @@ class PosDailySalesReportPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final day = DateTime.now();
-    return Scaffold(
+    return QaydScaffold(
       appBar: QaydAppBar(title: AppStrings.posDailySalesReportTitle),
       body: FutureBuilder(
         future: reportUseCase(day: day, currency: currency),

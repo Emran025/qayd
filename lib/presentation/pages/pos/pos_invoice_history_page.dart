@@ -6,6 +6,7 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_details.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/pos/pos_invoice_history_cubit.dart';
@@ -55,7 +56,7 @@ class _HistoryViewState extends State<_HistoryView> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return QaydScaffold(
       appBar: QaydAppBar(title: AppStrings.posInvoiceHistoryTitle),
       body: BlocBuilder<PosInvoiceHistoryCubit, PosInvoiceHistoryState>(
         builder: (context, state) {
@@ -122,7 +123,7 @@ class PosInvoiceDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return QaydScaffold(
       appBar: QaydAppBar(title: AppStrings.posInvoiceDetailTitle),
       body: FutureBuilder(
         future: detailsUseCase(invoiceId),

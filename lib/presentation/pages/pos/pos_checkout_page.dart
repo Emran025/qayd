@@ -11,6 +11,10 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
+import 'package:qayd/presentation/components/inputs/qayd_numeric_field.dart';
+import 'package:qayd/presentation/components/inputs/qayd_text_field.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/pos/pos_background_barcode_scanner.dart';
@@ -166,7 +170,7 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return QaydScaffold(
       appBar: QaydAppBar(title: AppStrings.posCheckoutTitle),
       body: Stack(
         children: [
@@ -259,21 +263,19 @@ class _CheckoutContent extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(SpacingTokens.lg),
       children: [
-        TextField(
+        QaydTextField(
           controller: inputController,
           autofocus: true,
           textInputAction: TextInputAction.done,
-          decoration: InputDecoration(
-            labelText: AppStrings.posCheckoutInputHint,
-            prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
-            suffixIcon: IconButton(
-              tooltip: AppStrings.posCheckoutClearCart,
-              icon: const Icon(Icons.backspace_outlined),
-              onPressed: inputController.clear,
-            ),
+          label: AppStrings.posCheckoutInputHint,
+          prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
+          suffixIcon: IconButton(
+            tooltip: AppStrings.posCheckoutClearCart,
+            icon: const Icon(Icons.backspace_outlined),
+            onPressed: inputController.clear,
           ),
           onChanged: onChanged,
-          onSubmitted: onSubmitted,
+          onFieldSubmitted: onSubmitted,
         ),
         const SizedBox(height: SpacingTokens.sm),
         Row(
@@ -326,127 +328,195 @@ class _CheckoutContent extends StatelessWidget {
           ),
           const SizedBox(height: SpacingTokens.md),
         ],
-        Row(
-          children: [
-            Text(
-              AppStrings.posCheckoutTitle,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const Spacer(),
-            TextButton(
-              onPressed: state.lines.isEmpty ? null : onClearCart,
-              child: Text(AppStrings.posCheckoutClearCart),
-            ),
-          ],
+        _CheckoutCartSection(
+          state: state,
+          onAddProduct: onAddProduct,
+          onSetQuantity: onSetQuantity,
+          onRemoveProduct: onRemoveProduct,
+          onClearCart: onClearCart,
         ),
-        const SizedBox(height: SpacingTokens.sm),
-        if (state.lines.isEmpty)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(SpacingTokens.lg),
-              child: Text(
-                AppStrings.posCheckoutCartEmpty,
-                textAlign: TextAlign.center,
-              ),
-            ),
-          )
-        else
-          ...state.lines.map(
-            (line) => _CheckoutLineTile(
-              line: line,
-              onIncrement: () => onAddProduct(line.product),
-              onDecrement: () {
-                final step = PosMoneyMath.scaleFactor(line.quantity.scale);
-                final next = line.quantity.scaledUnits - step;
-                onSetQuantity(
-                  line.product.id,
-                  PosQuantity.fromScaled(
-                    next < 0 ? 0 : next,
-                    scale: line.quantity.scale,
-                  ),
-                );
-              },
-              onRemove: () => onRemoveProduct(line.product.id),
-            ),
-          ),
         const SizedBox(height: SpacingTokens.lg),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(SpacingTokens.md),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(AppStrings.posCheckoutSubtotal),
-                  trailing: Text(
-                    formatPosMinor(state.subtotalMinorUnits, currency),
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                TextFormField(
-                  controller: advanceController,
-                  keyboardType: TextInputType.number,
-                  decoration:
-                      InputDecoration(labelText: AppStrings.posCheckoutAdvance),
-                ),
-                const SizedBox(height: SpacingTokens.sm),
-                DropdownButtonFormField<PosPaymentMethod>(
-                  initialValue: paymentMethod,
-                  decoration: InputDecoration(
-                      labelText: AppStrings.posCheckoutPaymentMethod),
-                  items: [
-                    DropdownMenuItem(
-                        value: PosPaymentMethod.cash,
-                        child: Text(AppStrings.posCheckoutCash)),
-                    DropdownMenuItem(
-                        value: PosPaymentMethod.bank,
-                        child: Text(AppStrings.posCheckoutBank)),
-                    DropdownMenuItem(
-                        value: PosPaymentMethod.credit,
-                        child: Text(AppStrings.posCheckoutCredit)),
-                    DropdownMenuItem(
-                        value: PosPaymentMethod.other,
-                        child: Text(AppStrings.posCheckoutOther)),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) onPaymentMethodChanged(value);
-                  },
-                ),
-                const SizedBox(height: SpacingTokens.sm),
-                TextFormField(
-                  controller: paymentAccountController,
-                  readOnly: true,
-                  onTap: onPickPaymentAccount,
-                  decoration: InputDecoration(
-                    labelText: AppStrings.posCheckoutPaymentAccount,
-                    suffixIcon: const Icon(Icons.account_balance_outlined),
-                  ),
-                ),
-                const SizedBox(height: SpacingTokens.sm),
-                TextFormField(
-                  controller: customerController,
-                  readOnly: true,
-                  onTap: onPickCustomer,
-                  decoration: InputDecoration(
-                    labelText: AppStrings.posCheckoutCustomerAccount,
-                    suffixIcon: const Icon(Icons.person_outline_rounded),
-                  ),
-                ),
-                const SizedBox(height: SpacingTokens.md),
-                FilledButton.icon(
-                  onPressed:
-                      state.lines.isEmpty || state.isBusy ? null : onComplete,
-                  icon: const Icon(Icons.verified_outlined),
-                  label: Text(AppStrings.posCheckoutComplete),
-                ),
-              ],
-            ),
-          ),
+        _CheckoutPaymentPanel(
+          state: state,
+          currency: currency,
+          advanceController: advanceController,
+          paymentMethod: paymentMethod,
+          onPaymentMethodChanged: onPaymentMethodChanged,
+          customerController: customerController,
+          paymentAccountController: paymentAccountController,
+          onPickCustomer: onPickCustomer,
+          onPickPaymentAccount: onPickPaymentAccount,
+          onComplete: onComplete,
         ),
       ],
     );
   }
+}
+
+class _CheckoutCartSection extends StatelessWidget {
+  const _CheckoutCartSection({
+    required this.state,
+    required this.onAddProduct,
+    required this.onSetQuantity,
+    required this.onRemoveProduct,
+    required this.onClearCart,
+  });
+
+  final PosCheckoutState state;
+  final ValueChanged<PosProduct> onAddProduct;
+  final void Function(String, PosQuantity) onSetQuantity;
+  final ValueChanged<String> onRemoveProduct;
+  final VoidCallback onClearCart;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Text(
+                AppStrings.posCheckoutTitle,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: state.lines.isEmpty ? null : onClearCart,
+                child: Text(AppStrings.posCheckoutClearCart),
+              ),
+            ],
+          ),
+          const SizedBox(height: SpacingTokens.sm),
+          if (state.lines.isEmpty)
+            SizedBox(
+              height: 180,
+              child: QaydEmptyState(
+                icon: Icons.shopping_cart_outlined,
+                title: AppStrings.posCheckoutCartEmpty,
+              ),
+            )
+          else
+            ...state.lines.map(
+              (line) => _CheckoutLineTile(
+                line: line,
+                onIncrement: () => onAddProduct(line.product),
+                onDecrement: () {
+                  final step = PosMoneyMath.scaleFactor(line.quantity.scale);
+                  final next = line.quantity.scaledUnits - step;
+                  onSetQuantity(
+                    line.product.id,
+                    PosQuantity.fromScaled(
+                      next < 0 ? 0 : next,
+                      scale: line.quantity.scale,
+                    ),
+                  );
+                },
+                onRemove: () => onRemoveProduct(line.product.id),
+              ),
+            ),
+        ],
+      );
+}
+
+class _CheckoutPaymentPanel extends StatelessWidget {
+  const _CheckoutPaymentPanel({
+    required this.state,
+    required this.currency,
+    required this.advanceController,
+    required this.paymentMethod,
+    required this.onPaymentMethodChanged,
+    required this.customerController,
+    required this.paymentAccountController,
+    required this.onPickCustomer,
+    required this.onPickPaymentAccount,
+    required this.onComplete,
+  });
+
+  final PosCheckoutState state;
+  final CurrencyCode currency;
+  final TextEditingController advanceController;
+  final PosPaymentMethod paymentMethod;
+  final ValueChanged<PosPaymentMethod> onPaymentMethodChanged;
+  final TextEditingController customerController;
+  final TextEditingController paymentAccountController;
+  final VoidCallback onPickCustomer;
+  final VoidCallback onPickPaymentAccount;
+  final VoidCallback onComplete;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(SpacingTokens.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(AppStrings.posCheckoutSubtotal),
+                trailing: Text(
+                  formatPosMinor(state.subtotalMinorUnits, currency),
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              QaydNumericField(
+                controller: advanceController,
+                label: AppStrings.posCheckoutAdvance,
+              ),
+              const SizedBox(height: SpacingTokens.sm),
+              DropdownButtonFormField<PosPaymentMethod>(
+                initialValue: paymentMethod,
+                decoration: InputDecoration(
+                  labelText: AppStrings.posCheckoutPaymentMethod,
+                ),
+                items: [
+                  DropdownMenuItem(
+                    value: PosPaymentMethod.cash,
+                    child: Text(AppStrings.posCheckoutCash),
+                  ),
+                  DropdownMenuItem(
+                    value: PosPaymentMethod.bank,
+                    child: Text(AppStrings.posCheckoutBank),
+                  ),
+                  DropdownMenuItem(
+                    value: PosPaymentMethod.credit,
+                    child: Text(AppStrings.posCheckoutCredit),
+                  ),
+                  DropdownMenuItem(
+                    value: PosPaymentMethod.other,
+                    child: Text(AppStrings.posCheckoutOther),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) onPaymentMethodChanged(value);
+                },
+              ),
+              const SizedBox(height: SpacingTokens.sm),
+              QaydTextField(
+                controller: paymentAccountController,
+                readOnly: true,
+                onTap: onPickPaymentAccount,
+                label: AppStrings.posCheckoutPaymentAccount,
+                suffixIcon: const Icon(Icons.account_balance_outlined),
+              ),
+              const SizedBox(height: SpacingTokens.sm),
+              QaydTextField(
+                controller: customerController,
+                readOnly: true,
+                onTap: onPickCustomer,
+                label: AppStrings.posCheckoutCustomerAccount,
+                suffixIcon: const Icon(Icons.person_outline_rounded),
+              ),
+              const SizedBox(height: SpacingTokens.md),
+              FilledButton.icon(
+                onPressed: state.lines.isEmpty || state.isBusy
+                    ? null
+                    : onComplete,
+                icon: const Icon(Icons.verified_outlined),
+                label: Text(AppStrings.posCheckoutComplete),
+              ),
+            ],
+          ),
+        ),
+      );
 }
 
 class _CheckoutLineTile extends StatelessWidget {

@@ -15,13 +15,17 @@ import 'package:qayd/domain/value_objects/pos_barcode.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/presentation/pages/pos/pos_product_categories_page.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
+import 'package:qayd/presentation/components/atomic/qayd_floating_action_button.dart';
+import 'package:qayd/presentation/components/inputs/qayd_text_field.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/navigation/qayd_page_route.dart';
+import 'package:qayd/presentation/pages/pos/widgets/pos_product_form_fields.dart';
 import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/pos/pos_catalog_cubit.dart';
 import 'package:qayd/presentation/theme/qayd_theme_extensions.dart';
-import 'package:qayd/presentation/theme/radius_tokens.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 
 /// POS product catalog screen. The page is presentation-only: all writes and
 /// reads are delegated to [PosCatalogCubit].
@@ -172,7 +176,7 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
             ..showSnackBar(SnackBar(content: Text(state.failure!.messageAr)));
         }
       },
-      child: Scaffold(
+      child: QaydScaffold(
         appBar: QaydAppBar(
           title: AppStrings.posCatalogTitle,
           actions: [
@@ -180,14 +184,14 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
               tooltip: AppStrings.posCatalogManageCategories,
               icon: const Icon(Icons.category_outlined),
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
+                QaydPageRoute.slideFromStart<void>(
                   builder: (_) => const PosProductCategoriesPage(),
                 ),
               ),
             ),
           ],
         ),
-        floatingActionButton: FloatingActionButton.extended(
+        floatingActionButton: QaydFloatingActionButton.extended(
           heroTag: 'fab_pos_catalog_add',
           onPressed: _openCreate,
           icon: const Icon(Icons.add_rounded),
@@ -202,29 +206,23 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
                 SpacingTokens.md,
                 SpacingTokens.xs,
               ),
-              child: TextField(
+              child: QaydTextField(
                 controller: _searchController,
                 onChanged: _onSearchChanged,
                 textInputAction: TextInputAction.search,
-                decoration: InputDecoration(
-                  hintText: AppStrings.posCatalogSearchHint,
-                  prefixIcon: const Icon(Icons.search_rounded),
-                  suffixIcon: _searchController.text.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: AppStrings.actionCancel,
-                          onPressed: () {
-                            _searchController.clear();
-                            _onSearchChanged('');
-                            setState(() {});
-                          },
-                          icon: const Icon(Icons.clear_rounded),
-                        ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(RadiusTokens.md),
-                  ),
-                  isDense: true,
-                ),
+                hint: AppStrings.posCatalogSearchHint,
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: AppStrings.actionCancel,
+                        onPressed: () {
+                          _searchController.clear();
+                          _onSearchChanged('');
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.clear_rounded),
+                      ),
               ),
             ),
             BlocBuilder<PosCatalogCubit, PosCatalogState>(
@@ -246,18 +244,34 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
                     return const Center(child: CircularProgressIndicator());
                   }
                   if (state.status == PosCatalogStatus.failure) {
-                    return _FailureState(
-                      message: state.failure?.messageAr ??
+                    return QaydEmptyState(
+                      icon: Icons.error_outline_rounded,
+                      title: state.failure?.messageAr ??
                           AppStrings.posProductReadFailed,
-                      onRetry: () => context
-                          .read<PosCatalogCubit>()
-                          .load(search: state.search),
+                      action: FilledButton.tonal(
+                        onPressed: () => context
+                            .read<PosCatalogCubit>()
+                            .load(search: state.search),
+                        child: Text(AppStrings.retryAction),
+                      ),
                     );
                   }
                   if (state.products.isEmpty) {
-                    return _EmptyState(
-                      hasSearch: state.search?.isNotEmpty == true,
-                      onAdd: _openCreate,
+                    final hasSearch = state.search?.isNotEmpty == true;
+                    return QaydEmptyState(
+                      icon: hasSearch
+                          ? Icons.search_off_rounded
+                          : Icons.inventory_2_outlined,
+                      title: hasSearch
+                          ? AppStrings.posCatalogNoResults
+                          : AppStrings.posCatalogEmpty,
+                      action: hasSearch
+                          ? null
+                          : FilledButton.icon(
+                              onPressed: _openCreate,
+                              icon: const Icon(Icons.add_rounded),
+                              label: Text(AppStrings.posCatalogAddProduct),
+                            ),
                     );
                   }
                   return RefreshIndicator(
@@ -377,72 +391,6 @@ class _ProductCard extends StatelessWidget {
   }
 }
 
-class _FailureState extends StatelessWidget {
-  const _FailureState({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(SpacingTokens.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline_rounded, size: 48),
-            const SizedBox(height: SpacingTokens.md),
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: SpacingTokens.md),
-            FilledButton.tonal(
-              onPressed: onRetry,
-              child: Text(AppStrings.retryAction),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.hasSearch, required this.onAdd});
-
-  final bool hasSearch;
-  final VoidCallback onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(SpacingTokens.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.inventory_2_outlined, size: 64),
-            const SizedBox(height: SpacingTokens.md),
-            Text(
-              hasSearch
-                  ? AppStrings.posCatalogNoResults
-                  : AppStrings.posCatalogEmpty,
-              textAlign: TextAlign.center,
-            ),
-            if (!hasSearch) ...[
-              const SizedBox(height: SpacingTokens.md),
-              FilledButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.add_rounded),
-                label: Text(AppStrings.posCatalogAddProduct),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _CreateProductSheet extends StatefulWidget {
   const _CreateProductSheet({
     required this.currency,
@@ -485,24 +433,6 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
     _barcode.dispose();
     _description.dispose();
     super.dispose();
-  }
-
-  String? _required(String? value, String message) {
-    return value == null || value.trim().isEmpty ? message : null;
-  }
-
-  String? _nonNegativeInteger(String? value, String message) {
-    final raw = value?.trim() ?? '';
-    if (raw.isEmpty) return message;
-    final parsed = int.tryParse(raw);
-    return parsed == null || parsed < 0 ? message : null;
-  }
-
-  String? _scaleValidator(String? value) {
-    final parsed = int.tryParse(value?.trim() ?? '');
-    return parsed == null || parsed < 0 || parsed > 6
-        ? AppStrings.posProductScaleInvalid
-        : null;
   }
 
   Future<void> _addCategory() async {
@@ -584,105 +514,27 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: SpacingTokens.md),
-              _field(
-                controller: _name,
-                label: AppStrings.posCatalogName,
-                validator: (value) =>
-                    _required(value, AppStrings.posProductNameRequired),
-              ),
-              _field(
-                controller: _sku,
-                label: AppStrings.posCatalogSku,
-                validator: (value) =>
-                    _required(value, AppStrings.posProductSkuRequired),
-              ),
-              _field(
-                controller: _salePrice,
-                label: AppStrings.posCatalogSalePriceMinor,
-                keyboardType: TextInputType.number,
-                validator: (value) => _nonNegativeInteger(
-                    value, AppStrings.posProductPriceInvalid),
-              ),
-              _field(
-                controller: _purchasePrice,
-                label: AppStrings.posCatalogPurchasePriceMinor,
-                keyboardType: TextInputType.number,
-                validator: (value) => _nonNegativeInteger(
-                    value, AppStrings.posProductPriceInvalid),
-              ),
-              _field(
-                controller: _unitName,
-                label: AppStrings.posCatalogUnit,
-                validator: (value) =>
-                    _required(value, AppStrings.posProductUnitRequired),
-              ),
-              DropdownButtonFormField<String>(
-                initialValue: _categoryId ?? '',
-                decoration: InputDecoration(
-                  labelText: AppStrings.posCatalogCategory,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(RadiusTokens.md),
-                  ),
-                  isDense: true,
-                ),
-                items: [
-                  DropdownMenuItem<String>(
-                    value: '',
-                    child: Text(AppStrings.posCatalogNoCategory),
-                  ),
-                  ..._categories.map(
-                    (category) => DropdownMenuItem<String>(
-                      value: category.id,
-                      child: Text('${category.name} (${category.code})'),
-                    ),
-                  ),
-                ],
-                onChanged: (value) => setState(
-                  () => _categoryId =
-                      value == null || value.isEmpty ? null : value,
-                ),
-              ),
-              if (widget.createCategoryUseCase != null)
-                Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: TextButton.icon(
-                    onPressed: _addCategory,
-                    icon: const Icon(Icons.add_rounded),
-                    label: Text(AppStrings.posCatalogAddCategory),
-                  ),
-                ),
-              const SizedBox(height: SpacingTokens.sm),
-              _field(
-                controller: _quantityScale,
-                label: AppStrings.posCatalogQuantityScale,
-                keyboardType: TextInputType.number,
-                validator: _scaleValidator,
-              ),
-              _field(
-                controller: _reorderLevel,
-                label: AppStrings.posCatalogReorderLevel,
-                keyboardType: TextInputType.number,
-                validator: (value) => _nonNegativeInteger(
-                  value,
-                  AppStrings.posProductThresholdInvalid,
-                ),
-              ),
-              _field(
-                controller: _barcode,
-                label: AppStrings.posCatalogBarcodesHint,
-                keyboardType: TextInputType.text,
-                maxLines: 3,
-              ),
-              _field(
-                controller: _description,
-                label: AppStrings.posCatalogDescription,
-                maxLines: 2,
-              ),
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                value: _expiryTracking,
-                onChanged: (value) => setState(() => _expiryTracking = value),
-                title: Text(AppStrings.posCatalogExpiryTracking),
+              PosProductFormFields(
+                nameController: _name,
+                skuController: _sku,
+                salePriceController: _salePrice,
+                purchasePriceController: _purchasePrice,
+                unitNameController: _unitName,
+                reorderLevelController: _reorderLevel,
+                barcodeController: _barcode,
+                descriptionController: _description,
+                categories: _categories,
+                categoryId: _categoryId,
+                onCategoryChanged: (value) =>
+                    setState(() => _categoryId = value),
+                quantityScaleController: _quantityScale,
+                quantityScaleValue: _quantityScale.text,
+                expiryTracking: _expiryTracking,
+                onExpiryTrackingChanged: (value) =>
+                    setState(() => _expiryTracking = value),
+                onAddCategory: widget.createCategoryUseCase == null
+                    ? null
+                    : _addCategory,
               ),
               const SizedBox(height: SpacingTokens.sm),
               Row(
@@ -709,30 +561,6 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
     );
   }
 
-  Widget _field({
-    required TextEditingController controller,
-    required String label,
-    String? Function(String?)? validator,
-    TextInputType? keyboardType,
-    int maxLines = 1,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: SpacingTokens.sm),
-      child: TextFormField(
-        controller: controller,
-        validator: validator,
-        keyboardType: keyboardType,
-        maxLines: maxLines,
-        decoration: InputDecoration(
-          labelText: label,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(RadiusTokens.md),
-          ),
-          isDense: true,
-        ),
-      ),
-    );
-  }
 }
 
 class _CreateProductCategoryDialog extends StatefulWidget {
@@ -767,25 +595,21 @@ class _CreateProductCategoryDialogState
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextFormField(
+              QaydTextField(
                 controller: _nameController,
                 autofocus: true,
                 textInputAction: TextInputAction.next,
-                decoration: InputDecoration(
-                  labelText: AppStrings.posCatalogCategoryName,
-                ),
+                label: AppStrings.posCatalogCategoryName,
                 validator: (value) => _required(
                   value,
                   AppStrings.posCatalogCategoryNameRequired,
                 ),
               ),
               const SizedBox(height: SpacingTokens.sm),
-              TextFormField(
+              QaydTextField(
                 controller: _codeController,
                 textCapitalization: TextCapitalization.characters,
-                decoration: InputDecoration(
-                  labelText: AppStrings.posCatalogCategoryCode,
-                ),
+                label: AppStrings.posCatalogCategoryCode,
                 validator: (value) => _required(
                   value,
                   AppStrings.posCatalogCategoryCodeRequired,
@@ -858,11 +682,6 @@ class _EditProductSheetState extends State<_EditProductSheet> {
     }
     super.dispose();
   }
-  String? _required(String? value, String message) => value == null || value.trim().isEmpty ? message : null;
-  String? _nonNegative(String? value, String message) {
-    final parsed = int.tryParse(value?.trim() ?? '');
-    return parsed == null || parsed < 0 ? message : null;
-  }
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     try {
@@ -885,33 +704,47 @@ class _EditProductSheetState extends State<_EditProductSheet> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     return Padding(
-      padding: EdgeInsets.fromLTRB(SpacingTokens.md, SpacingTokens.md, SpacingTokens.md, bottomInset + SpacingTokens.md),
-      child: SingleChildScrollView(child: Form(key: _formKey, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(AppStrings.posCatalogEditTitle, style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: SpacingTokens.md),
-        _field(_name, AppStrings.posCatalogName, (v) => _required(v, AppStrings.posProductNameRequired)),
-        _field(_sku, AppStrings.posCatalogSku, (v) => _required(v, AppStrings.posProductSkuRequired)),
-        _field(_sale, AppStrings.posCatalogSalePriceMinor, (v) => _nonNegative(v, AppStrings.posProductPriceInvalid), keyboardType: TextInputType.number),
-        _field(_purchase, AppStrings.posCatalogPurchasePriceMinor, (v) => _nonNegative(v, AppStrings.posProductPriceInvalid), keyboardType: TextInputType.number),
-        _field(_unit, AppStrings.posCatalogUnit, (v) => _required(v, AppStrings.posProductUnitRequired)),
-        DropdownButtonFormField<String?>(
-          initialValue: _categoryId,
-          decoration: InputDecoration(labelText: AppStrings.posCatalogCategory),
-          items: [DropdownMenuItem<String?>(value: null, child: Text(AppStrings.posCatalogNoCategory)), ...widget.categories.map((c) => DropdownMenuItem<String?>(value: c.id, child: Text('${c.name} (${c.code})')))],
-          onChanged: (value) => setState(() => _categoryId = value),
+      padding: EdgeInsets.fromLTRB(
+        SpacingTokens.md,
+        SpacingTokens.md,
+        SpacingTokens.md,
+        bottomInset + SpacingTokens.md,
+      ),
+      child: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                AppStrings.posCatalogEditTitle,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: SpacingTokens.md),
+              PosProductFormFields(
+                nameController: _name,
+                skuController: _sku,
+                salePriceController: _sale,
+                purchasePriceController: _purchase,
+                unitNameController: _unit,
+                reorderLevelController: _reorder,
+                barcodeController: _barcodes,
+                descriptionController: _description,
+                categories: widget.categories,
+                categoryId: _categoryId,
+                onCategoryChanged: (value) =>
+                    setState(() => _categoryId = value),
+                quantityScaleValue: '${widget.product.quantityScale}',
+                quantityScaleReadOnly: true,
+                expiryTracking: _expiryTracking,
+                onExpiryTrackingChanged: (value) =>
+                    setState(() => _expiryTracking = value),
+              ),
+              FilledButton(onPressed: _submit, child: Text(AppStrings.save)),
+            ],
+          ),
         ),
-        const SizedBox(height: SpacingTokens.sm),
-        TextFormField(initialValue: '${widget.product.quantityScale}', readOnly: true, decoration: InputDecoration(labelText: AppStrings.posCatalogQuantityScale, helperText: AppStrings.posCatalogQuantityScaleReadOnly)),
-        _field(_reorder, AppStrings.posCatalogReorderLevel, (v) => _nonNegative(v, AppStrings.posProductThresholdInvalid), keyboardType: TextInputType.number),
-        _field(_barcodes, AppStrings.posCatalogBarcodesHint, null, maxLines: 4),
-        _field(_description, AppStrings.posCatalogDescription, null, maxLines: 3),
-        SwitchListTile.adaptive(contentPadding: EdgeInsets.zero, value: _expiryTracking, onChanged: (v) => setState(() => _expiryTracking = v), title: Text(AppStrings.posCatalogExpiryTracking)),
-        FilledButton(onPressed: _submit, child: Text(AppStrings.save)),
-      ]))),
+      ),
     );
   }
-  Widget _field(TextEditingController controller, String label, String? Function(String?)? validator, {TextInputType? keyboardType, int maxLines = 1}) => Padding(
-    padding: const EdgeInsets.only(bottom: SpacingTokens.sm),
-    child: TextFormField(controller: controller, validator: validator, keyboardType: keyboardType, maxLines: maxLines, decoration: InputDecoration(labelText: label)),
-  );
 }

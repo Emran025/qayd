@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qayd/core/result/result.dart';
 import 'package:qayd/application/pos/build_pos_stock_adjustment_posting_use_case.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';

@@ -14,14 +14,17 @@ class QaydTextField extends StatelessWidget {
     this.errorText,
     this.validator,
     this.onChanged,
+    this.onTap,
     this.onFieldSubmitted,
     this.textInputAction,
+    this.textCapitalization = TextCapitalization.none,
     this.keyboardType,
     this.autofocus = false,
     this.readOnly = false,
     this.enabled = true,
     this.maxLines = 1,
     this.minLines,
+    this.maxLength,
     this.focusNode,
     this.prefixIcon,
     this.suffixIcon,
@@ -39,14 +42,17 @@ class QaydTextField extends StatelessWidget {
   final String? errorText;
   final FormFieldValidator<String>? validator;
   final ValueChanged<String>? onChanged;
+  final VoidCallback? onTap;
   final ValueChanged<String>? onFieldSubmitted;
   final TextInputAction? textInputAction;
+  final TextCapitalization textCapitalization;
   final TextInputType? keyboardType;
   final bool autofocus;
   final bool readOnly;
   final bool enabled;
   final int maxLines;
   final int? minLines;
+  final int? maxLength;
   final FocusNode? focusNode;
   final Widget? prefixIcon;
   final Widget? suffixIcon;
@@ -67,11 +73,14 @@ class QaydTextField extends StatelessWidget {
       enabled: enabled,
       maxLines: maxLines,
       minLines: minLines,
+      maxLength: maxLength,
       keyboardType: keyboardType,
       textInputAction: textInputAction,
+      textCapitalization: textCapitalization,
       textAlign: TextAlign.start,
       validator: validator,
       onChanged: onChanged,
+      onTap: onTap,
       onFieldSubmitted: onFieldSubmitted,
       inputFormatters: [
         FilteringTextInputFormatter.deny(TextSanitizer.emojiRegex,

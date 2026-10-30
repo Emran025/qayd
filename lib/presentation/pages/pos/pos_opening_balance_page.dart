@@ -5,6 +5,9 @@ import 'package:qayd/application/pos/post_pos_opening_balance_atomically_use_cas
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
+import 'package:qayd/presentation/components/inputs/qayd_numeric_field.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/pos/pos_catalog_cubit.dart';
@@ -139,7 +142,7 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
         BlocProvider.value(value: widget.catalogCubit),
         BlocProvider.value(value: widget.stockCubit),
       ],
-      child: Scaffold(
+      child: QaydScaffold(
         appBar: QaydAppBar(title: AppStrings.posOpeningBalanceTitle),
         body: ListView(
           padding: const EdgeInsets.all(SpacingTokens.lg),
@@ -179,16 +182,24 @@ class _ProductField extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
         if (state.status == PosCatalogStatus.failure) {
-          return Text(
-              state.failure?.messageAr ?? AppStrings.posProductReadFailed);
+          return QaydEmptyState(
+            icon: Icons.error_outline_rounded,
+            title: state.failure?.messageAr ?? AppStrings.posProductReadFailed,
+            action: FilledButton.tonal(
+              onPressed: () => context.read<PosCatalogCubit>().load(),
+              child: Text(AppStrings.retryAction),
+            ),
+          );
         }
         if (state.products.isEmpty) {
-          return Text(AppStrings.posOpeningBalanceNoProducts);
+          return QaydEmptyState(
+            icon: Icons.inventory_2_outlined,
+            title: AppStrings.posOpeningBalanceNoProducts,
+          );
         }
         return DropdownButtonFormField<PosProduct>(
           decoration: InputDecoration(
             labelText: AppStrings.posOpeningBalanceProduct,
-            border: const OutlineInputBorder(),
           ),
           items: state.products
               .map(
@@ -249,25 +260,17 @@ class _OpeningBalanceForm extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextFormField(
+          QaydNumericField(
             controller: quantityController,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: AppStrings.posOpeningBalanceQuantity,
-              helperText: AppStrings.posOpeningBalanceQuantityHint(scale),
-              border: const OutlineInputBorder(),
-            ),
+            label: AppStrings.posOpeningBalanceQuantity,
+            helperText: AppStrings.posOpeningBalanceQuantityHint(scale),
             validator: _positiveInteger,
           ),
           const SizedBox(height: SpacingTokens.md),
-          TextFormField(
+          QaydNumericField(
             controller: costController,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: AppStrings.posOpeningBalanceUnitCost,
-              helperText: AppStrings.posOpeningBalanceCostHint(currency),
-              border: const OutlineInputBorder(),
-            ),
+            label: AppStrings.posOpeningBalanceUnitCost,
+            helperText: AppStrings.posOpeningBalanceCostHint(currency),
             validator: _nonNegativeInteger,
           ),
           const SizedBox(height: SpacingTokens.md),

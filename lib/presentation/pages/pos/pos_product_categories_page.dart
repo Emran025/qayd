@@ -6,6 +6,10 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/domain/entities/pos_product_category.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
+import 'package:qayd/presentation/components/atomic/qayd_floating_action_button.dart';
+import 'package:qayd/presentation/components/inputs/qayd_text_field.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
 
@@ -163,9 +167,9 @@ class _PosProductCategoriesPageState extends State<PosProductCategoriesPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return QaydScaffold(
       appBar: QaydAppBar(title: AppStrings.posCatalogEditCategoryTitle),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: QaydFloatingActionButton.extended(
         onPressed: _createCategory,
         icon: const Icon(Icons.add_rounded),
         label: Text(AppStrings.posCatalogAddCategory),
@@ -191,8 +195,9 @@ class _PosProductCategoriesPageState extends State<PosProductCategoriesPage> {
                             children: [
                               SizedBox(
                                 height: 240,
-                                child: Center(
-                                  child: Text(AppStrings.posCatalogNoCategories),
+                                child: QaydEmptyState(
+                                  icon: Icons.category_outlined,
+                                  title: AppStrings.posCatalogNoCategories,
                                 ),
                               ),
                             ],
@@ -203,32 +208,53 @@ class _PosProductCategoriesPageState extends State<PosProductCategoriesPage> {
                               bottom: SpacingTokens.xxl,
                             ),
                             itemCount: _categories.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: SpacingTokens.xs),
                             itemBuilder: (context, index) {
                               final category = _categories[index];
-                              return ListTile(
-                                title: Text(category.name),
-                                subtitle: Text(category.code),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: AppStrings.posCatalogEditCategory,
-                                      icon: const Icon(Icons.edit_outlined),
-                                      onPressed: () => _editCategory(category),
-                                    ),
-                                    IconButton(
-                                      tooltip: category.isActive
-                                          ? AppStrings.posCatalogCategoryDeactivate
-                                          : AppStrings.posCatalogCategoryReactivate,
-                                      icon: Icon(
-                                        category.isActive
-                                            ? Icons.archive_outlined
-                                            : Icons.unarchive_outlined,
+                              final statusColor = category.isActive
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.outline;
+                              return Card(
+                                child: ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor:
+                                        statusColor.withValues(alpha: 0.12),
+                                    foregroundColor: statusColor,
+                                    child: const Icon(Icons.category_outlined),
+                                  ),
+                                  title: Text(
+                                    category.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  subtitle: Text(
+                                    '${category.code} · '
+                                    '${category.isActive ? AppStrings.statusActive : AppStrings.statusInactive}',
+                                  ),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip:
+                                            AppStrings.posCatalogEditCategory,
+                                        icon: const Icon(Icons.edit_outlined),
+                                        onPressed: () => _editCategory(category),
                                       ),
-                                      onPressed: () => _toggleCategory(category),
-                                    ),
-                                  ],
+                                      IconButton(
+                                        tooltip: category.isActive
+                                            ? AppStrings.posCatalogCategoryDeactivate
+                                            : AppStrings.posCatalogCategoryReactivate,
+                                        icon: Icon(
+                                          category.isActive
+                                              ? Icons.archive_outlined
+                                              : Icons.unarchive_outlined,
+                                        ),
+                                        onPressed: () =>
+                                            _toggleCategory(category),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               );
                             },
@@ -280,25 +306,21 @@ class _CategoryDialogState extends State<_CategoryDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextFormField(
+            QaydTextField(
               controller: _name,
               autofocus: widget.category == null,
               textInputAction: TextInputAction.next,
-              decoration: InputDecoration(
-                labelText: AppStrings.posCatalogCategoryName,
-              ),
+              label: AppStrings.posCatalogCategoryName,
               validator: (value) => _required(
                 value,
                 AppStrings.posCatalogCategoryNameRequired,
               ),
             ),
             const SizedBox(height: SpacingTokens.sm),
-            TextFormField(
+            QaydTextField(
               controller: _code,
               textCapitalization: TextCapitalization.characters,
-              decoration: InputDecoration(
-                labelText: AppStrings.posCatalogCategoryCode,
-              ),
+              label: AppStrings.posCatalogCategoryCode,
               validator: (value) => _required(
                 value,
                 AppStrings.posCatalogCategoryCodeRequired,
