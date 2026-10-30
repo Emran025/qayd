@@ -26,6 +26,9 @@ final class InvalidPosProductException implements Exception {
   factory InvalidPosProductException.quantityScaleInvalid() =>
       InvalidPosProductException._(AppStrings.posProductScaleInvalid);
 
+  factory InvalidPosProductException.quantityScaleImmutable() =>
+      InvalidPosProductException._(AppStrings.posProductScaleImmutable);
+
   factory InvalidPosProductException.thresholdScaleMismatch() =>
       InvalidPosProductException._(AppStrings.posProductThresholdInvalid);
 

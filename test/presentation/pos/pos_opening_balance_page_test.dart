@@ -6,6 +6,7 @@ import 'package:qayd/application/pos/create_pos_product_use_case.dart';
 import 'package:qayd/application/pos/deactivate_pos_product_use_case.dart';
 import 'package:qayd/application/pos/get_pos_stock_balance_use_case.dart';
 import 'package:qayd/application/pos/list_pos_products_use_case.dart';
+import 'package:qayd/application/pos/post_pos_opening_balance_atomically_use_case.dart';
 import 'package:qayd/application/pos/record_pos_stock_movement_use_case.dart';
 import 'package:qayd/application/pos/save_pos_product_use_case.dart';
 import 'package:qayd/core/result/result.dart';
@@ -186,6 +187,7 @@ PosStockCubit _stockCubit(PosProduct product, CurrencyCode currency) {
 Widget _host({
   required PosCatalogCubit catalogCubit,
   required PosStockCubit stockCubit,
+  required PostPosOpeningBalance postOpeningBalance,
 }) {
   return MaterialApp(
     theme: AppTheme.light(),
@@ -193,6 +195,7 @@ Widget _host({
       catalogCubit: catalogCubit,
       stockCubit: stockCubit,
       warehouseId: 'warehouse-1',
+      postOpeningBalance: postOpeningBalance,
     ),
   );
 }
@@ -208,7 +211,11 @@ void main() {
     addTearDown(stockCubit.close);
 
     await tester.pumpWidget(
-      _host(catalogCubit: catalogCubit, stockCubit: stockCubit),
+      _host(
+        catalogCubit: catalogCubit,
+        stockCubit: stockCubit,
+        postOpeningBalance: (_) async => const Success(null),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -221,11 +228,19 @@ void main() {
     final product = _product(currency);
     final catalogCubit = _catalogCubit([product], currency);
     final stockCubit = _stockCubit(product, currency);
+    PostPosOpeningBalanceInput? postedInput;
     addTearDown(catalogCubit.close);
     addTearDown(stockCubit.close);
 
     await tester.pumpWidget(
-      _host(catalogCubit: catalogCubit, stockCubit: stockCubit),
+      _host(
+        catalogCubit: catalogCubit,
+        stockCubit: stockCubit,
+        postOpeningBalance: (input) async {
+          postedInput = input;
+          return const Success(null);
+        },
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -245,6 +260,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(AppStrings.posOpeningBalanceSaved), findsOneWidget);
-    expect(stockCubit.state.balance?.quantity.scaledUnits, 5);
+    expect(postedInput?.productId, product.id);
+    expect(postedInput?.quantityScaled, 5);
+    expect(postedInput?.quantityScale, product.quantityScale);
+    expect(postedInput?.unitCostMinor, 100);
+    expect(postedInput?.currencyCode, 'SAR');
+    expect(postedInput?.idempotencyKey, isNotEmpty);
+    expect(postedInput?.sourceId, contains(postedInput!.idempotencyKey));
+    expect(stockCubit.state.balance?.quantity.scaledUnits, 0);
   });
 }

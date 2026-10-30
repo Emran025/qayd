@@ -2804,6 +2804,8 @@ abstract class AppStringsBase {
   String get posProductCurrencyMismatch => 'عملة سعر المنتج غير متطابقة.';
   String get posProductCurrencyNotFound => 'عملة المنتج غير موجودة.';
   String get posProductScaleInvalid => 'مقياس كمية المنتج غير صالح.';
+  String get posProductScaleImmutable =>
+      'لا يمكن تغيير مقياس الكمية بعد إنشاء المنتج.';
   String get posProductThresholdInvalid => 'حد إعادة الطلب غير صالح.';
   String get posProductNotFound => 'المنتج غير موجود.';
   String get posProductReadFailed => 'تعذر قراءة منتجات نقطة البيع.';
@@ -2936,6 +2938,7 @@ abstract class AppStringsBase {
   String get posCatalogNoCategory => 'بدون تصنيف';
   String get posCatalogAddCategory => 'إضافة تصنيف';
   String get posCatalogCreateCategory => 'إنشاء تصنيف جديد';
+  String get posCatalogEditCategory => 'تعديل التصنيف';
   String get posCatalogCategoryName => 'اسم التصنيف';
   String get posCatalogCategoryCode => 'رمز التصنيف';
   String get posCatalogCategoryNameRequired => 'يرجى إدخال اسم التصنيف.';
@@ -2951,4 +2954,18 @@ abstract class AppStringsBase {
   String get posCatalogDeactivateMessage =>
       'سيختفي المنتج من العمليات الجديدة مع الاحتفاظ بتاريخه.';
   String get posCatalogDeactivate => 'تعطيل المنتج';
+  String get posCatalogReactivate => 'إعادة تفعيل المنتج';
+  String get posCatalogBarcodesHint => 'باركودات متعددة (سطر لكل باركود)';
+  String get posCatalogShowInactive => 'إظهار المنتجات المعطلة';
+  String get posCatalogNoCategories => 'لا توجد تصنيفات بعد.';
+  String get posCatalogEditTitle => 'تعديل المنتج';
+  String get posCatalogEditCategoryTitle => 'إدارة تصنيفات المنتجات';
+  String get posCatalogDeactivateCategoryMessage =>
+      'سيتم إخفاء التصنيف من الاختيارات الجديدة مع الاحتفاظ بالمنتجات المرتبطة به.';
+  String get posCatalogCategoryDeactivateTitle => 'تعطيل التصنيف؟';
+  String get posCatalogCategoryDeactivate => 'تعطيل التصنيف';
+  String get posCatalogCategoryReactivate => 'إعادة تفعيل التصنيف';
+  String get posCatalogQuantityScaleReadOnly =>
+      'مقياس الكمية ثابت بعد إنشاء المنتج';
+  String get posCatalogEditValidationFailed => 'يرجى تصحيح البيانات قبل الحفظ.';
 }

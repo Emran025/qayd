@@ -2753,6 +2753,7 @@ class AppStrings {
   static String get posCatalogNoCategory => i.posCatalogNoCategory;
   static String get posCatalogAddCategory => i.posCatalogAddCategory;
   static String get posCatalogCreateCategory => i.posCatalogCreateCategory;
+  static String get posCatalogEditCategory => i.posCatalogEditCategory;
   static String get posCatalogCategoryName => i.posCatalogCategoryName;
   static String get posCatalogCategoryCode => i.posCatalogCategoryCode;
   static String get posCatalogCategoryNameRequired =>
@@ -2769,4 +2770,17 @@ class AppStrings {
   static String get posCatalogDeactivateMessage =>
       i.posCatalogDeactivateMessage;
   static String get posCatalogDeactivate => i.posCatalogDeactivate;
+  static String get posCatalogReactivate => i.posCatalogReactivate;
+  static String get posCatalogBarcodesHint => i.posCatalogBarcodesHint;
+  static String get posProductScaleImmutable => i.posProductScaleImmutable;
+  static String get posCatalogShowInactive => i.posCatalogShowInactive;
+  static String get posCatalogNoCategories => i.posCatalogNoCategories;
+  static String get posCatalogEditTitle => i.posCatalogEditTitle;
+  static String get posCatalogEditCategoryTitle => i.posCatalogEditCategoryTitle;
+  static String get posCatalogDeactivateCategoryMessage => i.posCatalogDeactivateCategoryMessage;
+  static String get posCatalogCategoryDeactivateTitle => i.posCatalogCategoryDeactivateTitle;
+  static String get posCatalogCategoryDeactivate => i.posCatalogCategoryDeactivate;
+  static String get posCatalogCategoryReactivate => i.posCatalogCategoryReactivate;
+  static String get posCatalogQuantityScaleReadOnly => i.posCatalogQuantityScaleReadOnly;
+  static String get posCatalogEditValidationFailed => i.posCatalogEditValidationFailed;
 }

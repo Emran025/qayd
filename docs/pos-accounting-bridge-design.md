@@ -46,7 +46,7 @@ The coordinator applies the following fail-closed rules inside the same transact
 
 Posting date matching uses the **UTC calendar date** rather than exact timestamps. This permits harmless differences in time-of-day while still preventing a movement and its bridge voucher from crossing fiscal business dates. Audit `created_at` timestamps are excluded from the replay fingerprint; all business identifiers, amounts, accounts, sides, currencies, dates, and payload fields remain part of the comparison.
 
-The typed template-installation read port is read-only and returns the enabled warehouse plus account IDs keyed by stable `PosTemplateAccountKey.value` metadata. It never provisions accounts. The opening-balance UI deliberately remains on the previous stock-only path until the governed orchestration is connected in a separately reviewed UI slice.
+The typed template-installation read port is read-only and returns the enabled warehouse plus account IDs keyed by stable `PosTemplateAccountKey.value` metadata. It never provisions accounts. The opening-balance UI now invokes the governed orchestration and carries a stable idempotency key across retries of the same form values; stock is refreshed only after the atomic posting succeeds.
 
 ## Implementation order
 
@@ -54,4 +54,9 @@ The typed template-installation read port is read-only and returns the enabled w
 2. **Completed for opening balance:** Define typed account-map access and posting payload/coordinator ports in Domain/Application.
 3. **Completed for opening balance:** Build the governed bridge using the official voucher and `EntryGenerator` path.
 4. **Completed for opening balance:** Commit stock plus voucher-ledger effects through one coordinator transaction, with replay, conflict, partial-state, and rollback tests.
-5. **Next:** Connect the opening-balance UI to the governed use case in a separately reviewed slice, then implement purchase inbound posting before sales/COGS checkout.
+5. **Completed:** Connect the opening-balance UI to the governed use case; widget coverage verifies that product, quantity, cost, currency, source ID, and idempotency key are sent to the atomic coordinator.
+6. **Next:** Implement purchase inbound posting before sales/COGS checkout, then build the linked correction, return, collection, and inventory-adjustment workflows with matching atomic accounting coordinators.
+
+## Cross-device sync boundary
+
+The Laravel sync API is a blind relay for opaque encrypted payloads; it does not need POS-specific plaintext endpoints or tables. However, the Flutter client currently emits and applies only its registered sync event types. POS products, stock movements, and invoices are not yet emitted through the outbox or applied by the inbound processor; an unrecognized event is treated as `unknown` and returned as processed. POS data therefore remains local to the device today. Before enabling cross-device POS sync, define versioned encrypted event envelopes plus replay/idempotency, conflict, ordering, and acknowledgement behavior, then add client-side dispatch/processor coverage. Do not send financial records in plaintext to the API.

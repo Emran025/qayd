@@ -179,6 +179,60 @@ final class PosProduct {
     );
   }
 
+  PosProduct updateDetails({
+    String? sku,
+    String? name,
+    String? categoryId,
+    String? description,
+    bool clearCategory = false,
+    bool clearDescription = false,
+    String? unitName,
+    Money? salePrice,
+    Money? purchasePrice,
+    int? quantityScale,
+    PosQuantity? reorderLevel,
+    bool? expiryTracking,
+    List<PosBarcode>? barcodes,
+  }) {
+    if (quantityScale != null && quantityScale != this.quantityScale) {
+      throw InvalidPosProductException.quantityScaleImmutable();
+    }
+    final draft = PosProduct.create(
+      id: id,
+      sku: sku ?? this.sku,
+      name: name ?? this.name,
+      categoryId: clearCategory ? null : categoryId ?? this.categoryId,
+      description: clearDescription ? null : description ?? this.description,
+      unitName: unitName ?? this.unitName,
+      currency: currency,
+      salePrice: salePrice ?? this.salePrice,
+      purchasePrice: purchasePrice ?? this.purchasePrice,
+      quantityScale: quantityScale ?? this.quantityScale,
+      reorderLevel: reorderLevel ?? this.reorderLevel,
+      expiryTracking: expiryTracking ?? this.expiryTracking,
+      barcodes: barcodes ?? this.barcodes,
+      now: DateTime.now().toUtc(),
+    );
+    return PosProduct._(
+      id: draft.id,
+      sku: draft.sku,
+      name: draft.name,
+      categoryId: draft.categoryId,
+      description: draft.description,
+      unitName: draft.unitName,
+      currency: draft.currency,
+      salePrice: draft.salePrice,
+      purchasePrice: draft.purchasePrice,
+      quantityScale: draft.quantityScale,
+      reorderLevel: draft.reorderLevel,
+      expiryTracking: draft.expiryTracking,
+      isActive: isActive,
+      barcodes: draft.barcodes,
+      createdAt: createdAt,
+      updatedAt: draft.updatedAt,
+    );
+  }
+
   PosProduct deactivate() {
     if (!isActive) return this;
     return _copyWith(isActive: false, updatedAt: DateTime.now().toUtc());

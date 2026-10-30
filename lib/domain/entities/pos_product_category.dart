@@ -71,13 +71,29 @@ final class PosProductCategory {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  PosProductCategory deactivate() => PosProductCategory._(
-        id: id,
-        name: name,
-        code: code,
-        parentId: parentId,
-        isActive: false,
-        createdAt: createdAt,
-        updatedAt: DateTime.now().toUtc(),
-      );
+  PosProductCategory copyWith({
+    String? name,
+    String? code,
+    String? parentId,
+    bool? isActive,
+  }) {
+    final nextName = name ?? this.name;
+    final nextCode = code ?? this.code;
+    if (nextName.trim().isEmpty || nextCode.trim().isEmpty) {
+      throw InvalidPosProductException.nameRequired();
+    }
+    return PosProductCategory._(
+      id: id,
+      name: nextName.trim(),
+      code: nextCode.trim().toUpperCase(),
+      parentId: parentId ?? this.parentId,
+      isActive: isActive ?? this.isActive,
+      createdAt: createdAt,
+      updatedAt: DateTime.now().toUtc(),
+    );
+  }
+
+  PosProductCategory deactivate() => copyWith(isActive: false);
+
+  PosProductCategory activate() => copyWith(isActive: true);
 }

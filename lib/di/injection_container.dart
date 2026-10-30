@@ -22,6 +22,8 @@ import 'package:qayd/application/pos/activate_pos_feature_use_case.dart';
 import 'package:qayd/application/pos/create_pos_product_use_case.dart';
 import 'package:qayd/application/pos/create_pos_product_category_use_case.dart';
 import 'package:qayd/application/pos/deactivate_pos_product_use_case.dart';
+import 'package:qayd/application/pos/reactivate_pos_product_use_case.dart';
+import 'package:qayd/application/pos/manage_pos_product_category_use_cases.dart';
 import 'package:qayd/application/pos/find_pos_product_by_barcode_use_case.dart';
 import 'package:qayd/application/pos/list_pos_products_use_case.dart';
 import 'package:qayd/application/pos/list_pos_product_categories_use_case.dart';
@@ -404,6 +406,10 @@ abstract final class InjectionContainer {
   static late PosCheckoutCubit posCheckoutCubit;
   static late FindPosProductByBarcodeUseCase findPosProductByBarcodeUseCase;
   static late DeactivatePosProductUseCase deactivatePosProductUseCase;
+  static late ReactivatePosProductUseCase reactivatePosProductUseCase;
+  static late SavePosProductCategoryUseCase savePosProductCategoryUseCase;
+  static late DeactivatePosProductCategoryUseCase deactivatePosProductCategoryUseCase;
+  static late ReactivatePosProductCategoryUseCase reactivatePosProductCategoryUseCase;
   static late PosCatalogCubit posCatalogCubit;
   static late PosWorkspaceCubit posWorkspaceCubit;
   static late PostPosOpeningBalanceAtomicallyUseCase
@@ -1067,6 +1073,18 @@ abstract final class InjectionContainer {
       governanceWriteGuard,
       _idGenerator,
     );
+    savePosProductCategoryUseCase = SavePosProductCategoryUseCase(
+      posProductCategoryRepository,
+      governanceWriteGuard,
+    );
+    deactivatePosProductCategoryUseCase = DeactivatePosProductCategoryUseCase(
+      posProductCategoryRepository,
+      governanceWriteGuard,
+    );
+    reactivatePosProductCategoryUseCase = ReactivatePosProductCategoryUseCase(
+      posProductCategoryRepository,
+      governanceWriteGuard,
+    );
     final sqliteStockMovementRepository =
         SqlitePosStockMovementRepository(database, currencyRepository);
     posStockMovementRepository = sqliteStockMovementRepository;
@@ -1148,11 +1166,16 @@ abstract final class InjectionContainer {
       posProductRepository,
       governanceWriteGuard,
     );
+    reactivatePosProductUseCase = ReactivatePosProductUseCase(
+      posProductRepository,
+      governanceWriteGuard,
+    );
     posCatalogCubit = PosCatalogCubit(
       listUseCase: listPosProductsUseCase,
       saveUseCase: savePosProductUseCase,
       createUseCase: createPosProductUseCase,
       deactivateUseCase: deactivatePosProductUseCase,
+      reactivateUseCase: reactivatePosProductUseCase,
     );
 
     listCurrenciesUseCase = ListCurrenciesUseCase(currencyRepository);

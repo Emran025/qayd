@@ -56,6 +56,8 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
           catalogCubit: InjectionContainer.posCatalogCubit,
           stockCubit: InjectionContainer.posStockCubit,
           warehouseId: state.warehouseId!,
+          postOpeningBalance:
+              InjectionContainer.postPosOpeningBalanceAtomicallyUseCase.call,
         ),
       ),
     );

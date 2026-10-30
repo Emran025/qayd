@@ -5369,6 +5369,8 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posCatalogCreateCategory => 'Create a category';
   @override
+  String get posCatalogEditCategory => 'Edit category';
+  @override
   String get posCatalogCategoryName => 'Category name';
   @override
   String get posCatalogCategoryCode => 'Category code';
@@ -5396,4 +5398,33 @@ class AppStringsEn extends AppStringsBase {
       'The product will be hidden from new operations while its history is preserved.';
   @override
   String get posCatalogDeactivate => 'Deactivate product';
+  @override
+  String get posCatalogReactivate => 'Reactivate product';
+  @override
+  String get posCatalogBarcodesHint => 'Multiple barcodes (one per line)';
+  @override
+  String get posProductScaleImmutable =>
+      'Quantity scale cannot be changed after product creation.';
+  @override
+  String get posCatalogShowInactive => 'Show inactive products';
+  @override
+  String get posCatalogNoCategories => 'No categories yet.';
+  @override
+  String get posCatalogEditTitle => 'Edit product';
+  @override
+  String get posCatalogEditCategoryTitle => 'Manage product categories';
+  @override
+  String get posCatalogDeactivateCategoryMessage =>
+      'The category will be hidden from new selections while linked products are preserved.';
+  @override
+  String get posCatalogCategoryDeactivateTitle => 'Deactivate category?';
+  @override
+  String get posCatalogCategoryDeactivate => 'Deactivate category';
+  @override
+  String get posCatalogCategoryReactivate => 'Reactivate category';
+  @override
+  String get posCatalogQuantityScaleReadOnly =>
+      'Quantity scale is fixed after product creation';
+  @override
+  String get posCatalogEditValidationFailed => 'Correct the form before saving.';
 }
