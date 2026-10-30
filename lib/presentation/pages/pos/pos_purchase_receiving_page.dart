@@ -4,6 +4,7 @@ import 'package:qayd/application/accounts/list_accounts_use_case.dart';
 import 'package:qayd/application/pos/build_pos_purchase_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_purchase_use_case.dart';
 import 'package:qayd/application/pos/list_pos_products_use_case.dart';
+import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';

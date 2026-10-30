@@ -184,24 +184,24 @@ PosPurchasePosting _purchase({bool duplicateLedgerEntryId = false}) {
     createdAt: date,
   );
   final voucher = Voucher.draft(
-    id: const VoucherId('purchase-voucher-1'),
+    id: VoucherId('purchase-voucher-1'),
     type: VoucherType.receipt,
     date: date,
     amount: Money.fromMinorUnits(200, _currency),
     currency: _currency,
-    counterpartyId: const AccountId('payables'),
-    affectedAccountId: const AccountId('inventory'),
+    counterpartyId: AccountId('payables'),
+    affectedAccountId: AccountId('inventory'),
     referenceNumber: invoiceId,
     description: 'POS purchase payable P-000001',
     createdAt: date,
   ).confirm(date);
   final entries = EntryGenerator().generateForConfirmedVoucher(
     voucher: voucher,
-    transactionId: const TransactionId('purchase-tx-1'),
+    transactionId: TransactionId('purchase-tx-1'),
     debitEntryId: EntryId(
       duplicateLedgerEntryId ? 'preexisting-ledger-id' : 'purchase-debit-1',
     ),
-    creditEntryId: const EntryId('purchase-credit-1'),
+    creditEntryId: EntryId('purchase-credit-1'),
     ledgerCreatedAt: date,
   );
   return PosPurchasePosting(
