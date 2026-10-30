@@ -171,6 +171,11 @@ void main() {
     expect(find.text(AppStrings.posWorkspaceSalesSection), findsOneWidget);
     expect(find.text(AppStrings.posWorkspaceSalesTitle), findsOneWidget);
     expect(find.text(AppStrings.posInvoiceHistoryTitle), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text(AppStrings.posDailySalesReportTitle),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text(AppStrings.posDailySalesReportTitle), findsOneWidget);
   });
 }

@@ -242,7 +242,7 @@ void main() {
     await tester.enterText(fields.at(1), 'SKU-NEW');
     await tester.enterText(fields.at(2), '1250');
     await tester.enterText(fields.at(3), '900');
-    await tester.enterText(fields.at(7), '628000000002');
+    await tester.enterText(fields.at(8), '628000000002');
     await tester.ensureVisible(find.text(AppStrings.save));
     await tester.tap(find.text(AppStrings.save));
     await tester.pumpAndSettle();
