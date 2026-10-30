@@ -237,7 +237,7 @@ void main() {
     expect(find.text('Beverages (DRINKS)'), findsOneWidget);
 
     final fields = find.byType(TextFormField);
-    expect(fields, findsNWidgets(9));
+    expect(fields, findsNWidgets(10));
     await tester.enterText(fields.at(0), 'New Coffee');
     await tester.enterText(fields.at(1), 'SKU-NEW');
     await tester.enterText(fields.at(2), '1250');
