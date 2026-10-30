@@ -2632,8 +2632,30 @@ class AppStrings {
       i.posWorkspaceEnableFromSettings;
   static String get posWorkspaceCatalogSubtitle =>
       i.posWorkspaceCatalogSubtitle;
+  static String get posWorkspacePurchaseSubtitle =>
+      i.posWorkspacePurchaseSubtitle;
   static String get posWorkspaceSalesTitle => i.posWorkspaceSalesTitle;
   static String get posWorkspaceComingSoon => i.posWorkspaceComingSoon;
+  static String get posPurchaseTitle => i.posPurchaseTitle;
+  static String get posPurchaseDescription => i.posPurchaseDescription;
+  static String get posPurchaseSupplier => i.posPurchaseSupplier;
+  static String get posPurchaseSelectSupplier => i.posPurchaseSelectSupplier;
+  static String get posPurchaseProducts => i.posPurchaseProducts;
+  static String get posPurchaseNoProducts => i.posPurchaseNoProducts;
+  static String get posPurchaseAddProduct => i.posPurchaseAddProduct;
+  static String get posPurchaseAlreadyAdded => i.posPurchaseAlreadyAdded;
+  static String get posPurchaseQuantity => i.posPurchaseQuantity;
+  static String get posPurchaseUnitCost => i.posPurchaseUnitCost;
+  static String get posPurchasePaymentMethod => i.posPurchasePaymentMethod;
+  static String get posPurchaseCredit => i.posPurchaseCredit;
+  static String get posPurchaseCash => i.posPurchaseCash;
+  static String get posPurchaseTotal => i.posPurchaseTotal;
+  static String get posPurchaseSubmit => i.posPurchaseSubmit;
+  static String get posPurchaseSaved => i.posPurchaseSaved;
+  static String get posPurchaseCartEmpty => i.posPurchaseCartEmpty;
+  static String get posPurchaseExpiryNotice => i.posPurchaseExpiryNotice;
+  static String get posPurchaseLoadFailed => i.posPurchaseLoadFailed;
+  static String get posPurchaseSubmitFailed => i.posPurchaseSubmitFailed;
   static String get posCheckoutTitle => i.posCheckoutTitle;
   static String get posCheckoutInputHint => i.posCheckoutInputHint;
   static String get posCheckoutSearchResults => i.posCheckoutSearchResults;

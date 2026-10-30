@@ -141,6 +141,7 @@ void main() {
 
     expect(find.text(AppStrings.posWorkspaceDisabled), findsOneWidget);
     expect(find.text(AppStrings.posCatalogTitle), findsNothing);
+    expect(find.text(AppStrings.posPurchaseTitle), findsNothing);
   });
 
   testWidgets('shows the catalog entry only after activation is enabled',
@@ -158,5 +159,7 @@ void main() {
 
     expect(find.text(AppStrings.posWorkspaceWelcome), findsOneWidget);
     expect(find.text(AppStrings.posCatalogTitle), findsOneWidget);
+    expect(find.text(AppStrings.posPurchaseTitle), findsOneWidget);
+    expect(find.text(AppStrings.posWorkspacePurchaseSubtitle), findsOneWidget);
   });
 }

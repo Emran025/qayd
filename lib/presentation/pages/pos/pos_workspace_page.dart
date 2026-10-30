@@ -8,6 +8,7 @@ import 'package:qayd/presentation/pages/pos/pos_opening_balance_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_checkout_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_invoice_history_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_daily_sales_report_page.dart';
+import 'package:qayd/presentation/pages/pos/pos_purchase_receiving_page.dart';
 import 'package:qayd/presentation/pos/pos_invoice_history_cubit.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/presentation/pos/pos_workspace_cubit.dart';
@@ -76,6 +77,21 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
     );
   }
 
+  Future<void> _openPurchaseReceiving(PosWorkspaceState state) async {
+    if (!state.isReady || !mounted) return;
+    await Navigator.of(context).push<void>(
+      QaydPageRoute.slideFromStart<void>(
+        builder: (_) => PosPurchaseReceivingPage(
+          warehouseId: state.warehouseId!,
+          currency: state.currency!,
+          listProducts: InjectionContainer.listPosProductsUseCase,
+          listAccounts: InjectionContainer.listAccountsUseCase,
+          completePurchase: InjectionContainer.completePosPurchaseUseCase,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openInvoiceHistory(PosWorkspaceState state) async {
     if (!state.isReady || !mounted) return;
     await Navigator.of(context).push<void>(
@@ -136,6 +152,7 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
                 state: state,
                 onOpenCatalog: () => _openCatalog(state),
                 onOpenOpeningBalance: () => _openOpeningBalance(state),
+                onOpenPurchaseReceiving: () => _openPurchaseReceiving(state),
                 onOpenCheckout: () => _openCheckout(state),
                 onOpenInvoiceHistory: () => _openInvoiceHistory(state),
                 onOpenDailySalesReport: () => _openDailySalesReport(state),
@@ -152,6 +169,7 @@ class _ReadyWorkspace extends StatelessWidget {
     required this.state,
     required this.onOpenCatalog,
     required this.onOpenOpeningBalance,
+    required this.onOpenPurchaseReceiving,
     required this.onOpenCheckout,
     required this.onOpenInvoiceHistory,
     required this.onOpenDailySalesReport,
@@ -160,6 +178,7 @@ class _ReadyWorkspace extends StatelessWidget {
   final PosWorkspaceState state;
   final VoidCallback onOpenCatalog;
   final VoidCallback onOpenOpeningBalance;
+  final VoidCallback onOpenPurchaseReceiving;
   final VoidCallback onOpenCheckout;
   final VoidCallback onOpenInvoiceHistory;
   final VoidCallback onOpenDailySalesReport;
@@ -193,6 +212,16 @@ class _ReadyWorkspace extends StatelessWidget {
             subtitle: Text(AppStrings.posOpeningBalanceDescription),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onOpenOpeningBalance,
+          ),
+        ),
+        const SizedBox(height: SpacingTokens.md),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.local_shipping_outlined),
+            title: Text(AppStrings.posPurchaseTitle),
+            subtitle: Text(AppStrings.posWorkspacePurchaseSubtitle),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onOpenPurchaseReceiving,
           ),
         ),
         const SizedBox(height: SpacingTokens.md),

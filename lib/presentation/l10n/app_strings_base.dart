@@ -2820,8 +2820,32 @@ abstract class AppStringsBase {
       'فعّل نقطة البيع من الإعدادات أولاً للوصول إلى هذه المساحة.';
   String get posWorkspaceCatalogSubtitle =>
       'إدارة المنتجات والأسعار والباركودات';
+  String get posWorkspacePurchaseSubtitle =>
+      'استلام المشتريات وتسجيل المخزون والقيد معاً';
   String get posWorkspaceSalesTitle => 'المبيعات';
   String get posWorkspaceComingSoon => 'ستتوفر بعد بناء نواة المخزون والفوترة.';
+  String get posPurchaseTitle => 'استلام المشتريات';
+  String get posPurchaseDescription =>
+      'تُرحّل الفاتورة والمخزون والقيد المحاسبي في معاملة واحدة.';
+  String get posPurchaseSupplier => 'حساب المورد';
+  String get posPurchaseSelectSupplier => 'اختر حساب المورد';
+  String get posPurchaseProducts => 'الأصناف';
+  String get posPurchaseNoProducts => 'لا توجد أصناف نشطة في الكتالوج.';
+  String get posPurchaseAddProduct => 'إضافة';
+  String get posPurchaseAlreadyAdded => 'الصنف موجود في قائمة الاستلام.';
+  String get posPurchaseQuantity => 'الكمية';
+  String get posPurchaseUnitCost => 'تكلفة الوحدة';
+  String get posPurchasePaymentMethod => 'تسوية الفاتورة';
+  String get posPurchaseCredit => 'آجل على حساب المورد';
+  String get posPurchaseCash => 'مدفوع نقداً بالكامل';
+  String get posPurchaseTotal => 'إجمالي الشراء';
+  String get posPurchaseSubmit => 'ترحيل استلام الشراء';
+  String get posPurchaseSaved => 'تم ترحيل الشراء والمخزون والقيد بنجاح.';
+  String get posPurchaseCartEmpty => 'أضف صنفاً واحداً على الأقل.';
+  String get posPurchaseExpiryNotice =>
+      'الأصناف التي تتطلب تتبع الصلاحية غير متاحة للاستلام حتى تكتمل إدارة الدفعات.';
+  String get posPurchaseLoadFailed => 'تعذر تحميل أصناف المشتريات.';
+  String get posPurchaseSubmitFailed => 'تعذر ترحيل استلام الشراء.';
   String get posCheckoutTitle => 'نقطة البيع';
   String get posCheckoutInputHint => 'امسح الباركود أو اكتب اسم المنتج أو رمزه';
   String get posCheckoutSearchResults => 'نتائج البحث';

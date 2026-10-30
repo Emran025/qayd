@@ -5140,10 +5140,56 @@ class AppStringsEn extends AppStringsBase {
   String get posWorkspaceCatalogSubtitle =>
       'Manage products, prices, and barcodes';
   @override
+  String get posWorkspacePurchaseSubtitle =>
+      'Receive purchases and post inventory and accounting together';
+  @override
   String get posWorkspaceSalesTitle => 'Sales';
   @override
   String get posWorkspaceComingSoon =>
       'Available after the inventory and invoicing core is built.';
+  @override
+  String get posPurchaseTitle => 'Receive purchase';
+  @override
+  String get posPurchaseDescription =>
+      'The invoice, stock, and accounting entry post in one transaction.';
+  @override
+  String get posPurchaseSupplier => 'Supplier account';
+  @override
+  String get posPurchaseSelectSupplier => 'Choose supplier account';
+  @override
+  String get posPurchaseProducts => 'Products';
+  @override
+  String get posPurchaseNoProducts => 'No active products in the catalog.';
+  @override
+  String get posPurchaseAddProduct => 'Add';
+  @override
+  String get posPurchaseAlreadyAdded => 'This product is already in the receipt.';
+  @override
+  String get posPurchaseQuantity => 'Quantity';
+  @override
+  String get posPurchaseUnitCost => 'Unit cost';
+  @override
+  String get posPurchasePaymentMethod => 'Settlement';
+  @override
+  String get posPurchaseCredit => 'On supplier account';
+  @override
+  String get posPurchaseCash => 'Paid fully in cash';
+  @override
+  String get posPurchaseTotal => 'Purchase total';
+  @override
+  String get posPurchaseSubmit => 'Post purchase receipt';
+  @override
+  String get posPurchaseSaved =>
+      'Purchase, stock, and accounting entry posted successfully.';
+  @override
+  String get posPurchaseCartEmpty => 'Add at least one product.';
+  @override
+  String get posPurchaseExpiryNotice =>
+      'Expiry-tracked products cannot be received until lot management is implemented.';
+  @override
+  String get posPurchaseLoadFailed => 'Could not load purchase products.';
+  @override
+  String get posPurchaseSubmitFailed => 'Could not post the purchase receipt.';
   @override
   String get posCheckoutTitle => 'Point of sale';
   @override
