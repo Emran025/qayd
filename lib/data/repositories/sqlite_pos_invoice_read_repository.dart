@@ -36,6 +36,25 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
   }
 
   @override
+  Future<Result<List<PosInvoiceDetails>>> getReturnsForSource(
+    String sourceInvoiceId,
+  ) async {
+    try {
+      final rows = await _db.query(
+        'pos_invoices',
+        where: 'source_invoice_id = ? AND document_type = ?',
+        whereArgs: [sourceInvoiceId, 'sales_return'],
+        orderBy: 'invoice_date ASC, created_at ASC',
+      );
+      final result = <PosInvoiceDetails>[];
+      for (final row in rows) result.add(await _mapDetails(row));
+      return Success(List.unmodifiable(result));
+    } catch (error) {
+      return FailureResult(failureFromDomainException(error));
+    }
+  }
+
+  @override
   Future<Result<List<PosInvoice>>> list({
     DateTime? from,
     DateTime? to,

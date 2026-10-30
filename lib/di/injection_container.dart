@@ -39,6 +39,9 @@ import 'package:qayd/application/pos/post_pos_purchase_atomically_use_case.dart'
 import 'package:qayd/application/pos/build_pos_opening_balance_posting_use_case.dart';
 import 'package:qayd/application/pos/build_pos_sale_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_sale_use_case.dart';
+import 'package:qayd/application/pos/build_pos_sales_return_posting_use_case.dart';
+import 'package:qayd/application/pos/complete_pos_sales_return_use_case.dart';
+import 'package:qayd/application/pos/post_pos_sales_return_atomically_use_case.dart';
 import 'package:qayd/application/pos/build_pos_purchase_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_purchase_use_case.dart';
 import 'package:qayd/application/pos/list_pos_invoices_use_case.dart';
@@ -131,6 +134,7 @@ import 'package:qayd/data/repositories/sqlite_pos_product_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_stock_movement_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_accounting_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sale_posting_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_sales_return_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_purchase_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_purchase_request_identity_repository.dart';
 import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
@@ -154,6 +158,7 @@ import 'package:qayd/domain/repositories/pos_stock_movement_repository.dart';
 import 'package:qayd/domain/repositories/pos_template_installation_repository.dart';
 import 'package:qayd/domain/repositories/pos_accounting_posting_repository.dart';
 import 'package:qayd/domain/repositories/pos_sale_posting_repository.dart';
+import 'package:qayd/domain/repositories/pos_sales_return_posting_repository.dart';
 import 'package:qayd/domain/repositories/pos_purchase_posting_repository.dart';
 import 'package:qayd/domain/repositories/pos_purchase_request_identity_repository.dart';
 import 'package:qayd/domain/services/voucher_qr_service.dart';
@@ -398,6 +403,7 @@ abstract final class InjectionContainer {
   static late PosStockMovementRepository posStockMovementRepository;
   static late PosAccountingPostingRepository posAccountingPostingRepository;
   static late PosSalePostingRepository posSalePostingRepository;
+  static late PosSalesReturnPostingRepository posSalesReturnPostingRepository;
   static late PosPurchasePostingRepository posPurchasePostingRepository;
   static late PosPurchaseRequestIdentityRepository
       posPurchaseRequestIdentityRepository;
@@ -407,6 +413,8 @@ abstract final class InjectionContainer {
   static late BuildPosDailySalesReportUseCase buildPosDailySalesReportUseCase;
   static late BuildPosSalePostingUseCase buildPosSalePostingUseCase;
   static late CompletePosSaleUseCase completePosSaleUseCase;
+  static late BuildPosSalesReturnPostingUseCase buildPosSalesReturnPostingUseCase;
+  static late CompletePosSalesReturnUseCase completePosSalesReturnUseCase;
   static late BuildPosPurchasePostingUseCase buildPosPurchasePostingUseCase;
   static late CompletePosPurchaseUseCase completePosPurchaseUseCase;
   static late GetPosStockBalanceUseCase getPosStockBalanceUseCase;
@@ -435,6 +443,8 @@ abstract final class InjectionContainer {
   static late PostPosOpeningBalanceAtomicallyUseCase
       postPosOpeningBalanceAtomicallyUseCase;
   static late PostPosSaleAtomicallyUseCase postPosSaleAtomicallyUseCase;
+  static late PostPosSalesReturnAtomicallyUseCase
+      postPosSalesReturnAtomicallyUseCase;
   static late PostPosPurchaseAtomicallyUseCase postPosPurchaseAtomicallyUseCase;
 
   // ── Sync & Real-Time Components ──────────────────────────────────────────
@@ -1120,6 +1130,13 @@ abstract final class InjectionContainer {
       sqliteVoucherRepository,
     );
     posSalePostingRepository = sqlitePosSalePostingRepository;
+    final sqlitePosSalesReturnPostingRepository =
+        SqlitePosSalesReturnPostingRepository(
+      transactionRunner,
+      sqliteStockMovementRepository,
+      sqliteVoucherRepository,
+    );
+    posSalesReturnPostingRepository = sqlitePosSalesReturnPostingRepository;
     final sqlitePosPurchasePostingRepository =
         SqlitePosPurchasePostingRepository(
       transactionRunner,
@@ -1155,6 +1172,21 @@ abstract final class InjectionContainer {
     completePosSaleUseCase = CompletePosSaleUseCase(
       buildPosting: buildPosSalePostingUseCase,
       postAtomically: postPosSaleAtomicallyUseCase,
+      signInvoice: signPosInvoiceUseCase,
+    );
+    buildPosSalesReturnPostingUseCase = BuildPosSalesReturnPostingUseCase(
+      invoiceRepository: posInvoiceReadRepository,
+      installationRepository: posTemplateInstallationRepository,
+    );
+    postPosSalesReturnAtomicallyUseCase =
+        PostPosSalesReturnAtomicallyUseCase(
+      writeGuard: governanceWriteGuard,
+      fiscalPeriodRepository: fiscalPeriodRepository,
+      postingRepository: posSalesReturnPostingRepository,
+    );
+    completePosSalesReturnUseCase = CompletePosSalesReturnUseCase(
+      buildPosting: buildPosSalesReturnPostingUseCase,
+      postAtomically: postPosSalesReturnAtomicallyUseCase,
       signInvoice: signPosInvoiceUseCase,
     );
     buildPosPurchasePostingUseCase = BuildPosPurchasePostingUseCase(

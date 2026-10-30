@@ -350,7 +350,9 @@ final class PosInvoice {
   }
 
   PosInvoice applyPayment(Money amount, DateTime at) {
-    if (amount.currency != currency || amount.isZero || amount.isNegative) {
+    if (amount.currency != currency ||
+        amount.isNegative ||
+        (amount.isZero && total.minorUnits != 0)) {
       throw InvalidPosInvoiceException.invalidPayment();
     }
     final newPaid = paid.minorUnits + amount.minorUnits;

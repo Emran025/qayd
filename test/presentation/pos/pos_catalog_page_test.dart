@@ -236,13 +236,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Beverages (DRINKS)'), findsOneWidget);
 
-    final fields = find.byType(TextFormField);
-    expect(fields, findsNWidgets(10));
+    final productForm = find.ancestor(
+      of: find.text(AppStrings.posCatalogCreateTitle),
+      matching: find.byType(Form),
+    );
+    final fields = find.descendant(
+      of: productForm,
+      matching: find.byType(TextFormField),
+    );
+    expect(fields, findsNWidgets(9));
     await tester.enterText(fields.at(0), 'New Coffee');
     await tester.enterText(fields.at(1), 'SKU-NEW');
     await tester.enterText(fields.at(2), '1250');
     await tester.enterText(fields.at(3), '900');
-    await tester.enterText(fields.at(8), '628000000002');
+    await tester.enterText(fields.at(7), '628000000002');
     await tester.ensureVisible(find.text(AppStrings.save));
     await tester.tap(find.text(AppStrings.save));
     await tester.pumpAndSettle();

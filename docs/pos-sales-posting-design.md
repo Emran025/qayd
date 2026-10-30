@@ -12,6 +12,16 @@ For a cash sale, the commercial journal is debit POS cash and credit POS sales r
 
 The sale coordinator must persist both journals through the official voucher/ledger adapter. It must not insert directly into `ledger_entries` from Application, Cubit, or Widgets.
 
+## Sales returns and invoice reversals
+
+A sales return is a new immutable document linked to the original sale. The current application boundary permits returns only for fully paid, non-credit sales; it rejects over-returns and returns after a void. A full void is a distinct reversal request that must cover every source line and cannot follow a prior return. The source document is marked `partiallyReturned`, `fullyReturned`, or `voided` only in the same transaction that saves the return.
+
+Return persistence is one local SQLCipher transaction containing the return invoice and lines, refund-payment events, inbound stock movements, the source/return relation, vouchers and ledger entries, and the source status update. Refunds are split back across the original payment accounts and methods. The accounting direction is debit sales returns / credit the original cash or bank account; cost reversal is debit inventory / credit COGS. The payload checks the role accounts, balanced confirmed vouchers, return amount plus COGS amount, and that every movement belongs to the return's warehouse.
+
+Partial-return rounding is cumulative in minor currency units. Line discounts and tax follow cumulative returned quantities; any invoice-level discount or tax is distributed by cumulative returned gross subtotal. The last return therefore receives any rounding remainder, so a complete return exactly reverses the original invoice totals instead of losing or creating minor units. Zero-value returns do not invent a zero payment or refund voucher, but still reverse inventory cost when applicable.
+
+The application and SQLite posting boundary plus focused unit/integration tests now exist for this slice. The invoice-history UI, explicit return/void review flow, durable request-identity recovery across an app restart, and end-to-end signer/governance presentation are not yet connected; do not describe the user-facing return feature as complete until those are implemented and validated.
+
 ## Exact totals
 
 Quantities are `PosQuantity` scaled integers. Unit prices, unit costs, discounts, tax, paid, and due values are `Money` minor units. No `double` participates in validation, persistence, signatures, or replay fingerprints. Invoice lines store product name and barcode snapshots so historical PDFs remain stable after catalog changes.
@@ -32,4 +42,4 @@ Invoice and report generators reuse Qayd's Cairo font, header configuration, bra
 
 ## Acceptance gates
 
-The sale slice cannot be connected to the visible checkout UI until focused tests prove exact totals, governance and fiscal-period rejection before writes, missing template-account rejection, insufficient stock rollback, invoice/voucher/ledger rollback, payment idempotency, exact replay without ledger mutation, signature verification, and stable PDF snapshot content. Camera behavior additionally requires real-device Android/iOS validation because the sandbox cannot provide physical camera hardware.
+The sale slice cannot be connected to the visible checkout UI until focused tests prove exact totals, governance and fiscal-period rejection before writes, missing template-account rejection, insufficient stock rollback, invoice/voucher/ledger rollback, payment idempotency, exact replay without ledger mutation, signature verification, and stable PDF snapshot content. The return slice additionally requires integration tests for partial/full return totals, invoice-level discount/tax rounding, payment-method refund allocation, full void, replay and rollback; and UI tests for review, confirmation, and recovery. Camera behavior additionally requires real-device Android/iOS validation because the sandbox cannot provide physical camera hardware.
