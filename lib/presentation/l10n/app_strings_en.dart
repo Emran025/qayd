@@ -5415,7 +5415,7 @@ class AppStringsEn extends AppStringsBase {
   String get posCatalogEditCategoryTitle => 'Manage product categories';
   @override
   String get posCatalogDeactivateCategoryMessage =>
-      'The category will be hidden from new selections while linked products are preserved.';
+      'Categories assigned to products cannot be deactivated. Products and their history are never deleted.';
   @override
   String get posCatalogCategoryDeactivateTitle => 'Deactivate category?';
   @override

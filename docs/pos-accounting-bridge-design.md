@@ -30,7 +30,7 @@ A sale or purchase cannot be considered posted when only the revenue/payment pai
 
 ## Identified prerequisite
 
-The current POS template contains inventory, revenue, COGS, cash, receivables, payables, returns, discounts, and optional tax accounts, but it does not contain an explicit opening-balance clearing/equity account. The opening-balance accounting bridge must not silently use an unrelated account. Before posting opening stock to the ledger, the template must gain a stable `openingBalanceClearing` account key under a versioned template upgrade, or the product must explicitly select an existing authorized counterpart account through a typed configuration use case. The choice must be persisted by metadata key, not by account name.
+The version 2 POS template now defines `openingBalanceClearing` as a required stable account key and installs it during explicit POS activation. Opening-balance posting therefore has an authorized counterpart without selecting an unrelated account by name. Future posting flows must continue to resolve template accounts through stable metadata keys.
 
 ## Fiscal-period and correction rules
 
@@ -60,3 +60,9 @@ The typed template-installation read port is read-only and returns the enabled w
 ## Cross-device sync boundary
 
 The Laravel sync API is a blind relay for opaque encrypted payloads; it does not need POS-specific plaintext endpoints or tables. However, the Flutter client currently emits and applies only its registered sync event types. POS products, stock movements, and invoices are not yet emitted through the outbox or applied by the inbound processor; an unrecognized event is treated as `unknown` and returned as processed. POS data therefore remains local to the device today. Before enabling cross-device POS sync, define versioned encrypted event envelopes plus replay/idempotency, conflict, ordering, and acknowledgement behavior, then add client-side dispatch/processor coverage. Do not send financial records in plaintext to the API.
+
+## Remaining UI and workflow scope
+
+- Full inventory workflows are not implemented yet: purchase receiving, stock adjustments, damaged/expired stock, batches, expiry tracking, and purchase returns need dedicated screens plus atomic accounting coordinators.
+- Sales returns, invoice cancellation/reversal, later customer collections, discounts, tax handling, and thermal receipt printing remain outstanding.
+- Product and category removal is archival/deactivation only in this slice; hard deletion is intentionally excluded to protect existing stock and accounting history. A future physical-delete action would need a guarded no-history/no-reference policy.

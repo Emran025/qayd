@@ -2961,7 +2961,7 @@ abstract class AppStringsBase {
   String get posCatalogEditTitle => 'تعديل المنتج';
   String get posCatalogEditCategoryTitle => 'إدارة تصنيفات المنتجات';
   String get posCatalogDeactivateCategoryMessage =>
-      'سيتم إخفاء التصنيف من الاختيارات الجديدة مع الاحتفاظ بالمنتجات المرتبطة به.';
+      'لا يمكن تعطيل تصنيف مرتبط بمنتجات؛ ولن تُحذف المنتجات أو بياناتها التاريخية.';
   String get posCatalogCategoryDeactivateTitle => 'تعطيل التصنيف؟';
   String get posCatalogCategoryDeactivate => 'تعطيل التصنيف';
   String get posCatalogCategoryReactivate => 'إعادة تفعيل التصنيف';
