@@ -9,5 +9,15 @@ abstract interface class PosStockMovementRepository {
 
   Future<Result<PosStockMovement?>> getByIdempotencyKey(String key);
 
+  Future<Result<List<PosStockMovement>>> listMovements({
+    required String warehouseId,
+    String? productId,
+    PosStockMovementType? type,
+    DateTime? fromInclusive,
+    DateTime? untilExclusive,
+    int limit = 100,
+    int offset = 0,
+  });
+
   Future<Result<void>> append(PosStockMovement movement);
 }

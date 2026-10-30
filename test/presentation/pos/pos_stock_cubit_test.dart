@@ -82,6 +82,17 @@ final class _StockRepository implements PosStockMovementRepository {
       const Success(null);
 
   @override
+  Future<Result<List<PosStockMovement>>> listMovements({
+    required String warehouseId,
+    String? productId,
+    PosStockMovementType? type,
+    DateTime? fromInclusive,
+    DateTime? untilExclusive,
+    int limit = 100,
+    int offset = 0,
+  }) async => const Success([]);
+
+  @override
   Future<Result<void>> append(PosStockMovement movement) async {
     balance = balance.apply(movement);
     return const Success(null);

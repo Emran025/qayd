@@ -2,6 +2,7 @@ import 'dart:collection';
 
 import 'package:qayd/domain/entities/pos_invoice_signature.dart';
 import 'package:qayd/domain/exceptions/invalid_pos_invoice_exception.dart';
+import 'package:qayd/domain/entities/pos_invoice_line_conversion.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
@@ -28,6 +29,10 @@ final class PosInvoiceLine {
     required this.lineTotal,
     required this.sourceLineId,
     required this.createdAt,
+    this.currencyConversion,
+    this.proposedSalePrice,
+    this.proposedSalePriceApplied = false,
+    this.productUpdatedAtSnapshot,
   });
 
   factory PosInvoiceLine.create({
@@ -43,6 +48,10 @@ final class PosInvoiceLine {
     required DateTime createdAt,
     String? barcodeSnapshot,
     String? sourceLineId,
+    PosInvoiceLineConversion? currencyConversion,
+    Money? proposedSalePrice,
+    bool proposedSalePriceApplied = false,
+    DateTime? productUpdatedAtSnapshot,
   }) {
     if (id.trim().isEmpty ||
         invoiceId.trim().isEmpty ||
@@ -52,11 +61,31 @@ final class PosInvoiceLine {
     if (productNameSnapshot.trim().isEmpty || quantity.isZero) {
       throw InvalidPosInvoiceException.invalidLine();
     }
-    _assertCurrency(unitPrice, unitCost, discount, tax);
+    _assertCurrency(unitPrice, discount, tax);
     if (unitPrice.isNegative ||
         unitCost.isNegative ||
         discount.isNegative ||
         tax.isNegative) {
+      throw InvalidPosInvoiceException.invalidLine();
+    }
+    if (currencyConversion != null) {
+      final conversionMatches = switch (currencyConversion.purpose) {
+        PosInvoiceLineConversionPurpose.catalogSalePrice =>
+          currencyConversion.targetAmount == unitPrice,
+        PosInvoiceLineConversionPurpose.purchaseCost =>
+          currencyConversion.sourceAmount == unitPrice &&
+              currencyConversion.targetAmount == unitCost,
+      };
+      if (!conversionMatches) {
+        throw InvalidPosInvoiceException.invalidLine();
+      }
+    }
+    if (proposedSalePrice != null &&
+        proposedSalePrice.currency != unitCost.currency) {
+      throw InvalidPosInvoiceException.currencyMismatch();
+    }
+    if (proposedSalePriceApplied &&
+        (proposedSalePrice == null || productUpdatedAtSnapshot == null)) {
       throw InvalidPosInvoiceException.invalidLine();
     }
     final gross = PosMoneyMath.multiply(quantity, unitPrice);
@@ -79,6 +108,10 @@ final class PosInvoiceLine {
       lineTotal: Money.fromMinorUnits(net, unitPrice.currency),
       sourceLineId: sourceLineId?.trim(),
       createdAt: createdAt.toUtc(),
+      currencyConversion: currencyConversion,
+      proposedSalePrice: proposedSalePrice,
+      proposedSalePriceApplied: proposedSalePriceApplied,
+      productUpdatedAtSnapshot: productUpdatedAtSnapshot?.toUtc(),
     );
   }
 
@@ -96,6 +129,10 @@ final class PosInvoiceLine {
     required DateTime createdAt,
     String? barcodeSnapshot,
     String? sourceLineId,
+    PosInvoiceLineConversion? currencyConversion,
+    Money? proposedSalePrice,
+    bool proposedSalePriceApplied = false,
+    DateTime? productUpdatedAtSnapshot,
   }) {
     final line = PosInvoiceLine.create(
       id: id,
@@ -110,6 +147,10 @@ final class PosInvoiceLine {
       createdAt: createdAt,
       barcodeSnapshot: barcodeSnapshot,
       sourceLineId: sourceLineId,
+      currencyConversion: currencyConversion,
+      proposedSalePrice: proposedSalePrice,
+      proposedSalePriceApplied: proposedSalePriceApplied,
+      productUpdatedAtSnapshot: productUpdatedAtSnapshot,
     );
     if (line.lineTotal != lineTotal) {
       throw InvalidPosInvoiceException.invalidTotals();
@@ -130,17 +171,18 @@ final class PosInvoiceLine {
   final Money lineTotal;
   final String? sourceLineId;
   final DateTime createdAt;
+  final PosInvoiceLineConversion? currencyConversion;
+  final Money? proposedSalePrice;
+  final bool proposedSalePriceApplied;
+  final DateTime? productUpdatedAtSnapshot;
 
   static void _assertCurrency(
     Money unitPrice,
-    Money unitCost,
     Money discount,
     Money tax,
   ) {
     final currency = unitPrice.currency;
-    if (unitCost.currency != currency ||
-        discount.currency != currency ||
-        tax.currency != currency) {
+    if (discount.currency != currency || tax.currency != currency) {
       throw InvalidPosInvoiceException.currencyMismatch();
     }
   }
@@ -350,7 +392,9 @@ final class PosInvoice {
   }
 
   PosInvoice applyPayment(Money amount, DateTime at) {
-    if (amount.currency != currency || amount.isZero || amount.isNegative) {
+    if (amount.currency != currency ||
+        amount.isNegative ||
+        (amount.isZero && total.minorUnits != 0)) {
       throw InvalidPosInvoiceException.invalidPayment();
     }
     final newPaid = paid.minorUnits + amount.minorUnits;

@@ -1,17 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:qayd/core/result/result.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/navigation/qayd_page_route.dart';
 import 'package:qayd/presentation/pages/pos/pos_catalog_page.dart';
+import 'package:qayd/presentation/pages/pos/pos_currency_rates_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_opening_balance_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_checkout_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_invoice_history_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_daily_sales_report_page.dart';
+import 'package:qayd/presentation/pages/pos/pos_purchase_receiving_page.dart';
+import 'package:qayd/presentation/pages/pos/pos_stock_movements_page.dart';
+import 'package:qayd/presentation/pages/pos/widgets/pos_workspace_action_card.dart';
+import 'package:qayd/domain/entities/pos_template_definition.dart';
+import 'package:qayd/presentation/pages/settings/pos_feature_settings_page.dart';
 import 'package:qayd/presentation/pos/pos_invoice_history_cubit.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/presentation/pos/pos_workspace_cubit.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 
 /// Visually independent POS workspace hosted inside the main Qayd app.
 ///
@@ -56,6 +65,8 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
           catalogCubit: InjectionContainer.posCatalogCubit,
           stockCubit: InjectionContainer.posStockCubit,
           warehouseId: state.warehouseId!,
+          postOpeningBalance:
+              InjectionContainer.postPosOpeningBalanceAtomicallyUseCase.call,
         ),
       ),
     );
@@ -69,6 +80,26 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
           cubit: InjectionContainer.posCheckoutCubit,
           warehouseId: state.warehouseId!,
           currency: state.currency!,
+          listCurrenciesUseCase: InjectionContainer.listCurrenciesUseCase,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openPurchaseReceiving(PosWorkspaceState state) async {
+    if (!state.isReady || !mounted) return;
+    await Navigator.of(context).push<void>(
+      QaydPageRoute.slideFromStart<void>(
+        builder: (_) => PosPurchaseReceivingPage(
+          warehouseId: state.warehouseId!,
+          currency: state.currency!,
+          listCurrencies: InjectionContainer.listCurrenciesUseCase,
+          currencyConverter: InjectionContainer.posCurrencyConverter,
+          listProducts: InjectionContainer.listPosProductsUseCase,
+          listAccounts: InjectionContainer.listAccountsUseCase,
+          completePurchase: InjectionContainer.completePosPurchaseUseCase,
+          requestIdentityRepository:
+              InjectionContainer.posPurchaseRequestIdentityRepository,
         ),
       ),
     );
@@ -84,6 +115,50 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
           ),
           detailsUseCase: InjectionContainer.getPosInvoiceDetailsUseCase,
           pdfUseCase: InjectionContainer.buildPosInvoicePdfUseCase,
+          completeReturnUseCase:
+              InjectionContainer.completePosSalesReturnUseCase,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openStockMovements(PosWorkspaceState state) async {
+    if (!state.isReady || !mounted) return;
+    final installation = await InjectionContainer
+        .posTemplateInstallationRepository
+        .getEnabledInstallation(template: PosTemplateDefinition.current());
+    if (!mounted) return;
+    if (installation.isFailure) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            installation.failureOrNull?.messageAr ??
+                AppStrings.posAccountingAccountsRequired,
+          ),
+        ),
+      );
+      return;
+    }
+    final inventoryAccountId = installation.valueOrNull
+        ?.accountIdsByKey[PosTemplateAccountKey.inventoryAsset.value];
+    if (inventoryAccountId == null || inventoryAccountId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.posAccountingAccountsRequired)),
+      );
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      QaydPageRoute.slideFromStart<void>(
+        builder: (_) => PosStockMovementsPage(
+          warehouseId: state.warehouseId!,
+          currency: state.currency!,
+          listMovements: InjectionContainer.listPosStockMovementsUseCase,
+          listProducts: InjectionContainer.listPosProductsUseCase,
+          listAccounts: InjectionContainer.listAccountsUseCase,
+          getBalance: InjectionContainer.getPosStockBalanceUseCase,
+          submitAdjustment:
+              InjectionContainer.postPosStockAdjustmentAtomicallyUseCase.call,
+          inventoryAccountId: inventoryAccountId,
         ),
       ),
     );
@@ -112,18 +187,43 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
     );
   }
 
+  Future<void> _openCurrencyRates() async {
+    await Navigator.of(context).push<void>(
+      QaydPageRoute.slideFromStart<void>(
+        builder: (_) => PosCurrencyRatesPage(
+          preferredCurrency: context.read<PosWorkspaceCubit>().state.currency,
+          listCurrencies: InjectionContainer.listCurrenciesUseCase,
+          recordRate: InjectionContainer.recordPosCurrencyRateUseCase,
+          listHistory: InjectionContainer.listPosCurrencyRateHistoryUseCase,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openPosFeatureSettings() async {
+    await Navigator.of(context).push<void>(
+      QaydPageRoute.slideFromStart<void>(
+        builder: (_) => PosFeatureSettingsPage(
+          cubit: InjectionContainer.posFeatureCubit,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    context.read<PosWorkspaceCubit>().load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<PosWorkspaceCubit, PosWorkspaceState>(
       builder: (context, state) {
-        return Scaffold(
+        return QaydScaffold(
           appBar: QaydAppBar(title: AppStrings.posWorkspaceTitle),
           body: switch (state.status) {
             PosWorkspaceStatus.initial ||
             PosWorkspaceStatus.loading =>
               const Center(child: CircularProgressIndicator()),
             PosWorkspaceStatus.disabled => _DisabledWorkspace(
-                onOpenSettings: () => Navigator.of(context).maybePop(),
+                onOpenSettings: _openPosFeatureSettings,
               ),
             PosWorkspaceStatus.failure => _WorkspaceFailure(
                 message: state.failure?.messageAr ??
@@ -133,7 +233,10 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
             PosWorkspaceStatus.ready => _ReadyWorkspace(
                 state: state,
                 onOpenCatalog: () => _openCatalog(state),
+                onOpenCurrencyRates: _openCurrencyRates,
                 onOpenOpeningBalance: () => _openOpeningBalance(state),
+                onOpenPurchaseReceiving: () => _openPurchaseReceiving(state),
+                onOpenStockMovements: () => _openStockMovements(state),
                 onOpenCheckout: () => _openCheckout(state),
                 onOpenInvoiceHistory: () => _openInvoiceHistory(state),
                 onOpenDailySalesReport: () => _openDailySalesReport(state),
@@ -149,7 +252,10 @@ class _ReadyWorkspace extends StatelessWidget {
   const _ReadyWorkspace({
     required this.state,
     required this.onOpenCatalog,
+    required this.onOpenCurrencyRates,
     required this.onOpenOpeningBalance,
+    required this.onOpenPurchaseReceiving,
+    required this.onOpenStockMovements,
     required this.onOpenCheckout,
     required this.onOpenInvoiceHistory,
     required this.onOpenDailySalesReport,
@@ -157,13 +263,17 @@ class _ReadyWorkspace extends StatelessWidget {
 
   final PosWorkspaceState state;
   final VoidCallback onOpenCatalog;
+  final VoidCallback onOpenCurrencyRates;
   final VoidCallback onOpenOpeningBalance;
+  final VoidCallback onOpenPurchaseReceiving;
+  final VoidCallback onOpenStockMovements;
   final VoidCallback onOpenCheckout;
   final VoidCallback onOpenInvoiceHistory;
   final VoidCallback onOpenDailySalesReport;
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return ListView(
       padding: const EdgeInsets.all(SpacingTokens.lg),
       children: [
@@ -174,54 +284,78 @@ class _ReadyWorkspace extends StatelessWidget {
         const SizedBox(height: SpacingTokens.sm),
         Text(AppStrings.posWorkspaceDescription),
         const SizedBox(height: SpacingTokens.lg),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.inventory_2_outlined),
-            title: Text(AppStrings.posCatalogTitle),
-            subtitle: Text(AppStrings.posWorkspaceCatalogSubtitle),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: onOpenCatalog,
-          ),
+        Text(
+          AppStrings.posWorkspaceInventorySection,
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: SpacingTokens.sm),
+        PosWorkspaceActionCard(
+          icon: Icons.inventory_2_outlined,
+          title: AppStrings.posCatalogTitle,
+          subtitle: AppStrings.posWorkspaceCatalogSubtitle,
+          accent: colors.primary,
+          onTap: onOpenCatalog,
         ),
         const SizedBox(height: SpacingTokens.md),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.account_balance_wallet_outlined),
-            title: Text(AppStrings.posOpeningBalanceTitle),
-            subtitle: Text(AppStrings.posOpeningBalanceDescription),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: onOpenOpeningBalance,
-          ),
+        PosWorkspaceActionCard(
+          icon: Icons.currency_exchange_outlined,
+          title: AppStrings.posCurrencyRatesTitle,
+          subtitle: AppStrings.posCurrencyRatesDescription,
+          accent: colors.secondary,
+          onTap: onOpenCurrencyRates,
         ),
         const SizedBox(height: SpacingTokens.md),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.point_of_sale_outlined),
-            title: Text(AppStrings.posWorkspaceSalesTitle),
-            subtitle: Text(AppStrings.posCheckoutInputHint),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: onOpenCheckout,
-          ),
+        PosWorkspaceActionCard(
+          icon: Icons.account_balance_wallet_outlined,
+          title: AppStrings.posOpeningBalanceTitle,
+          subtitle: AppStrings.posOpeningBalanceDescription,
+          accent: colors.secondary,
+          onTap: onOpenOpeningBalance,
         ),
         const SizedBox(height: SpacingTokens.md),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.receipt_long_outlined),
-            title: Text(AppStrings.posInvoiceHistoryTitle),
-            subtitle: Text(AppStrings.posInvoiceExportPdf),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: onOpenInvoiceHistory,
-          ),
+        PosWorkspaceActionCard(
+          icon: Icons.local_shipping_outlined,
+          title: AppStrings.posPurchaseTitle,
+          subtitle: AppStrings.posWorkspacePurchaseSubtitle,
+          accent: colors.tertiary,
+          onTap: onOpenPurchaseReceiving,
         ),
         const SizedBox(height: SpacingTokens.md),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.analytics_outlined),
-            title: Text(AppStrings.posDailySalesReportTitle),
-            subtitle: Text(AppStrings.posDailySalesGross),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: onOpenDailySalesReport,
-          ),
+        PosWorkspaceActionCard(
+          icon: Icons.swap_vert_rounded,
+          title: AppStrings.posStockMovementsTitle,
+          subtitle: AppStrings.posStockMovementsDescription,
+          accent: colors.primary,
+          onTap: onOpenStockMovements,
+        ),
+        const SizedBox(height: SpacingTokens.lg),
+        Text(
+          AppStrings.posWorkspaceSalesSection,
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: SpacingTokens.sm),
+        PosWorkspaceActionCard(
+          icon: Icons.point_of_sale_outlined,
+          title: AppStrings.posWorkspaceSalesTitle,
+          subtitle: AppStrings.posCheckoutInputHint,
+          accent: colors.tertiary,
+          onTap: onOpenCheckout,
+        ),
+        const SizedBox(height: SpacingTokens.md),
+        PosWorkspaceActionCard(
+          icon: Icons.receipt_long_outlined,
+          title: AppStrings.posInvoiceHistoryTitle,
+          subtitle: AppStrings.posInvoiceExportPdf,
+          accent: colors.secondary,
+          onTap: onOpenInvoiceHistory,
+        ),
+        const SizedBox(height: SpacingTokens.md),
+        PosWorkspaceActionCard(
+          icon: Icons.analytics_outlined,
+          title: AppStrings.posDailySalesReportTitle,
+          subtitle: AppStrings.posDailySalesGross,
+          accent: colors.primary,
+          onTap: onOpenDailySalesReport,
         ),
       ],
     );
@@ -235,32 +369,14 @@ class _DisabledWorkspace extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(SpacingTokens.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.lock_outline_rounded, size: 56),
-            const SizedBox(height: SpacingTokens.md),
-            Text(
-              AppStrings.posWorkspaceDisabled,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: SpacingTokens.sm),
-            Text(
-              AppStrings.posWorkspaceEnableFromSettings,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: SpacingTokens.lg),
-            FilledButton.icon(
-              onPressed: onOpenSettings,
-              icon: const Icon(Icons.settings_outlined),
-              label: Text(AppStrings.actionCancel),
-            ),
-          ],
-        ),
+    return QaydEmptyState(
+      icon: Icons.lock_outline_rounded,
+      title: AppStrings.posWorkspaceDisabled,
+      description: AppStrings.posWorkspaceEnableFromSettings,
+      action: FilledButton.icon(
+        onPressed: onOpenSettings,
+        icon: const Icon(Icons.settings_outlined),
+        label: Text(AppStrings.posWorkspaceOpenSettings),
       ),
     );
   }
@@ -273,24 +389,12 @@ class _WorkspaceFailure extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(SpacingTokens.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline_rounded, size: 48),
-            const SizedBox(height: SpacingTokens.md),
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: SpacingTokens.md),
-            FilledButton.tonal(
-              onPressed: onRetry,
-              child: Text(AppStrings.retryAction),
-            ),
-          ],
+  Widget build(BuildContext context) => QaydEmptyState(
+        icon: Icons.error_outline_rounded,
+        title: message,
+        action: FilledButton.tonal(
+          onPressed: onRetry,
+          child: Text(AppStrings.retryAction),
         ),
-      ),
-    );
-  }
+      );
 }

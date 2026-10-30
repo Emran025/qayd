@@ -27,19 +27,28 @@ final class SqlitePosProductCategoryRepository
   @override
   Future<Result<void>> save(PosProductCategory category) async {
     try {
-      await _db.insert(
+      final values = <String, Object?>{
+        'id': category.id,
+        'name': category.name,
+        'code': category.code,
+        'parent_id': category.parentId,
+        'is_active': category.isActive ? 1 : 0,
+        'created_at': category.createdAt.toUtc().toIso8601String(),
+        'updated_at': category.updatedAt.toUtc().toIso8601String(),
+      };
+      final updated = await _db.update(
         'pos_product_categories',
-        {
-          'id': category.id,
-          'name': category.name,
-          'code': category.code,
-          'parent_id': category.parentId,
-          'is_active': category.isActive ? 1 : 0,
-          'created_at': category.createdAt.toUtc().toIso8601String(),
-          'updated_at': category.updatedAt.toUtc().toIso8601String(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.abort,
+        values,
+        where: 'id = ?',
+        whereArgs: [category.id],
       );
+      if (updated == 0) {
+        await _db.insert(
+          'pos_product_categories',
+          values,
+          conflictAlgorithm: ConflictAlgorithm.abort,
+        );
+      }
       return const Success(null);
     } on DatabaseException {
       return FailureResult(DatabaseFailure(messageAr: AppStrings.posProductSaveFailed));

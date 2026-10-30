@@ -3,6 +3,7 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/data/database/migrations/migration_040_pos_foundation.dart';
 import 'package:qayd/data/database/migrations/migration_041_pos_invoice_metadata.dart';
 import 'package:qayd/data/database/migrations/migration_042_pos_product_categories.dart';
+import 'package:qayd/data/database/migrations/migration_registry.dart';
 import 'package:qayd/data/repositories/sqlite_pos_product_repository.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
@@ -77,6 +78,7 @@ void main() {
       await Migration040PosFoundation().up(db);
       await Migration041PosInvoiceMetadata().up(db);
       await Migration042PosProductCategories().up(db);
+      await MigrationRegistry.applyFromTo(db, fromVersion: 42, toVersion: 45);
       repository = SqlitePosProductRepository(
         db,
         _CurrencyRepository(currency),

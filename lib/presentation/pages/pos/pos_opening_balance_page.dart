@@ -1,15 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qayd/application/pos/get_pos_stock_balance_use_case.dart';
-import 'package:qayd/application/pos/record_pos_stock_movement_use_case.dart';
+import 'package:qayd/application/pos/post_pos_opening_balance_atomically_use_case.dart';
+import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
-import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
+import 'package:qayd/presentation/components/inputs/qayd_numeric_field.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/pos/pos_catalog_cubit.dart';
 import 'package:qayd/presentation/pos/pos_stock_cubit.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
+
+typedef PostPosOpeningBalance =
+    Future<Result<void>> Function(PostPosOpeningBalanceInput input);
 
 /// Records an append-only opening stock movement for one product.
 class PosOpeningBalancePage extends StatefulWidget {
@@ -18,11 +24,13 @@ class PosOpeningBalancePage extends StatefulWidget {
     required this.catalogCubit,
     required this.stockCubit,
     required this.warehouseId,
+    required this.postOpeningBalance,
   });
 
   final PosCatalogCubit catalogCubit;
   final PosStockCubit stockCubit;
   final String warehouseId;
+  final PostPosOpeningBalance postOpeningBalance;
 
   @override
   State<PosOpeningBalancePage> createState() => _PosOpeningBalancePageState();
@@ -34,6 +42,8 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
   final _costController = TextEditingController();
   PosProduct? _selectedProduct;
   bool _submitted = false;
+  String? _retryFingerprint;
+  String? _retryIdempotencyKey;
 
   @override
   void initState() {
@@ -49,7 +59,11 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
   }
 
   void _selectProduct(PosProduct? product) {
-    setState(() => _selectedProduct = product);
+    setState(() {
+      _selectedProduct = product;
+      _retryFingerprint = null;
+      _retryIdempotencyKey = null;
+    });
     if (product == null) return;
     widget.stockCubit.loadBalance(
       GetPosStockBalanceInput(
@@ -59,26 +73,65 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
     );
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final product = _selectedProduct;
     if (product == null) return;
     final quantityScaled = int.parse(_quantityController.text.trim());
     final unitCostMinor = int.parse(_costController.text.trim());
+    final fingerprint =
+        '${product.id}:$quantityScaled:${product.quantityScale}:$unitCostMinor:${product.currency.code}';
+    if (_retryFingerprint != fingerprint || _retryIdempotencyKey == null) {
+      _retryFingerprint = fingerprint;
+      _retryIdempotencyKey =
+          'opening:${DateTime.now().toUtc().microsecondsSinceEpoch}';
+    }
+    final idempotencyKey = _retryIdempotencyKey!;
     setState(() => _submitted = true);
-    widget.stockCubit.record(
-      RecordPosStockMovementInput(
+    final Result<void> result;
+    try {
+      result = await widget.postOpeningBalance(
+        PostPosOpeningBalanceInput(
+          productId: product.id,
+          quantityScaled: quantityScaled,
+          quantityScale: product.quantityScale,
+          unitCostMinor: unitCostMinor,
+          currencyCode: product.currency.code,
+          idempotencyKey: idempotencyKey,
+          sourceId: '$idempotencyKey:${product.id}',
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _submitted = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.posStockAppendFailed)),
+      );
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _submitted = false);
+    if (result.isFailure) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.failureOrNull?.messageAr ?? AppStrings.posStockAppendFailed,
+          ),
+        ),
+      );
+      return;
+    }
+    _retryFingerprint = null;
+    _retryIdempotencyKey = null;
+    await widget.stockCubit.loadBalance(
+      GetPosStockBalanceInput(
         productId: product.id,
         warehouseId: widget.warehouseId,
-        type: PosStockMovementType.opening,
-        direction: PosStockMovementDirection.inbound,
-        quantityScaled: quantityScaled,
-        quantityScale: product.quantityScale,
-        unitCostMinor: unitCostMinor,
-        currencyCode: product.currency.code,
-        idempotencyKey:
-            'opening:${product.id}:$quantityScaled:$unitCostMinor:${DateTime.now().microsecondsSinceEpoch}',
       ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(AppStrings.posOpeningBalanceSaved)),
     );
   }
 
@@ -89,46 +142,26 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
         BlocProvider.value(value: widget.catalogCubit),
         BlocProvider.value(value: widget.stockCubit),
       ],
-      child: BlocListener<PosStockCubit, PosStockState>(
-        listener: (context, state) {
-          if (!_submitted) return;
-          if (state.status == PosStockStatus.ready) {
-            setState(() => _submitted = false);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(AppStrings.posOpeningBalanceSaved)),
-            );
-          } else if (state.status == PosStockStatus.failure) {
-            setState(() => _submitted = false);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  state.failure?.messageAr ?? AppStrings.posStockAppendFailed,
-                ),
-              ),
-            );
-          }
-        },
-        child: Scaffold(
-          appBar: QaydAppBar(title: AppStrings.posOpeningBalanceTitle),
-          body: ListView(
-            padding: const EdgeInsets.all(SpacingTokens.lg),
-            children: [
-              Text(AppStrings.posOpeningBalanceDescription),
-              const SizedBox(height: SpacingTokens.lg),
-              _ProductField(onChanged: _selectProduct),
-              const SizedBox(height: SpacingTokens.md),
-              _OpeningBalanceForm(
-                formKey: _formKey,
-                quantityController: _quantityController,
-                costController: _costController,
-                product: _selectedProduct,
-                onSubmit: _submit,
-                submitted: _submitted,
-              ),
-              const SizedBox(height: SpacingTokens.md),
-              _CurrentBalanceCard(product: _selectedProduct),
-            ],
-          ),
+      child: QaydScaffold(
+        appBar: QaydAppBar(title: AppStrings.posOpeningBalanceTitle),
+        body: ListView(
+          padding: const EdgeInsets.all(SpacingTokens.lg),
+          children: [
+            Text(AppStrings.posOpeningBalanceDescription),
+            const SizedBox(height: SpacingTokens.lg),
+            _ProductField(onChanged: _selectProduct),
+            const SizedBox(height: SpacingTokens.md),
+            _OpeningBalanceForm(
+              formKey: _formKey,
+              quantityController: _quantityController,
+              costController: _costController,
+              product: _selectedProduct,
+              onSubmit: _submit,
+              submitted: _submitted,
+            ),
+            const SizedBox(height: SpacingTokens.md),
+            _CurrentBalanceCard(product: _selectedProduct),
+          ],
         ),
       ),
     );
@@ -149,16 +182,24 @@ class _ProductField extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
         if (state.status == PosCatalogStatus.failure) {
-          return Text(
-              state.failure?.messageAr ?? AppStrings.posProductReadFailed);
+          return QaydEmptyState(
+            icon: Icons.error_outline_rounded,
+            title: state.failure?.messageAr ?? AppStrings.posProductReadFailed,
+            action: FilledButton.tonal(
+              onPressed: () => context.read<PosCatalogCubit>().load(),
+              child: Text(AppStrings.retryAction),
+            ),
+          );
         }
         if (state.products.isEmpty) {
-          return Text(AppStrings.posOpeningBalanceNoProducts);
+          return QaydEmptyState(
+            icon: Icons.inventory_2_outlined,
+            title: AppStrings.posOpeningBalanceNoProducts,
+          );
         }
         return DropdownButtonFormField<PosProduct>(
           decoration: InputDecoration(
             labelText: AppStrings.posOpeningBalanceProduct,
-            border: const OutlineInputBorder(),
           ),
           items: state.products
               .map(
@@ -219,25 +260,17 @@ class _OpeningBalanceForm extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextFormField(
+          QaydNumericField(
             controller: quantityController,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: AppStrings.posOpeningBalanceQuantity,
-              helperText: AppStrings.posOpeningBalanceQuantityHint(scale),
-              border: const OutlineInputBorder(),
-            ),
+            label: AppStrings.posOpeningBalanceQuantity,
+            helperText: AppStrings.posOpeningBalanceQuantityHint(scale),
             validator: _positiveInteger,
           ),
           const SizedBox(height: SpacingTokens.md),
-          TextFormField(
+          QaydNumericField(
             controller: costController,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: AppStrings.posOpeningBalanceUnitCost,
-              helperText: AppStrings.posOpeningBalanceCostHint(currency),
-              border: const OutlineInputBorder(),
-            ),
+            label: AppStrings.posOpeningBalanceUnitCost,
+            helperText: AppStrings.posOpeningBalanceCostHint(currency),
             validator: _nonNegativeInteger,
           ),
           const SizedBox(height: SpacingTokens.md),

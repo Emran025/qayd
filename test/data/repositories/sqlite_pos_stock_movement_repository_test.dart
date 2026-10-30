@@ -3,6 +3,7 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/data/database/migrations/migration_040_pos_foundation.dart';
 import 'package:qayd/data/database/migrations/migration_041_pos_invoice_metadata.dart';
 import 'package:qayd/data/database/migrations/migration_042_pos_product_categories.dart';
+import 'package:qayd/data/database/migrations/migration_registry.dart';
 import 'package:qayd/data/repositories/sqlite_pos_product_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_stock_movement_repository.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
@@ -76,6 +77,7 @@ void main() {
       await Migration040PosFoundation().up(db);
       await Migration041PosInvoiceMetadata().up(db);
       await Migration042PosProductCategories().up(db);
+      await MigrationRegistry.applyFromTo(db, fromVersion: 42, toVersion: 45);
       await db.insert('pos_warehouses', <String, Object?>{
         'id': 'warehouse-1',
         'code': 'POS-MAIN',
@@ -242,6 +244,101 @@ void main() {
 
       expect(result.isFailure, isTrue);
       expect(await db.query('pos_stock_movements'), isEmpty);
+    });
+
+    test('lists movements in deterministic descending order with pagination',
+        () async {
+      await repository.append(
+        movement(
+          id: 'opening',
+          type: PosStockMovementType.opening,
+          direction: PosStockMovementDirection.inbound,
+          quantity: 10,
+          cost: 100,
+          occurredAt: DateTime.utc(2026, 1, 1),
+        ),
+      );
+      await repository.append(
+        movement(
+          id: 'purchase',
+          type: PosStockMovementType.purchase,
+          direction: PosStockMovementDirection.inbound,
+          quantity: 5,
+          cost: 200,
+          occurredAt: DateTime.utc(2026, 1, 2),
+        ),
+      );
+      await repository.append(
+        movement(
+          id: 'sale',
+          type: PosStockMovementType.sale,
+          direction: PosStockMovementDirection.outbound,
+          quantity: 2,
+          cost: 133,
+          occurredAt: DateTime.utc(2026, 1, 3),
+        ),
+      );
+
+      final firstPage = await repository.listMovements(
+        warehouseId: 'warehouse-1',
+        limit: 2,
+      );
+      final secondPage = await repository.listMovements(
+        warehouseId: 'warehouse-1',
+        limit: 2,
+        offset: 2,
+      );
+
+      expect(firstPage.isSuccess, isTrue);
+      expect(
+          firstPage.valueOrNull!.map((item) => item.id), ['sale', 'purchase']);
+      expect(secondPage.valueOrNull!.map((item) => item.id), ['opening']);
+    });
+
+    test('filters by type, product, and UTC date range', () async {
+      await repository.append(
+        movement(
+          id: 'opening',
+          type: PosStockMovementType.opening,
+          direction: PosStockMovementDirection.inbound,
+          quantity: 10,
+          cost: 100,
+          occurredAt: DateTime.utc(2026, 1, 1),
+        ),
+      );
+      await repository.append(
+        movement(
+          id: 'purchase',
+          type: PosStockMovementType.purchase,
+          direction: PosStockMovementDirection.inbound,
+          quantity: 5,
+          cost: 200,
+          occurredAt: DateTime.utc(2026, 1, 2),
+        ),
+      );
+
+      final result = await repository.listMovements(
+        warehouseId: 'warehouse-1',
+        productId: 'product-1',
+        type: PosStockMovementType.purchase,
+        fromInclusive: DateTime.utc(2026, 1, 2),
+        untilExclusive: DateTime.utc(2026, 1, 3),
+      );
+
+      expect(result.isSuccess, isTrue);
+      expect(result.valueOrNull!.map((item) => item.id), ['purchase']);
+      expect(result.valueOrNull!.single.productId, 'product-1');
+      expect(result.valueOrNull!.single.type, PosStockMovementType.purchase);
+    });
+
+    test('rejects an inverted date range', () async {
+      final result = await repository.listMovements(
+        warehouseId: 'warehouse-1',
+        fromInclusive: DateTime.utc(2026, 1, 3),
+        untilExclusive: DateTime.utc(2026, 1, 2),
+      );
+
+      expect(result.isFailure, isTrue);
     });
   });
 }

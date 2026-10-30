@@ -4,6 +4,7 @@ import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/entities/pos_profit_margin.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
 import 'package:qayd/domain/repositories/pos_product_repository.dart';
 import 'package:qayd/domain/value_objects/money.dart';
@@ -25,6 +26,7 @@ final class CreatePosProductInput {
     this.description,
     this.categoryId,
     this.unitName = 'unit',
+    this.profitMargin,
   });
 
   final String sku;
@@ -39,6 +41,7 @@ final class CreatePosProductInput {
   final String? description;
   final String? categoryId;
   final String unitName;
+  final PosProfitMargin? profitMargin;
 }
 
 final class CreatePosProductUseCase {
@@ -85,12 +88,11 @@ final class CreatePosProductUseCase {
           scale: input.quantityScale,
         ),
         expiryTracking: input.expiryTracking,
-        barcodes: input.barcodes
-            .map(PosBarcode.new)
-            .toList(growable: false),
+        barcodes: input.barcodes.map(PosBarcode.new).toList(growable: false),
         description: input.description,
         categoryId: input.categoryId,
         unitName: input.unitName,
+        profitMargin: input.profitMargin,
       );
       return await _repository.save(product);
     } catch (error) {

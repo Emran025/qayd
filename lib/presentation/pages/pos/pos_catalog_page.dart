@@ -8,16 +8,25 @@ import 'package:qayd/application/pos/list_pos_product_categories_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/entities/pos_profit_margin.dart';
 import 'package:qayd/domain/entities/pos_product_category.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
+import 'package:qayd/domain/value_objects/money.dart';
+import 'package:qayd/domain/value_objects/pos_barcode.dart';
+import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/presentation/pages/pos/pos_product_categories_page.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
+import 'package:qayd/presentation/components/atomic/qayd_floating_action_button.dart';
+import 'package:qayd/presentation/components/inputs/qayd_text_field.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/navigation/qayd_page_route.dart';
+import 'package:qayd/presentation/pages/pos/widgets/pos_product_form_fields.dart';
 import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/pos/pos_catalog_cubit.dart';
 import 'package:qayd/presentation/theme/qayd_theme_extensions.dart';
-import 'package:qayd/presentation/theme/radius_tokens.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 
 /// POS product catalog screen. The page is presentation-only: all writes and
 /// reads are delegated to [PosCatalogCubit].
@@ -123,6 +132,22 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
     await context.read<PosCatalogCubit>().create(input);
   }
 
+  Future<void> _openEdit(PosProduct product) async {
+    final categories = widget.listCategoriesUseCase == null
+        ? const <PosProductCategory>[]
+        : (await widget.listCategoriesUseCase!()).valueOrNull ??
+            const <PosProductCategory>[];
+    if (!mounted) return;
+    final edited = await showModalBottomSheet<PosProduct>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) =>
+            _EditProductSheet(product: product, categories: categories));
+    if (edited != null && mounted)
+      await context.read<PosCatalogCubit>().save(edited);
+  }
+
   Future<void> _confirmDeactivate(PosProduct product) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -146,6 +171,10 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
     }
   }
 
+  Future<void> _reactivate(PosProduct product) async {
+    await context.read<PosCatalogCubit>().reactivate(product.id);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<QaydCustomColors>()!;
@@ -157,9 +186,22 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
             ..showSnackBar(SnackBar(content: Text(state.failure!.messageAr)));
         }
       },
-      child: Scaffold(
-        appBar: QaydAppBar(title: AppStrings.posCatalogTitle),
-        floatingActionButton: FloatingActionButton.extended(
+      child: QaydScaffold(
+        appBar: QaydAppBar(
+          title: AppStrings.posCatalogTitle,
+          actions: [
+            IconButton(
+              tooltip: AppStrings.posCatalogManageCategories,
+              icon: const Icon(Icons.category_outlined),
+              onPressed: () => Navigator.of(context).push(
+                QaydPageRoute.slideFromStart<void>(
+                  builder: (_) => const PosProductCategoriesPage(),
+                ),
+              ),
+            ),
+          ],
+        ),
+        floatingActionButton: QaydFloatingActionButton.extended(
           heroTag: 'fab_pos_catalog_add',
           onPressed: _openCreate,
           icon: const Icon(Icons.add_rounded),
@@ -174,29 +216,34 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
                 SpacingTokens.md,
                 SpacingTokens.xs,
               ),
-              child: TextField(
+              child: QaydTextField(
                 controller: _searchController,
                 onChanged: _onSearchChanged,
                 textInputAction: TextInputAction.search,
-                decoration: InputDecoration(
-                  hintText: AppStrings.posCatalogSearchHint,
-                  prefixIcon: const Icon(Icons.search_rounded),
-                  suffixIcon: _searchController.text.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: AppStrings.actionCancel,
-                          onPressed: () {
-                            _searchController.clear();
-                            _onSearchChanged('');
-                            setState(() {});
-                          },
-                          icon: const Icon(Icons.clear_rounded),
-                        ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(RadiusTokens.md),
-                  ),
-                  isDense: true,
-                ),
+                hint: AppStrings.posCatalogSearchHint,
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: AppStrings.actionCancel,
+                        onPressed: () {
+                          _searchController.clear();
+                          _onSearchChanged('');
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.clear_rounded),
+                      ),
+              ),
+            ),
+            BlocBuilder<PosCatalogCubit, PosCatalogState>(
+              buildWhen: (previous, current) =>
+                  previous.includeInactive != current.includeInactive,
+              builder: (context, state) => SwitchListTile.adaptive(
+                value: state.includeInactive,
+                title: Text(AppStrings.posCatalogShowInactive),
+                onChanged: (value) => context
+                    .read<PosCatalogCubit>()
+                    .load(includeInactive: value),
               ),
             ),
             Expanded(
@@ -207,18 +254,34 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
                     return const Center(child: CircularProgressIndicator());
                   }
                   if (state.status == PosCatalogStatus.failure) {
-                    return _FailureState(
-                      message: state.failure?.messageAr ??
+                    return QaydEmptyState(
+                      icon: Icons.error_outline_rounded,
+                      title: state.failure?.messageAr ??
                           AppStrings.posProductReadFailed,
-                      onRetry: () => context
-                          .read<PosCatalogCubit>()
-                          .load(search: state.search),
+                      action: FilledButton.tonal(
+                        onPressed: () => context
+                            .read<PosCatalogCubit>()
+                            .load(search: state.search),
+                        child: Text(AppStrings.retryAction),
+                      ),
                     );
                   }
                   if (state.products.isEmpty) {
-                    return _EmptyState(
-                      hasSearch: state.search?.isNotEmpty == true,
-                      onAdd: _openCreate,
+                    final hasSearch = state.search?.isNotEmpty == true;
+                    return QaydEmptyState(
+                      icon: hasSearch
+                          ? Icons.search_off_rounded
+                          : Icons.inventory_2_outlined,
+                      title: hasSearch
+                          ? AppStrings.posCatalogNoResults
+                          : AppStrings.posCatalogEmpty,
+                      action: hasSearch
+                          ? null
+                          : FilledButton.icon(
+                              onPressed: _openCreate,
+                              icon: const Icon(Icons.add_rounded),
+                              label: Text(AppStrings.posCatalogAddProduct),
+                            ),
                     );
                   }
                   return RefreshIndicator(
@@ -238,8 +301,10 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
                       itemBuilder: (_, index) => _ProductCard(
                         product: state.products[index],
                         colors: colors,
+                        onEdit: () => _openEdit(state.products[index]),
                         onDeactivate: () =>
                             _confirmDeactivate(state.products[index]),
+                        onReactivate: () => _reactivate(state.products[index]),
                       ),
                     ),
                   );
@@ -258,15 +323,20 @@ class _ProductCard extends StatelessWidget {
     required this.product,
     required this.colors,
     required this.onDeactivate,
+    required this.onReactivate,
+    required this.onEdit,
   });
 
   final PosProduct product;
   final QaydCustomColors colors;
   final VoidCallback onDeactivate;
+  final VoidCallback onReactivate;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
-    final barcode = product.primaryBarcode?.value;
+    final barcodes =
+        product.barcodes.map((barcode) => barcode.value).join(', ');
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(SpacingTokens.md),
@@ -291,8 +361,8 @@ class _ProductCard extends StatelessWidget {
                   ),
                   const SizedBox(height: SpacingTokens.xs),
                   Text('${AppStrings.posCatalogSku}: ${product.sku}'),
-                  if (barcode != null)
-                    Text('${AppStrings.posCatalogBarcode}: $barcode'),
+                  if (barcodes.isNotEmpty)
+                    Text('${AppStrings.posCatalogBarcode}: $barcodes'),
                   const SizedBox(height: SpacingTokens.sm),
                   Wrap(
                     spacing: SpacingTokens.md,
@@ -311,81 +381,21 @@ class _ProductCard extends StatelessWidget {
             ),
             PopupMenuButton<String>(
               onSelected: (value) {
+                if (value == 'edit') onEdit();
                 if (value == 'deactivate') onDeactivate();
+                if (value == 'reactivate') onReactivate();
               },
               itemBuilder: (_) => [
                 PopupMenuItem(
-                  value: 'deactivate',
-                  child: Text(AppStrings.posCatalogDeactivate),
+                    value: 'edit', child: Text(AppStrings.posCatalogEditTitle)),
+                PopupMenuItem(
+                  value: product.isActive ? 'deactivate' : 'reactivate',
+                  child: Text(product.isActive
+                      ? AppStrings.posCatalogDeactivate
+                      : AppStrings.posCatalogReactivate),
                 ),
               ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FailureState extends StatelessWidget {
-  const _FailureState({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(SpacingTokens.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline_rounded, size: 48),
-            const SizedBox(height: SpacingTokens.md),
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: SpacingTokens.md),
-            FilledButton.tonal(
-              onPressed: onRetry,
-              child: Text(AppStrings.retryAction),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.hasSearch, required this.onAdd});
-
-  final bool hasSearch;
-  final VoidCallback onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(SpacingTokens.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.inventory_2_outlined, size: 64),
-            const SizedBox(height: SpacingTokens.md),
-            Text(
-              hasSearch
-                  ? AppStrings.posCatalogNoResults
-                  : AppStrings.posCatalogEmpty,
-              textAlign: TextAlign.center,
-            ),
-            if (!hasSearch) ...[
-              const SizedBox(height: SpacingTokens.md),
-              FilledButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.add_rounded),
-                label: Text(AppStrings.posCatalogAddProduct),
-              ),
-            ],
           ],
         ),
       ),
@@ -414,12 +424,14 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
   final _name = TextEditingController();
   final _salePrice = TextEditingController();
   final _purchasePrice = TextEditingController();
+  final _profitMargin = TextEditingController(text: '0');
   final _unitName = TextEditingController(text: 'unit');
   final _quantityScale = TextEditingController(text: '0');
   final _reorderLevel = TextEditingController(text: '0');
   final _barcode = TextEditingController();
   final _description = TextEditingController();
   bool _expiryTracking = false;
+  String _profitMarginType = 'percentage';
   String? _categoryId;
   late final List<PosProductCategory> _categories = [...widget.categories];
 
@@ -429,30 +441,13 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
     _name.dispose();
     _salePrice.dispose();
     _purchasePrice.dispose();
+    _profitMargin.dispose();
     _unitName.dispose();
     _quantityScale.dispose();
     _reorderLevel.dispose();
     _barcode.dispose();
     _description.dispose();
     super.dispose();
-  }
-
-  String? _required(String? value, String message) {
-    return value == null || value.trim().isEmpty ? message : null;
-  }
-
-  String? _nonNegativeInteger(String? value, String message) {
-    final raw = value?.trim() ?? '';
-    if (raw.isEmpty) return message;
-    final parsed = int.tryParse(raw);
-    return parsed == null || parsed < 0 ? message : null;
-  }
-
-  String? _scaleValidator(String? value) {
-    final parsed = int.tryParse(value?.trim() ?? '');
-    return parsed == null || parsed < 0 || parsed > 6
-        ? AppStrings.posProductScaleInvalid
-        : null;
   }
 
   Future<void> _addCategory() async {
@@ -493,7 +488,16 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final scale = int.parse(_quantityScale.text.trim());
-    final barcode = _barcode.text.trim();
+    final profitMargin = _parseProfitMargin(
+      _profitMargin.text,
+      _profitMarginType,
+      widget.currency,
+    );
+    final barcodes = _barcode.text
+        .split(RegExp(r'[,\n]'))
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
     Navigator.of(context).pop(
       CreatePosProductInput(
         sku: _sku.text.trim(),
@@ -501,12 +505,13 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
         currencyCode: widget.currency.code,
         salePriceMinor: int.parse(_salePrice.text.trim()),
         purchasePriceMinor: int.parse(_purchasePrice.text.trim()),
+        profitMargin: profitMargin,
         unitName: _unitName.text.trim(),
         categoryId: _categoryId,
         quantityScale: scale,
         reorderLevelScaled: int.parse(_reorderLevel.text.trim()),
         expiryTracking: _expiryTracking,
-        barcodes: barcode.isEmpty ? const <String>[] : [barcode],
+        barcodes: barcodes,
         description:
             _description.text.trim().isEmpty ? null : _description.text.trim(),
       ),
@@ -534,104 +539,33 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: SpacingTokens.md),
-              _field(
-                controller: _name,
-                label: AppStrings.posCatalogName,
-                validator: (value) =>
-                    _required(value, AppStrings.posProductNameRequired),
-              ),
-              _field(
-                controller: _sku,
-                label: AppStrings.posCatalogSku,
-                validator: (value) =>
-                    _required(value, AppStrings.posProductSkuRequired),
-              ),
-              _field(
-                controller: _salePrice,
-                label: AppStrings.posCatalogSalePriceMinor,
-                keyboardType: TextInputType.number,
-                validator: (value) => _nonNegativeInteger(
-                    value, AppStrings.posProductPriceInvalid),
-              ),
-              _field(
-                controller: _purchasePrice,
-                label: AppStrings.posCatalogPurchasePriceMinor,
-                keyboardType: TextInputType.number,
-                validator: (value) => _nonNegativeInteger(
-                    value, AppStrings.posProductPriceInvalid),
-              ),
-              _field(
-                controller: _unitName,
-                label: AppStrings.posCatalogUnit,
-                validator: (value) =>
-                    _required(value, AppStrings.posProductUnitRequired),
-              ),
-              DropdownButtonFormField<String>(
-                initialValue: _categoryId ?? '',
-                decoration: InputDecoration(
-                  labelText: AppStrings.posCatalogCategory,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(RadiusTokens.md),
-                  ),
-                  isDense: true,
-                ),
-                items: [
-                  DropdownMenuItem<String>(
-                    value: '',
-                    child: Text(AppStrings.posCatalogNoCategory),
-                  ),
-                  ..._categories.map(
-                    (category) => DropdownMenuItem<String>(
-                      value: category.id,
-                      child: Text('${category.name} (${category.code})'),
-                    ),
-                  ),
-                ],
-                onChanged: (value) => setState(
-                  () => _categoryId =
-                      value == null || value.isEmpty ? null : value,
-                ),
-              ),
-              if (widget.createCategoryUseCase != null)
-                Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: TextButton.icon(
-                    onPressed: _addCategory,
-                    icon: const Icon(Icons.add_rounded),
-                    label: Text(AppStrings.posCatalogAddCategory),
-                  ),
-                ),
-              const SizedBox(height: SpacingTokens.sm),
-              _field(
-                controller: _quantityScale,
-                label: AppStrings.posCatalogQuantityScale,
-                keyboardType: TextInputType.number,
-                validator: _scaleValidator,
-              ),
-              _field(
-                controller: _reorderLevel,
-                label: AppStrings.posCatalogReorderLevel,
-                keyboardType: TextInputType.number,
-                validator: (value) => _nonNegativeInteger(
-                  value,
-                  AppStrings.posProductThresholdInvalid,
-                ),
-              ),
-              _field(
-                controller: _barcode,
-                label: AppStrings.posCatalogBarcode,
-                keyboardType: TextInputType.number,
-              ),
-              _field(
-                controller: _description,
-                label: AppStrings.posCatalogDescription,
-                maxLines: 2,
-              ),
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                value: _expiryTracking,
-                onChanged: (value) => setState(() => _expiryTracking = value),
-                title: Text(AppStrings.posCatalogExpiryTracking),
+              PosProductFormFields(
+                currency: widget.currency,
+                nameController: _name,
+                skuController: _sku,
+                salePriceController: _salePrice,
+                purchasePriceController: _purchasePrice,
+                profitMarginController: _profitMargin,
+                profitMarginType: _profitMarginType,
+                onProfitMarginTypeChanged: (value) => setState(() {
+                  _profitMarginType = value;
+                  _profitMargin.text = '0';
+                }),
+                unitNameController: _unitName,
+                reorderLevelController: _reorderLevel,
+                barcodeController: _barcode,
+                descriptionController: _description,
+                categories: _categories,
+                categoryId: _categoryId,
+                onCategoryChanged: (value) =>
+                    setState(() => _categoryId = value),
+                quantityScaleController: _quantityScale,
+                quantityScaleValue: _quantityScale.text,
+                expiryTracking: _expiryTracking,
+                onExpiryTrackingChanged: (value) =>
+                    setState(() => _expiryTracking = value),
+                onAddCategory:
+                    widget.createCategoryUseCase == null ? null : _addCategory,
               ),
               const SizedBox(height: SpacingTokens.sm),
               Row(
@@ -653,31 +587,6 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _field({
-    required TextEditingController controller,
-    required String label,
-    String? Function(String?)? validator,
-    TextInputType? keyboardType,
-    int maxLines = 1,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: SpacingTokens.sm),
-      child: TextFormField(
-        controller: controller,
-        validator: validator,
-        keyboardType: keyboardType,
-        maxLines: maxLines,
-        decoration: InputDecoration(
-          labelText: label,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(RadiusTokens.md),
-          ),
-          isDense: true,
         ),
       ),
     );
@@ -716,25 +625,21 @@ class _CreateProductCategoryDialogState
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextFormField(
+              QaydTextField(
                 controller: _nameController,
                 autofocus: true,
                 textInputAction: TextInputAction.next,
-                decoration: InputDecoration(
-                  labelText: AppStrings.posCatalogCategoryName,
-                ),
+                label: AppStrings.posCatalogCategoryName,
                 validator: (value) => _required(
                   value,
                   AppStrings.posCatalogCategoryNameRequired,
                 ),
               ),
               const SizedBox(height: SpacingTokens.sm),
-              TextFormField(
+              QaydTextField(
                 controller: _codeController,
                 textCapitalization: TextCapitalization.characters,
-                decoration: InputDecoration(
-                  labelText: AppStrings.posCatalogCategoryCode,
-                ),
+                label: AppStrings.posCatalogCategoryCode,
                 validator: (value) => _required(
                   value,
                   AppStrings.posCatalogCategoryCodeRequired,
@@ -768,3 +673,203 @@ Route<void> posCatalogRoute({required CurrencyCode currency}) =>
     QaydPageRoute.slideFromStart<void>(
       builder: (_) => PosCatalogPage(currency: currency),
     );
+
+class _EditProductSheet extends StatefulWidget {
+  const _EditProductSheet({required this.product, required this.categories});
+  final PosProduct product;
+  final List<PosProductCategory> categories;
+  @override
+  State<_EditProductSheet> createState() => _EditProductSheetState();
+}
+
+class _EditProductSheetState extends State<_EditProductSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final _name = TextEditingController(text: widget.product.name);
+  late final _sku = TextEditingController(text: widget.product.sku);
+  late final _sale =
+      TextEditingController(text: '${widget.product.salePrice.minorUnits}');
+  late final _purchase =
+      TextEditingController(text: '${widget.product.purchasePrice.minorUnits}');
+  final _profitMargin = TextEditingController();
+  late final _unit = TextEditingController(text: widget.product.unitName);
+  late final _reorder =
+      TextEditingController(text: '${widget.product.reorderLevel.scaledUnits}');
+  late final _barcodes = TextEditingController(
+      text: widget.product.barcodes.map((b) => b.value).join('\n'));
+  late final _description =
+      TextEditingController(text: widget.product.description ?? '');
+  String? _categoryId;
+  late String _profitMarginType;
+  late bool _expiryTracking = widget.product.expiryTracking;
+
+  @override
+  void initState() {
+    super.initState();
+    _categoryId = widget.product.categoryId;
+    final margin = widget.product.profitMargin;
+    _profitMarginType = margin.isPercentage ? 'percentage' : 'fixed_amount';
+    _profitMargin.text = margin.isPercentage
+        ? _formatScaledAmount(margin.percentageBasisPoints!, 2)
+        : _formatScaledAmount(
+            margin.fixedAmount!.minorUnits,
+            widget.product.currency.fractionalDigits,
+          );
+  }
+
+  @override
+  void dispose() {
+    for (final c in [
+      _name,
+      _sku,
+      _sale,
+      _purchase,
+      _profitMargin,
+      _unit,
+      _reorder,
+      _barcodes,
+      _description,
+    ]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    try {
+      final barcodes = _barcodes.text
+          .split(RegExp(r'[,\n]'))
+          .map((v) => v.trim())
+          .where((v) => v.isNotEmpty)
+          .map(PosBarcode.new)
+          .toList(growable: false);
+      final edited = widget.product.updateDetails(
+        name: _name.text,
+        sku: _sku.text,
+        salePrice: Money.fromMinorUnits(
+            int.parse(_sale.text.trim()), widget.product.currency),
+        purchasePrice: Money.fromMinorUnits(
+            int.parse(_purchase.text.trim()), widget.product.currency),
+        profitMargin: _parseProfitMargin(
+          _profitMargin.text,
+          _profitMarginType,
+          widget.product.currency,
+        ),
+        unitName: _unit.text,
+        categoryId: _categoryId,
+        clearCategory: _categoryId == null,
+        description: _description.text,
+        clearDescription: _description.text.trim().isEmpty,
+        reorderLevel: PosQuantity.fromScaled(int.parse(_reorder.text.trim()),
+            scale: widget.product.quantityScale),
+        expiryTracking: _expiryTracking,
+        barcodes: barcodes,
+      );
+      Navigator.of(context).pop(edited);
+    } catch (error) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        SpacingTokens.md,
+        SpacingTokens.md,
+        SpacingTokens.md,
+        bottomInset + SpacingTokens.md,
+      ),
+      child: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                AppStrings.posCatalogEditTitle,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: SpacingTokens.md),
+              PosProductFormFields(
+                currency: widget.product.currency,
+                nameController: _name,
+                skuController: _sku,
+                salePriceController: _sale,
+                purchasePriceController: _purchase,
+                profitMarginController: _profitMargin,
+                profitMarginType: _profitMarginType,
+                onProfitMarginTypeChanged: (value) => setState(() {
+                  _profitMarginType = value;
+                  _profitMargin.text = '0';
+                }),
+                unitNameController: _unit,
+                reorderLevelController: _reorder,
+                barcodeController: _barcodes,
+                descriptionController: _description,
+                categories: widget.categories,
+                categoryId: _categoryId,
+                onCategoryChanged: (value) =>
+                    setState(() => _categoryId = value),
+                quantityScaleValue: '${widget.product.quantityScale}',
+                quantityScaleReadOnly: true,
+                expiryTracking: _expiryTracking,
+                onExpiryTrackingChanged: (value) =>
+                    setState(() => _expiryTracking = value),
+              ),
+              FilledButton(onPressed: _submit, child: Text(AppStrings.save)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+PosProfitMargin _parseProfitMargin(
+  String raw,
+  String type,
+  CurrencyCode currency,
+) {
+  final digits = type == 'percentage' ? 2 : currency.fractionalDigits;
+  final scaled = _parseScaledAmount(raw, digits);
+  if (scaled == null) throw const FormatException('Invalid profit margin');
+  return type == 'percentage'
+      ? PosProfitMargin.percentage(scaled)
+      : PosProfitMargin.fixedAmount(Money.fromMinorUnits(scaled, currency));
+}
+
+int? _parseScaledAmount(String raw, int digits) {
+  final text = raw.trim().replaceAll(',', '.');
+  if (text.isEmpty || digits < 0 || digits > 18) return null;
+  final parts = text.split('.');
+  if (parts.length > 2) return null;
+  final whole = parts.first.isEmpty ? '0' : parts.first;
+  final fraction = parts.length == 2 ? parts[1] : '';
+  if (!RegExp(r'^\d+$').hasMatch(whole) ||
+      (fraction.isNotEmpty && !RegExp(r'^\d+$').hasMatch(fraction)) ||
+      fraction.length > digits ||
+      (digits == 0 && parts.length > 1)) {
+    return null;
+  }
+  final factor = BigInt.from(10).pow(digits);
+  final minor = BigInt.parse(whole) * factor +
+      BigInt.parse(fraction.padRight(digits, '0').isEmpty
+          ? '0'
+          : fraction.padRight(digits, '0'));
+  if (minor > BigInt.parse('9223372036854775807')) return null;
+  return minor.toInt();
+}
+
+String _formatScaledAmount(int value, int digits) {
+  if (digits == 0) return value.toString();
+  final factor = BigInt.from(10).pow(digits);
+  final amount = BigInt.from(value);
+  final whole = amount ~/ factor;
+  final fraction = (amount % factor).toString().padLeft(digits, '0');
+  final trimmed = fraction.replaceFirst(RegExp(r'0+$'), '');
+  return trimmed.isEmpty ? '$whole' : '$whole.$trimmed';
+}

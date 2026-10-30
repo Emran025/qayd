@@ -144,5 +144,37 @@ void main() {
       expect(deactivated.isActive, isFalse);
       expect(reactivated.isActive, isTrue);
     });
+
+    test('updateDetails can clear category and description', () {
+      final product = PosProduct.create(
+        id: 'product-1',
+        sku: 'SKU-1',
+        name: 'Coffee',
+        currency: currency,
+        salePrice: amount(1500),
+        purchasePrice: amount(900),
+        categoryId: 'category-1',
+        description: 'Old description',
+      );
+
+      final changed = product.updateDetails(
+        clearCategory: true,
+        clearDescription: true,
+      );
+
+      expect(changed.categoryId, isNull);
+      expect(changed.description, isNull);
+      expect(product.categoryId, 'category-1');
+      expect(product.description, 'Old description');
+    });
+
+    test('updateDetails rejects changing the quantity scale', () {
+      final product = validProduct(quantityScale: 2);
+
+      expect(
+        () => product.updateDetails(quantityScale: 3),
+        throwsA(isA<InvalidPosProductException>()),
+      );
+    });
   });
 }

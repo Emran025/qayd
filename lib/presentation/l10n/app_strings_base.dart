@@ -2804,6 +2804,8 @@ abstract class AppStringsBase {
   String get posProductCurrencyMismatch => 'عملة سعر المنتج غير متطابقة.';
   String get posProductCurrencyNotFound => 'عملة المنتج غير موجودة.';
   String get posProductScaleInvalid => 'مقياس كمية المنتج غير صالح.';
+  String get posProductScaleImmutable =>
+      'لا يمكن تغيير مقياس الكمية بعد إنشاء المنتج.';
   String get posProductThresholdInvalid => 'حد إعادة الطلب غير صالح.';
   String get posProductNotFound => 'المنتج غير موجود.';
   String get posProductReadFailed => 'تعذر قراءة منتجات نقطة البيع.';
@@ -2818,13 +2820,81 @@ abstract class AppStringsBase {
       'فعّل نقطة البيع من الإعدادات أولاً للوصول إلى هذه المساحة.';
   String get posWorkspaceCatalogSubtitle =>
       'إدارة المنتجات والأسعار والباركودات';
+  String get posWorkspacePurchaseSubtitle =>
+      'استلام المشتريات وتسجيل المخزون والقيد معاً';
   String get posWorkspaceSalesTitle => 'المبيعات';
   String get posWorkspaceComingSoon => 'ستتوفر بعد بناء نواة المخزون والفوترة.';
+  String get posPurchaseTitle => 'استلام المشتريات';
+  String get posPurchaseDescription =>
+      'تُرحّل الفاتورة والمخزون والقيد المحاسبي في معاملة واحدة.';
+  String get posPurchaseSupplier => 'حساب المورد';
+  String get posPurchaseSelectSupplier => 'اختر حساب المورد';
+  String get posPurchaseProducts => 'الأصناف';
+  String get posPurchaseNoProducts => 'لا توجد أصناف نشطة في الكتالوج.';
+  String get posPurchaseAddProduct => 'إضافة';
+  String get posPurchaseAlreadyAdded => 'الصنف موجود في قائمة الاستلام.';
+  String get posPurchaseQuantity => 'الكمية';
+  String get posPurchaseUnitCost => 'تكلفة الوحدة';
+  String get posPurchaseSourceUnitPrice => 'سعر الوحدة بعملة فاتورة المورد';
+  String get posPurchaseCurrencyLocked =>
+      'أفرغ السلة أولاً لتغيير عملة فاتورة الشراء.';
+  String get posPurchaseInventoryCost => 'تكلفة المخزون بعد التحويل';
+  String get posPurchaseProposedSalePrice => 'سعر البيع المقترح بعد الهامش';
+  String get posPurchaseCurrentCatalogSalePrice =>
+      'سعر البيع الحالي في الكتالوج';
+  String get posPurchaseApplyProposedSalePrice =>
+      'اعتماد السعر المقترح في الكتالوج';
+  String get posPurchaseEnterCostForCurrency =>
+      'أدخل سعر الشراء بعملة الفاتورة؛ لا يوجد سعر كتالوج بهذه العملة.';
+  String get posProfitMarginTitle => 'هامش الربح المقترح';
+  String get posProfitMarginPercentage => 'نسبة مئوية';
+  String get posProfitMarginFixedAmount => 'مبلغ ثابت بعملة الصنف';
+  String get posProfitMarginAmount => 'قيمة الهامش';
+  String get posProfitMarginHint =>
+      'يُحسب سعر مقترح من التكلفة والهامش، ولا يتغير سعر البيع إلا عند اعتمادك له.';
+  String get posCurrencyRatesTitle => 'أسعار الصرف اليدوية';
+  String get posCurrencyRatesDescription =>
+      'تُدخل الأسعار صراحةً. كل تعديل يُضاف كسجل جديد ولا يجلب التطبيق أسعاراً تلقائياً.';
+  String get posCurrencyRateFrom => 'من العملة';
+  String get posCurrencyRateTo => 'إلى العملة';
+  String get posCurrencyRateValue => 'كم وحدة من عملة الهدف لكل وحدة مصدر؟';
+  String get posCurrencyRateNote => 'ملاحظة أو مرجع السعر (اختياري)';
+  String get posCurrencyRateSave => 'تسجيل سعر جديد';
+  String get posCurrencyRateSaved => 'تم حفظ سعر الصرف كسجل جديد.';
+  String get posCurrencyRateHistory => 'سجل الأسعار (الأحدث أولاً)';
+  String get posCurrencyRateNoHistory => 'لا توجد أسعار مسجلة لهذا الزوج.';
+  String get posCurrencyRateInvalid => 'أدخل سعراً موجباً حتى 8 منازل عشرية.';
+  String get posCurrencyRateHistoryLoadFailed => 'تعذر تحميل سجل أسعار الصرف.';
+  String get posCheckoutRateSnapshotLabel => 'سعر الصرف المسجل المستخدم';
+  String get posCheckoutRateReverseApplied =>
+      'استُخدم السعر المسجل بالاتجاه العكسي';
+  String get posPurchasePaymentMethod => 'تسوية الفاتورة';
+  String get posPurchaseCredit => 'آجل على حساب المورد';
+  String get posPurchaseCash => 'مدفوع نقداً بالكامل';
+  String get posPurchaseTotal => 'إجمالي الشراء';
+  String get posPurchaseSubmit => 'ترحيل استلام الشراء';
+  String get posPurchaseSaved => 'تم ترحيل الشراء والمخزون والقيد بنجاح.';
+  String get posPurchaseAcknowledgeFailed =>
+      'تم ترحيل الشراء، لكن تعذر تأكيد النتيجة محلياً. أعد إرسال النموذج نفسه للتحقق قبل إدخال شراء جديد.';
+  String get posPurchaseSnapshotRestored =>
+      'استُعيد سعر الصرف المحفوظ لمحاولة الشراء السابقة. راجع المعاينة ثم أعد الترحيل.';
+  String get posPurchaseSnapshotRestoreFailed =>
+      'تعذر استعادة تفاصيل محاولة الشراء السابقة بأمان. لم يُرسل ترحيل جديد.';
+  String get posPurchaseCartEmpty => 'أضف صنفاً واحداً على الأقل.';
+  String get posPurchaseExpiryNotice =>
+      'الأصناف التي تتطلب تتبع الصلاحية غير متاحة للاستلام حتى تكتمل إدارة الدفعات.';
+  String get posPurchaseLoadFailed => 'تعذر تحميل أصناف المشتريات.';
+  String get posPurchaseSubmitFailed => 'تعذر ترحيل استلام الشراء.';
   String get posCheckoutTitle => 'نقطة البيع';
   String get posCheckoutInputHint => 'امسح الباركود أو اكتب اسم المنتج أو رمزه';
   String get posCheckoutSearchResults => 'نتائج البحث';
   String get posCheckoutCartEmpty =>
       'السلة فارغة. امسح باركوداً أو ابحث عن منتج.';
+  String get posCheckoutCurrencyLabel => 'عملة الفاتورة';
+  String get posCheckoutPricePerUnit => 'سعر الوحدة';
+  String get posCheckoutCatalogReference => 'سعر الكتالوج بعملته الأصلية';
+  String get posCheckoutPriceRequired =>
+      'لا يوجد سعر صرف مسجل لهذه العملة بعد.';
   String get posCheckoutSubtotal => 'الإجمالي الفرعي';
   String get posCheckoutClearCart => 'تفريغ السلة';
   String get posCheckoutCameraActive => 'المسح الخلفي مفعّل';
@@ -2847,9 +2917,32 @@ abstract class AppStringsBase {
   String get posInvoiceDueLabel => 'المتبقي';
   String get posInvoiceExportPdf => 'تصدير ومشاركة PDF';
   String get posInvoicePdfFailed => 'تعذر إنشاء PDF الفاتورة.';
+  String get posSalesReturnAction => 'إرجاع أصناف';
+  String get posSalesReturnTitle => 'مرتجع مبيعات';
+  String get posSalesReturnDescription =>
+      'حدد الكميات المرتجعة. سيُسجل رد المبلغ محاسبياً مع إعادة الأصناف للمخزون.';
+  String get posSalesReturnQuantity => 'الكمية المراد إرجاعها';
+  String get posSalesReturnMaximum => 'المباع';
+  String get posSalesReturnReason => 'سبب الإرجاع (اختياري)';
+  String get posSalesReturnSubmit => 'ترحيل المرتجع ذرياً';
+  String get posSalesReturnSucceeded => 'تم ترحيل المرتجع وإعادة المخزون.';
+  String get posSalesReturnFailed => 'تعذر ترحيل المرتجع.';
+  String get posSalesReturnQuantityInvalid =>
+      'أدخل كمية صحيحة لا تتجاوز الكمية المباعة.';
+  String get posSalesReturnNothingSelected =>
+      'حدد كمية واحدة على الأقل للإرجاع.';
+  String get posSalesReturnUnavailable =>
+      'لا يمكن إرجاع هذه الفاتورة في حالتها الحالية.';
+  String get posSalesVoidAction => 'إلغاء الفاتورة';
+  String get posSalesVoidConfirm =>
+      'سيُنشأ مرتجع كامل وتُعكس حركة المخزون والقيود المحاسبية في معاملة واحدة. هل تريد المتابعة؟';
+  String get posSalesVoidSucceeded => 'تم إلغاء الفاتورة وترحيل عكسها الذري.';
+  String get posSalesVoidFailed => 'تعذر إلغاء الفاتورة.';
   String get posDailySalesReportTitle => 'تقرير المبيعات اليومي';
   String get posDailySalesReportFailed => 'تعذر إنشاء تقرير المبيعات اليومي.';
   String get posDailySalesInvoiceCount => 'فاتورة';
+  String get posDailySalesOtherCurrenciesExcluded =>
+      'فواتير بعملات أخرى غير محتسبة هنا';
   String get posDailySalesGross => 'إجمالي المبيعات';
   String get posDailySalesPaid => 'إجمالي المدفوع';
   String get posDailySalesDue => 'إجمالي المتبقي';
@@ -2870,7 +2963,49 @@ abstract class AppStringsBase {
   String get posStockReadFailed => 'تعذر قراءة رصيد المخزون.';
   String get posStockAppendFailed => 'تعذر تسجيل حركة المخزون.';
   String get posStockProductInactive => 'لا يمكن تسجيل حركة لمنتج غير نشط.';
-  String get posOpeningBalanceTitle => 'الرصيد الافتتاحي للمخزون';
+  String get posStockMovementsTitle => 'حركات المخزون';
+  String get posStockMovementsDescription =>
+      'سجل للزيادات والنقص الناتجة عن الشراء والبيع والإدخال والتسويات.';
+  String get posStockMovementsEmpty => 'لا توجد حركات مخزون بعد.';
+  String get posStockMovementsLoadMore => 'تحميل المزيد';
+  String get posStockMovementAllProducts => 'كل المنتجات';
+  String get posStockMovementAllTypes => 'كل أنواع الحركات';
+  String posStockMovementTypeLabel(String type) => switch (type) {
+        'opening' => 'مخزون افتتاحي',
+        'purchase' => 'استلام شراء',
+        'sale' => 'بيع',
+        'salesReturn' => 'مرتجع بيع',
+        'purchaseReturn' => 'مرتجع شراء',
+        'adjustment' => 'تسوية جرد',
+        'damage' => 'تالف',
+        'expiry' => 'منتهي الصلاحية',
+        _ => 'حركة مخزون',
+      };
+  String get posStockMovementInbound => 'زيادة';
+  String get posStockMovementOutbound => 'نقص';
+  String get posStockAdjustmentTitle => 'تسوية جرد المخزون';
+  String get posStockAdjustmentDescription =>
+      'سجّل فرق الجرد كحركة جديدة مع قيد محاسبي متوازن. لا تُعدّل الحركات السابقة.';
+  String get posStockAdjustmentDirection => 'اتجاه التسوية';
+  String get posStockAdjustmentIncrease => 'زيادة المخزون';
+  String get posStockAdjustmentDecrease => 'نقص المخزون';
+  String get posStockAdjustmentQuantity => 'الكمية بوحدات القياس';
+  String get posStockAdjustmentUnitCost => 'تكلفة الوحدة بوحدة العملة الصغرى';
+  String get posStockAdjustmentCounterAccount => 'الحساب المقابل لفرق الجرد';
+  String get posStockAdjustmentSelectAccount => 'اختر الحساب المقابل';
+  String get posStockAdjustmentReason => 'سبب التسوية';
+  String get posStockAdjustmentReasonRequired => 'يرجى توضيح سبب التسوية.';
+  String get posStockAdjustmentValueRequired =>
+      'يجب أن تكون قيمة التسوية أكبر من صفر؛ راجع تكلفة المخزون.';
+  String get posStockAdjustmentSave => 'تسجيل التسوية';
+  String get posStockAdjustmentSaved => 'تم تسجيل التسوية والقيد معاً.';
+  String posStockAdjustmentVoucherDescription(String reason) =>
+      'تسوية مخزون نقطة البيع: $reason';
+  String get posWorkspaceInventorySection => 'الأصناف والمخزون';
+  String get posWorkspaceSalesSection => 'المبيعات والتقارير';
+  String get posWorkspaceOpenSettings => 'فتح إعدادات نقطة البيع';
+  String get posCatalogManageCategories => 'إدارة التصنيفات';
+  String get posOpeningBalanceTitle => 'إدخال مخزون افتتاحي';
   String get posOpeningBalanceDescription =>
       'أدخل الكمية والتكلفة الافتتاحية. سيُحفظ الإدخال كحركة جديدة قابلة للتدقيق.';
   String get posOpeningBalanceProduct => 'المنتج';
@@ -2878,10 +3013,10 @@ abstract class AppStringsBase {
   String get posOpeningBalanceNoProducts => 'أضف منتجاً إلى الكتالوج أولاً.';
   String get posOpeningBalanceQuantity => 'الكمية بوحدات القياس';
   String posOpeningBalanceQuantityHint(int scale) =>
-      'أدخل العدد الصحيح scaled units (المقياس الحالي: $scale).';
+      'أدخل الكمية كعدد صحيح بوحدات القياس المصغّرة (مقياس المنتج: $scale).';
   String get posOpeningBalanceUnitCost => 'تكلفة الوحدة بالوحدات الصغرى';
   String posOpeningBalanceCostHint(String currency) =>
-      'أدخل قيمة صحيحة بالوحدات الصغرى ($currency)، دون فاصلة عشرية.';
+      'أدخل قيمة صحيحة بوحدة العملة الصغرى ($currency)، دون فاصلة عشرية.';
   String get posOpeningBalancePositiveInteger => 'أدخل عدداً صحيحاً موجباً.';
   String get posOpeningBalanceNonNegativeInteger =>
       'أدخل صفراً أو عدداً صحيحاً موجباً.';
@@ -2936,6 +3071,7 @@ abstract class AppStringsBase {
   String get posCatalogNoCategory => 'بدون تصنيف';
   String get posCatalogAddCategory => 'إضافة تصنيف';
   String get posCatalogCreateCategory => 'إنشاء تصنيف جديد';
+  String get posCatalogEditCategory => 'تعديل التصنيف';
   String get posCatalogCategoryName => 'اسم التصنيف';
   String get posCatalogCategoryCode => 'رمز التصنيف';
   String get posCatalogCategoryNameRequired => 'يرجى إدخال اسم التصنيف.';
@@ -2951,4 +3087,18 @@ abstract class AppStringsBase {
   String get posCatalogDeactivateMessage =>
       'سيختفي المنتج من العمليات الجديدة مع الاحتفاظ بتاريخه.';
   String get posCatalogDeactivate => 'تعطيل المنتج';
+  String get posCatalogReactivate => 'إعادة تفعيل المنتج';
+  String get posCatalogBarcodesHint => 'باركودات متعددة (سطر لكل باركود)';
+  String get posCatalogShowInactive => 'إظهار المنتجات المعطلة';
+  String get posCatalogNoCategories => 'لا توجد تصنيفات بعد.';
+  String get posCatalogEditTitle => 'تعديل المنتج';
+  String get posCatalogEditCategoryTitle => 'إدارة تصنيفات المنتجات';
+  String get posCatalogDeactivateCategoryMessage =>
+      'لا يمكن تعطيل تصنيف مرتبط بمنتجات؛ ولن تُحذف المنتجات أو بياناتها التاريخية.';
+  String get posCatalogCategoryDeactivateTitle => 'تعطيل التصنيف؟';
+  String get posCatalogCategoryDeactivate => 'تعطيل التصنيف';
+  String get posCatalogCategoryReactivate => 'إعادة تفعيل التصنيف';
+  String get posCatalogQuantityScaleReadOnly =>
+      'مقياس الكمية ثابت بعد إنشاء المنتج';
+  String get posCatalogEditValidationFailed => 'يرجى تصحيح البيانات قبل الحفظ.';
 }

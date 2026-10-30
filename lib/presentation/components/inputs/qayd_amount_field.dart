@@ -9,6 +9,7 @@ class QaydAmountField extends StatelessWidget {
     this.label,
     this.hint,
     this.helperText,
+    this.suffixText,
     this.errorText,
     this.validator,
     this.onChanged,
@@ -25,6 +26,7 @@ class QaydAmountField extends StatelessWidget {
   final String? label;
   final String? hint;
   final String? helperText;
+  final String? suffixText;
   final String? errorText;
   final FormFieldValidator<String>? validator;
   final ValueChanged<String>? onChanged;
@@ -59,6 +61,7 @@ class QaydAmountField extends StatelessWidget {
           labelText: label,
           hintText: hint,
           helperText: helperText,
+          suffixText: suffixText,
           errorText: errorText,
         ),
       ),

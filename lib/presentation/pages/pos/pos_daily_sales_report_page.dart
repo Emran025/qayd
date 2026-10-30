@@ -5,6 +5,7 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_sales_report.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
+import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
@@ -25,7 +26,7 @@ class PosDailySalesReportPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final day = DateTime.now();
-    return Scaffold(
+    return QaydScaffold(
       appBar: QaydAppBar(title: AppStrings.posDailySalesReportTitle),
       body: FutureBuilder(
         future: reportUseCase(day: day, currency: currency),
@@ -62,6 +63,14 @@ class _ReportBody extends StatelessWidget {
           '${report.from.toLocal().toString().split(' ').first} · ${report.invoices.length} ${AppStrings.posDailySalesInvoiceCount}',
           style: Theme.of(context).textTheme.titleMedium,
         ),
+        if (report.excludedInvoiceCount > 0) ...[
+          const SizedBox(height: SpacingTokens.sm),
+          Text(
+            '${AppStrings.posDailySalesOtherCurrenciesExcluded}: '
+            '${report.excludedInvoiceCount}',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
         const SizedBox(height: SpacingTokens.md),
         _MetricCard(
             label: AppStrings.posDailySalesGross,

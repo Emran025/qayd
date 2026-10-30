@@ -90,16 +90,25 @@ final class _SaleRepository implements PosSalePostingRepository {
   }
 }
 
-PosAccountingPosting _posting({required String id, required String sourceId}) {
+PosAccountingPosting _posting({
+  required String id,
+  required String sourceId,
+  VoucherType type = VoucherType.receipt,
+  int amountMinorUnits = 500,
+}) {
   final date = DateTime.utc(2026, 1, 10, 10);
   final voucher = Voucher.draft(
     id: VoucherId(id),
-    type: VoucherType.receipt,
+    type: type,
     date: date,
-    amount: Money.fromMinorUnits(500, _currency),
+    amount: Money.fromMinorUnits(amountMinorUnits, _currency),
     currency: _currency,
-    counterpartyId: AccountId('revenue'),
-    affectedAccountId: AccountId('cash'),
+    counterpartyId: AccountId(
+      type == VoucherType.receipt ? 'revenue' : 'cogs',
+    ),
+    affectedAccountId: AccountId(
+      type == VoucherType.receipt ? 'cash' : 'inventory',
+    ),
     referenceNumber: sourceId,
     createdAt: date,
   ).confirm(date);
@@ -164,7 +173,12 @@ PosSalePosting _sale({bool posted = true}) {
     ],
     postings: [
       _posting(id: 'voucher-1', sourceId: invoiceId),
-      _posting(id: 'voucher-2', sourceId: invoiceId),
+      _posting(
+        id: 'voucher-2',
+        sourceId: invoiceId,
+        type: VoucherType.payment,
+        amountMinorUnits: 100,
+      ),
     ],
     payments: const [],
   );

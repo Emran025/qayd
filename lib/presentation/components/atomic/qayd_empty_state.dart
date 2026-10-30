@@ -8,11 +8,13 @@ class QaydEmptyState extends StatelessWidget {
     required this.icon,
     required this.title,
     this.description,
+    this.action,
   });
 
   final IconData icon;
   final String title;
   final String? description;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -52,6 +54,10 @@ class QaydEmptyState extends StatelessWidget {
                 textAlign: TextAlign.center,
                 color: scheme.onSurfaceVariant,
               ),
+            ],
+            if (action != null) ...[
+              const SizedBox(height: SpacingTokens.md),
+              action!,
             ],
           ],
         ),

@@ -12,9 +12,25 @@ For a cash sale, the commercial journal is debit POS cash and credit POS sales r
 
 The sale coordinator must persist both journals through the official voucher/ledger adapter. It must not insert directly into `ledger_entries` from Application, Cubit, or Widgets.
 
+## Sales returns and invoice reversals
+
+A sales return is a new immutable document linked to the original sale. The current application boundary permits returns only for fully paid, non-credit sales; it rejects over-returns and returns after a void. A full void is a distinct reversal request that must cover every source line and cannot follow a prior return. The source document is marked `partiallyReturned`, `fullyReturned`, or `voided` only in the same transaction that saves the return.
+
+Return persistence is one local SQLCipher transaction containing the return invoice and lines, refund-payment events, inbound stock movements, the source/return relation, vouchers and ledger entries, and the source status update. Refunds are split back across the original payment accounts and methods. The accounting direction is debit sales returns / credit the original cash or bank account; cost reversal is debit inventory / credit COGS. The payload checks the role accounts, balanced confirmed vouchers, return amount plus COGS amount, and that every movement belongs to the return's warehouse.
+
+Partial-return rounding is cumulative in minor currency units. Line discounts and tax follow cumulative returned quantities; any invoice-level discount or tax is distributed by cumulative returned gross subtotal. The last return therefore receives any rounding remainder, so a complete return exactly reverses the original invoice totals instead of losing or creating minor units. Zero-value returns do not invent a zero payment or refund voucher, but still reverse inventory cost when applicable.
+
+The invoice-history UI now exposes partial return and confirmed full void, and the return completion use case retains a hashed request identity in SQLCipher until the commit is acknowledged. Focused unit and repository tests cover the accounting boundary; CI and end-to-end UI validation remain acceptance gates.
+
 ## Exact totals
 
 Quantities are `PosQuantity` scaled integers. Unit prices, unit costs, discounts, tax, paid, and due values are `Money` minor units. No `double` participates in validation, persistence, signatures, or replay fingerprints. Invoice lines store product name and barcode snapshots so historical PDFs remain stable after catalog changes.
+
+## Currency handling
+
+Checkout may select an active invoice currency. If a product's catalog sale-price currency differs, its catalog price is not copied or converted: the operator must enter the line price explicitly in the invoice currency. The invoice, payment, receivable, and revenue voucher use that selected currency.
+
+Inventory cost remains in the stock valuation currency captured on each invoice line. Sale COGS is posted as a separate balanced voucher per cost currency; a return refunds in invoice currency and reverses inventory/COGS in the original cost currency. Schema v43 stores this cost-currency snapshot and backfills older lines from their invoice currency. No exchange rate, FX gain/loss, or automatic translation is inferred. Daily reporting currently refuses to combine invoices from different currencies, so consolidated multi-currency profitability remains out of scope until an explicit rate snapshot and reporting policy are designed.
 
 ## Fast checkout input
 
@@ -32,4 +48,4 @@ Invoice and report generators reuse Qayd's Cairo font, header configuration, bra
 
 ## Acceptance gates
 
-The sale slice cannot be connected to the visible checkout UI until focused tests prove exact totals, governance and fiscal-period rejection before writes, missing template-account rejection, insufficient stock rollback, invoice/voucher/ledger rollback, payment idempotency, exact replay without ledger mutation, signature verification, and stable PDF snapshot content. Camera behavior additionally requires real-device Android/iOS validation because the sandbox cannot provide physical camera hardware.
+Acceptance still requires passing CI for exact totals, governance/fiscal-period rejection, rollback and replay; return/void rounding, refund allocation and durable recovery; signature verification; and stable PDF snapshots. The new currency tests verify explicit sale prices, separate COGS currencies, and return reversals. Camera behavior still requires real-device Android/iOS validation because the sandbox cannot provide physical camera hardware.

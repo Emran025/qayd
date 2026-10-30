@@ -5140,10 +5140,129 @@ class AppStringsEn extends AppStringsBase {
   String get posWorkspaceCatalogSubtitle =>
       'Manage products, prices, and barcodes';
   @override
+  String get posWorkspacePurchaseSubtitle =>
+      'Receive purchases and post inventory and accounting together';
+  @override
   String get posWorkspaceSalesTitle => 'Sales';
   @override
   String get posWorkspaceComingSoon =>
       'Available after the inventory and invoicing core is built.';
+  @override
+  String get posPurchaseTitle => 'Receive purchase';
+  @override
+  String get posPurchaseDescription =>
+      'The invoice, stock, and accounting entry post in one transaction.';
+  @override
+  String get posPurchaseSupplier => 'Supplier account';
+  @override
+  String get posPurchaseSelectSupplier => 'Choose supplier account';
+  @override
+  String get posPurchaseProducts => 'Products';
+  @override
+  String get posPurchaseNoProducts => 'No active products in the catalog.';
+  @override
+  String get posPurchaseAddProduct => 'Add';
+  @override
+  String get posPurchaseAlreadyAdded =>
+      'This product is already in the receipt.';
+  @override
+  String get posPurchaseQuantity => 'Quantity';
+  @override
+  String get posPurchaseUnitCost => 'Unit cost';
+  @override
+  String get posPurchaseSourceUnitPrice =>
+      'Supplier unit price (invoice currency)';
+  @override
+  String get posPurchaseCurrencyLocked =>
+      'Clear the cart before changing the purchase invoice currency.';
+  @override
+  String get posPurchaseInventoryCost => 'Inventory cost after conversion';
+  @override
+  String get posPurchaseProposedSalePrice =>
+      'Suggested sale price after margin';
+  @override
+  String get posPurchaseCurrentCatalogSalePrice => 'Current catalog sale price';
+  @override
+  String get posPurchaseApplyProposedSalePrice =>
+      'Apply suggested price to catalog';
+  @override
+  String get posPurchaseEnterCostForCurrency =>
+      'Enter the purchase price in the invoice currency; no catalog price exists in that currency.';
+  @override
+  String get posProfitMarginTitle => 'Suggested profit margin';
+  @override
+  String get posProfitMarginPercentage => 'Percentage';
+  @override
+  String get posProfitMarginFixedAmount => 'Fixed amount in product currency';
+  @override
+  String get posProfitMarginAmount => 'Margin value';
+  @override
+  String get posProfitMarginHint =>
+      'A suggested sale price is calculated from cost and margin. The catalog price changes only when you approve it.';
+  @override
+  String get posCurrencyRatesTitle => 'Manual exchange rates';
+  @override
+  String get posCurrencyRatesDescription =>
+      'Rates are entered explicitly. Each change is appended as a new record; the app never fetches rates automatically.';
+  @override
+  String get posCurrencyRateFrom => 'From currency';
+  @override
+  String get posCurrencyRateTo => 'To currency';
+  @override
+  String get posCurrencyRateValue =>
+      'Target currency units per one source unit';
+  @override
+  String get posCurrencyRateNote => 'Rate note or reference (optional)';
+  @override
+  String get posCurrencyRateSave => 'Record new rate';
+  @override
+  String get posCurrencyRateSaved => 'Exchange rate saved as a new record.';
+  @override
+  String get posCurrencyRateHistory => 'Rate history (newest first)';
+  @override
+  String get posCurrencyRateNoHistory => 'No rates recorded for this pair.';
+  @override
+  String get posCurrencyRateInvalid =>
+      'Enter a positive rate with up to 8 decimals.';
+  @override
+  String get posCurrencyRateHistoryLoadFailed =>
+      'Could not load exchange-rate history.';
+  @override
+  String get posCheckoutRateSnapshotLabel => 'Recorded rate used';
+  @override
+  String get posCheckoutRateReverseApplied =>
+      'The recorded rate was applied in reverse';
+  @override
+  String get posPurchasePaymentMethod => 'Settlement';
+  @override
+  String get posPurchaseCredit => 'On supplier account';
+  @override
+  String get posPurchaseCash => 'Paid fully in cash';
+  @override
+  String get posPurchaseTotal => 'Purchase total';
+  @override
+  String get posPurchaseSubmit => 'Post purchase receipt';
+  @override
+  String get posPurchaseSaved =>
+      'Purchase, stock, and accounting entry posted successfully.';
+  @override
+  String get posPurchaseAcknowledgeFailed =>
+      'The purchase was posted, but its local confirmation could not be recorded. Submit the same form again to verify before entering a new purchase.';
+  @override
+  String get posPurchaseSnapshotRestored =>
+      'The exchange-rate snapshot from the earlier purchase attempt was restored. Review the preview, then submit again.';
+  @override
+  String get posPurchaseSnapshotRestoreFailed =>
+      'The earlier purchase attempt could not be restored safely. No new posting was submitted.';
+  @override
+  String get posPurchaseCartEmpty => 'Add at least one product.';
+  @override
+  String get posPurchaseExpiryNotice =>
+      'Expiry-tracked products cannot be received until lot management is implemented.';
+  @override
+  String get posPurchaseLoadFailed => 'Could not load purchase products.';
+  @override
+  String get posPurchaseSubmitFailed => 'Could not post the purchase receipt.';
   @override
   String get posCheckoutTitle => 'Point of sale';
   @override
@@ -5154,6 +5273,15 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posCheckoutCartEmpty =>
       'The cart is empty. Scan or search for a product.';
+  @override
+  String get posCheckoutCurrencyLabel => 'Invoice currency';
+  @override
+  String get posCheckoutPricePerUnit => 'Sale price per unit';
+  @override
+  String get posCheckoutCatalogReference => 'Catalog price in product currency';
+  @override
+  String get posCheckoutPriceRequired =>
+      'No exchange rate is recorded for this currency yet.';
   @override
   String get posCheckoutSubtotal => 'Subtotal';
   @override
@@ -5198,12 +5326,52 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posInvoicePdfFailed => 'Could not create the invoice PDF.';
   @override
+  String get posSalesReturnAction => 'Return items';
+  @override
+  String get posSalesReturnTitle => 'Sales return';
+  @override
+  String get posSalesReturnDescription =>
+      'Select returned quantities. The refund and stock receipt are posted atomically.';
+  @override
+  String get posSalesReturnQuantity => 'Quantity to return';
+  @override
+  String get posSalesReturnMaximum => 'Sold';
+  @override
+  String get posSalesReturnReason => 'Return reason (optional)';
+  @override
+  String get posSalesReturnSubmit => 'Post return atomically';
+  @override
+  String get posSalesReturnSucceeded => 'Return posted and stock restored.';
+  @override
+  String get posSalesReturnFailed => 'Could not post the return.';
+  @override
+  String get posSalesReturnQuantityInvalid =>
+      'Enter a valid quantity no greater than the sold quantity.';
+  @override
+  String get posSalesReturnNothingSelected =>
+      'Select at least one quantity to return.';
+  @override
+  String get posSalesReturnUnavailable =>
+      'This invoice cannot be returned in its current state.';
+  @override
+  String get posSalesVoidAction => 'Void invoice';
+  @override
+  String get posSalesVoidConfirm =>
+      'A full return will reverse inventory and accounting entries in one transaction. Continue?';
+  @override
+  String get posSalesVoidSucceeded => 'Invoice voided with an atomic reversal.';
+  @override
+  String get posSalesVoidFailed => 'Could not void the invoice.';
+  @override
   String get posDailySalesReportTitle => 'Daily sales report';
   @override
   String get posDailySalesReportFailed =>
       'Could not create the daily sales report.';
   @override
   String get posDailySalesInvoiceCount => 'invoices';
+  @override
+  String get posDailySalesOtherCurrenciesExcluded =>
+      'Invoices in other currencies excluded from this total';
   @override
   String get posDailySalesGross => 'Gross sales';
   @override
@@ -5249,7 +5417,79 @@ class AppStringsEn extends AppStringsBase {
   String get posStockProductInactive =>
       'Cannot record a movement for an inactive product.';
   @override
-  String get posOpeningBalanceTitle => 'Opening stock balance';
+  String get posStockMovementsTitle => 'Inventory movements';
+  @override
+  String get posStockMovementsDescription =>
+      'A ledger of stock increases and decreases from purchases, sales, opening stock, and adjustments.';
+  @override
+  String get posStockMovementsEmpty => 'No inventory movements yet.';
+  @override
+  String get posStockMovementsLoadMore => 'Load more';
+  @override
+  String get posStockMovementAllProducts => 'All products';
+  @override
+  String get posStockMovementAllTypes => 'All movement types';
+  @override
+  String posStockMovementTypeLabel(String type) => switch (type) {
+        'opening' => 'Opening stock',
+        'purchase' => 'Purchase receipt',
+        'sale' => 'Sale',
+        'salesReturn' => 'Sales return',
+        'purchaseReturn' => 'Purchase return',
+        'adjustment' => 'Stock count adjustment',
+        'damage' => 'Damaged stock',
+        'expiry' => 'Expired stock',
+        _ => 'Inventory movement',
+      };
+  @override
+  String get posStockMovementInbound => 'Increase';
+  @override
+  String get posStockMovementOutbound => 'Decrease';
+  @override
+  String get posStockAdjustmentTitle => 'Adjust stock count';
+  @override
+  String get posStockAdjustmentDescription =>
+      'Record the count variance as a new movement with a balanced accounting entry. Previous movements stay unchanged.';
+  @override
+  String get posStockAdjustmentDirection => 'Adjustment direction';
+  @override
+  String get posStockAdjustmentIncrease => 'Increase stock';
+  @override
+  String get posStockAdjustmentDecrease => 'Decrease stock';
+  @override
+  String get posStockAdjustmentQuantity => 'Quantity in scaled units';
+  @override
+  String get posStockAdjustmentUnitCost => 'Unit cost in minor currency units';
+  @override
+  String get posStockAdjustmentCounterAccount => 'Counter-account for variance';
+  @override
+  String get posStockAdjustmentSelectAccount => 'Choose counter-account';
+  @override
+  String get posStockAdjustmentReason => 'Reason for adjustment';
+  @override
+  String get posStockAdjustmentReasonRequired =>
+      'Enter a reason for the adjustment.';
+  @override
+  String get posStockAdjustmentValueRequired =>
+      'The adjustment value must be greater than zero; review the stock cost.';
+  @override
+  String get posStockAdjustmentSave => 'Record adjustment';
+  @override
+  String get posStockAdjustmentSaved =>
+      'Stock adjustment and accounting entry recorded.';
+  @override
+  String posStockAdjustmentVoucherDescription(String reason) =>
+      'POS stock adjustment: $reason';
+  @override
+  String get posWorkspaceInventorySection => 'Products and inventory';
+  @override
+  String get posWorkspaceSalesSection => 'Sales and reports';
+  @override
+  String get posWorkspaceOpenSettings => 'Open POS settings';
+  @override
+  String get posCatalogManageCategories => 'Manage categories';
+  @override
+  String get posOpeningBalanceTitle => 'Enter opening stock';
   @override
   String get posOpeningBalanceDescription =>
       'Enter opening quantity and cost. The entry is saved as an auditable new movement.';
@@ -5264,12 +5504,12 @@ class AppStringsEn extends AppStringsBase {
   String get posOpeningBalanceQuantity => 'Quantity in scaled units';
   @override
   String posOpeningBalanceQuantityHint(int scale) =>
-      'Enter an integer scaled quantity (current scale: $scale).';
+      'Enter the quantity as an integer in scaled units (product scale: $scale).';
   @override
   String get posOpeningBalanceUnitCost => 'Unit cost in minor units';
   @override
   String posOpeningBalanceCostHint(String currency) =>
-      'Enter an integer minor-unit value ($currency), without decimals.';
+      'Enter a whole number in minor currency units ($currency), without decimals.';
   @override
   String get posOpeningBalancePositiveInteger => 'Enter a positive integer.';
   @override
@@ -5369,6 +5609,8 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posCatalogCreateCategory => 'Create a category';
   @override
+  String get posCatalogEditCategory => 'Edit category';
+  @override
   String get posCatalogCategoryName => 'Category name';
   @override
   String get posCatalogCategoryCode => 'Category code';
@@ -5396,4 +5638,34 @@ class AppStringsEn extends AppStringsBase {
       'The product will be hidden from new operations while its history is preserved.';
   @override
   String get posCatalogDeactivate => 'Deactivate product';
+  @override
+  String get posCatalogReactivate => 'Reactivate product';
+  @override
+  String get posCatalogBarcodesHint => 'Multiple barcodes (one per line)';
+  @override
+  String get posProductScaleImmutable =>
+      'Quantity scale cannot be changed after product creation.';
+  @override
+  String get posCatalogShowInactive => 'Show inactive products';
+  @override
+  String get posCatalogNoCategories => 'No categories yet.';
+  @override
+  String get posCatalogEditTitle => 'Edit product';
+  @override
+  String get posCatalogEditCategoryTitle => 'Manage product categories';
+  @override
+  String get posCatalogDeactivateCategoryMessage =>
+      'Categories assigned to products cannot be deactivated. Products and their history are never deleted.';
+  @override
+  String get posCatalogCategoryDeactivateTitle => 'Deactivate category?';
+  @override
+  String get posCatalogCategoryDeactivate => 'Deactivate category';
+  @override
+  String get posCatalogCategoryReactivate => 'Reactivate category';
+  @override
+  String get posCatalogQuantityScaleReadOnly =>
+      'Quantity scale is fixed after product creation';
+  @override
+  String get posCatalogEditValidationFailed =>
+      'Correct the form before saving.';
 }
