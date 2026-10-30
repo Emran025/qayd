@@ -49,6 +49,7 @@ final class SqlitePosPurchaseRequestIdentityRepository
             invoiceId: value['invoice_id'] as String,
             idempotencyKey: value['idempotency_key'] as String,
             createdAt: DateTime.parse(value['created_at'] as String).toUtc(),
+            requestSnapshotJson: value['request_snapshot_json'] as String?,
           );
         }
 
@@ -60,6 +61,7 @@ final class SqlitePosPurchaseRequestIdentityRepository
               'invoice_id': candidate.invoiceId.trim(),
               'idempotency_key': candidate.idempotencyKey.trim(),
               'created_at': candidate.createdAt.toUtc().toIso8601String(),
+              'request_snapshot_json': candidate.requestSnapshotJson,
             }),
           },
         );
@@ -107,8 +109,8 @@ final class SqlitePosPurchaseRequestIdentityRepository
           limit: 1,
         );
         if (rows.isEmpty) return true;
-        final value = jsonDecode(rows.single['value']! as String)
-            as Map<String, dynamic>;
+        final value =
+            jsonDecode(rows.single['value']! as String) as Map<String, dynamic>;
         if (value['invoice_id'] != identity.invoiceId ||
             value['idempotency_key'] != identity.idempotencyKey) {
           return false;

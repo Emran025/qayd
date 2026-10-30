@@ -63,6 +63,14 @@ class _ReportBody extends StatelessWidget {
           '${report.from.toLocal().toString().split(' ').first} · ${report.invoices.length} ${AppStrings.posDailySalesInvoiceCount}',
           style: Theme.of(context).textTheme.titleMedium,
         ),
+        if (report.excludedInvoiceCount > 0) ...[
+          const SizedBox(height: SpacingTokens.sm),
+          Text(
+            '${AppStrings.posDailySalesOtherCurrenciesExcluded}: '
+            '${report.excludedInvoiceCount}',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
         const SizedBox(height: SpacingTokens.md),
         _MetricCard(
             label: AppStrings.posDailySalesGross,

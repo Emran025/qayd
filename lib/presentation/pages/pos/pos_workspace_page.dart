@@ -6,6 +6,7 @@ import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/navigation/qayd_page_route.dart';
 import 'package:qayd/presentation/pages/pos/pos_catalog_page.dart';
+import 'package:qayd/presentation/pages/pos/pos_currency_rates_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_opening_balance_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_checkout_page.dart';
 import 'package:qayd/presentation/pages/pos/pos_invoice_history_page.dart';
@@ -92,6 +93,8 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
         builder: (_) => PosPurchaseReceivingPage(
           warehouseId: state.warehouseId!,
           currency: state.currency!,
+          listCurrencies: InjectionContainer.listCurrenciesUseCase,
+          currencyConverter: InjectionContainer.posCurrencyConverter,
           listProducts: InjectionContainer.listPosProductsUseCase,
           listAccounts: InjectionContainer.listAccountsUseCase,
           completePurchase: InjectionContainer.completePosPurchaseUseCase,
@@ -121,9 +124,9 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
 
   Future<void> _openStockMovements(PosWorkspaceState state) async {
     if (!state.isReady || !mounted) return;
-    final installation =
-        await InjectionContainer.posTemplateInstallationRepository
-            .getEnabledInstallation(template: PosTemplateDefinition.current());
+    final installation = await InjectionContainer
+        .posTemplateInstallationRepository
+        .getEnabledInstallation(template: PosTemplateDefinition.current());
     if (!mounted) return;
     if (installation.isFailure) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -136,9 +139,8 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
       );
       return;
     }
-    final inventoryAccountId = installation.valueOrNull?.accountIdsByKey[
-      PosTemplateAccountKey.inventoryAsset.value
-    ];
+    final inventoryAccountId = installation.valueOrNull
+        ?.accountIdsByKey[PosTemplateAccountKey.inventoryAsset.value];
     if (inventoryAccountId == null || inventoryAccountId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppStrings.posAccountingAccountsRequired)),
@@ -154,8 +156,8 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
           listProducts: InjectionContainer.listPosProductsUseCase,
           listAccounts: InjectionContainer.listAccountsUseCase,
           getBalance: InjectionContainer.getPosStockBalanceUseCase,
-          submitAdjustment: InjectionContainer
-              .postPosStockAdjustmentAtomicallyUseCase.call,
+          submitAdjustment:
+              InjectionContainer.postPosStockAdjustmentAtomicallyUseCase.call,
           inventoryAccountId: inventoryAccountId,
         ),
       ),
@@ -181,6 +183,19 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
     await Navigator.of(context).push<void>(
       QaydPageRoute.slideFromStart<void>(
         builder: (_) => PosCatalogPage(currency: currency),
+      ),
+    );
+  }
+
+  Future<void> _openCurrencyRates() async {
+    await Navigator.of(context).push<void>(
+      QaydPageRoute.slideFromStart<void>(
+        builder: (_) => PosCurrencyRatesPage(
+          preferredCurrency: context.read<PosWorkspaceCubit>().state.currency,
+          listCurrencies: InjectionContainer.listCurrenciesUseCase,
+          recordRate: InjectionContainer.recordPosCurrencyRateUseCase,
+          listHistory: InjectionContainer.listPosCurrencyRateHistoryUseCase,
+        ),
       ),
     );
   }
@@ -218,6 +233,7 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
             PosWorkspaceStatus.ready => _ReadyWorkspace(
                 state: state,
                 onOpenCatalog: () => _openCatalog(state),
+                onOpenCurrencyRates: _openCurrencyRates,
                 onOpenOpeningBalance: () => _openOpeningBalance(state),
                 onOpenPurchaseReceiving: () => _openPurchaseReceiving(state),
                 onOpenStockMovements: () => _openStockMovements(state),
@@ -236,6 +252,7 @@ class _ReadyWorkspace extends StatelessWidget {
   const _ReadyWorkspace({
     required this.state,
     required this.onOpenCatalog,
+    required this.onOpenCurrencyRates,
     required this.onOpenOpeningBalance,
     required this.onOpenPurchaseReceiving,
     required this.onOpenStockMovements,
@@ -246,6 +263,7 @@ class _ReadyWorkspace extends StatelessWidget {
 
   final PosWorkspaceState state;
   final VoidCallback onOpenCatalog;
+  final VoidCallback onOpenCurrencyRates;
   final VoidCallback onOpenOpeningBalance;
   final VoidCallback onOpenPurchaseReceiving;
   final VoidCallback onOpenStockMovements;
@@ -277,6 +295,14 @@ class _ReadyWorkspace extends StatelessWidget {
           subtitle: AppStrings.posWorkspaceCatalogSubtitle,
           accent: colors.primary,
           onTap: onOpenCatalog,
+        ),
+        const SizedBox(height: SpacingTokens.md),
+        PosWorkspaceActionCard(
+          icon: Icons.currency_exchange_outlined,
+          title: AppStrings.posCurrencyRatesTitle,
+          subtitle: AppStrings.posCurrencyRatesDescription,
+          accent: colors.secondary,
+          onTap: onOpenCurrencyRates,
         ),
         const SizedBox(height: SpacingTokens.md),
         PosWorkspaceActionCard(

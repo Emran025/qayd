@@ -8,6 +8,7 @@ import 'package:qayd/application/pos/list_pos_product_categories_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/entities/pos_profit_margin.dart';
 import 'package:qayd/domain/entities/pos_product_category.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
@@ -132,10 +133,19 @@ class _PosCatalogViewState extends State<_PosCatalogView> {
   }
 
   Future<void> _openEdit(PosProduct product) async {
-    final categories = widget.listCategoriesUseCase == null ? const <PosProductCategory>[] : (await widget.listCategoriesUseCase!()).valueOrNull ?? const <PosProductCategory>[];
+    final categories = widget.listCategoriesUseCase == null
+        ? const <PosProductCategory>[]
+        : (await widget.listCategoriesUseCase!()).valueOrNull ??
+            const <PosProductCategory>[];
     if (!mounted) return;
-    final edited = await showModalBottomSheet<PosProduct>(context: context, isScrollControlled: true, useSafeArea: true, builder: (_) => _EditProductSheet(product: product, categories: categories));
-    if (edited != null && mounted) await context.read<PosCatalogCubit>().save(edited);
+    final edited = await showModalBottomSheet<PosProduct>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) =>
+            _EditProductSheet(product: product, categories: categories));
+    if (edited != null && mounted)
+      await context.read<PosCatalogCubit>().save(edited);
   }
 
   Future<void> _confirmDeactivate(PosProduct product) async {
@@ -325,7 +335,8 @@ class _ProductCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final barcodes = product.barcodes.map((barcode) => barcode.value).join(', ');
+    final barcodes =
+        product.barcodes.map((barcode) => barcode.value).join(', ');
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(SpacingTokens.md),
@@ -375,7 +386,8 @@ class _ProductCard extends StatelessWidget {
                 if (value == 'reactivate') onReactivate();
               },
               itemBuilder: (_) => [
-                PopupMenuItem(value: 'edit', child: Text(AppStrings.posCatalogEditTitle)),
+                PopupMenuItem(
+                    value: 'edit', child: Text(AppStrings.posCatalogEditTitle)),
                 PopupMenuItem(
                   value: product.isActive ? 'deactivate' : 'reactivate',
                   child: Text(product.isActive
@@ -412,12 +424,14 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
   final _name = TextEditingController();
   final _salePrice = TextEditingController();
   final _purchasePrice = TextEditingController();
+  final _profitMargin = TextEditingController(text: '0');
   final _unitName = TextEditingController(text: 'unit');
   final _quantityScale = TextEditingController(text: '0');
   final _reorderLevel = TextEditingController(text: '0');
   final _barcode = TextEditingController();
   final _description = TextEditingController();
   bool _expiryTracking = false;
+  String _profitMarginType = 'percentage';
   String? _categoryId;
   late final List<PosProductCategory> _categories = [...widget.categories];
 
@@ -427,6 +441,7 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
     _name.dispose();
     _salePrice.dispose();
     _purchasePrice.dispose();
+    _profitMargin.dispose();
     _unitName.dispose();
     _quantityScale.dispose();
     _reorderLevel.dispose();
@@ -473,7 +488,16 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final scale = int.parse(_quantityScale.text.trim());
-    final barcodes = _barcode.text.split(RegExp(r'[,\n]')).map((value) => value.trim()).where((value) => value.isNotEmpty).toList(growable: false);
+    final profitMargin = _parseProfitMargin(
+      _profitMargin.text,
+      _profitMarginType,
+      widget.currency,
+    );
+    final barcodes = _barcode.text
+        .split(RegExp(r'[,\n]'))
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
     Navigator.of(context).pop(
       CreatePosProductInput(
         sku: _sku.text.trim(),
@@ -481,6 +505,7 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
         currencyCode: widget.currency.code,
         salePriceMinor: int.parse(_salePrice.text.trim()),
         purchasePriceMinor: int.parse(_purchasePrice.text.trim()),
+        profitMargin: profitMargin,
         unitName: _unitName.text.trim(),
         categoryId: _categoryId,
         quantityScale: scale,
@@ -515,10 +540,17 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
               ),
               const SizedBox(height: SpacingTokens.md),
               PosProductFormFields(
+                currency: widget.currency,
                 nameController: _name,
                 skuController: _sku,
                 salePriceController: _salePrice,
                 purchasePriceController: _purchasePrice,
+                profitMarginController: _profitMargin,
+                profitMarginType: _profitMarginType,
+                onProfitMarginTypeChanged: (value) => setState(() {
+                  _profitMarginType = value;
+                  _profitMargin.text = '0';
+                }),
                 unitNameController: _unitName,
                 reorderLevelController: _reorderLevel,
                 barcodeController: _barcode,
@@ -532,9 +564,8 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
                 expiryTracking: _expiryTracking,
                 onExpiryTrackingChanged: (value) =>
                     setState(() => _expiryTracking = value),
-                onAddCategory: widget.createCategoryUseCase == null
-                    ? null
-                    : _addCategory,
+                onAddCategory:
+                    widget.createCategoryUseCase == null ? null : _addCategory,
               ),
               const SizedBox(height: SpacingTokens.sm),
               Row(
@@ -560,7 +591,6 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
       ),
     );
   }
-
 }
 
 class _CreateProductCategoryDialog extends StatefulWidget {
@@ -648,24 +678,44 @@ class _EditProductSheet extends StatefulWidget {
   const _EditProductSheet({required this.product, required this.categories});
   final PosProduct product;
   final List<PosProductCategory> categories;
-  @override State<_EditProductSheet> createState() => _EditProductSheetState();
+  @override
+  State<_EditProductSheet> createState() => _EditProductSheetState();
 }
 
 class _EditProductSheetState extends State<_EditProductSheet> {
   final _formKey = GlobalKey<FormState>();
   late final _name = TextEditingController(text: widget.product.name);
   late final _sku = TextEditingController(text: widget.product.sku);
-  late final _sale = TextEditingController(text: '${widget.product.salePrice.minorUnits}');
-  late final _purchase = TextEditingController(text: '${widget.product.purchasePrice.minorUnits}');
+  late final _sale =
+      TextEditingController(text: '${widget.product.salePrice.minorUnits}');
+  late final _purchase =
+      TextEditingController(text: '${widget.product.purchasePrice.minorUnits}');
+  final _profitMargin = TextEditingController();
   late final _unit = TextEditingController(text: widget.product.unitName);
-  late final _reorder = TextEditingController(text: '${widget.product.reorderLevel.scaledUnits}');
-  late final _barcodes = TextEditingController(text: widget.product.barcodes.map((b) => b.value).join('\n'));
-  late final _description = TextEditingController(text: widget.product.description ?? '');
+  late final _reorder =
+      TextEditingController(text: '${widget.product.reorderLevel.scaledUnits}');
+  late final _barcodes = TextEditingController(
+      text: widget.product.barcodes.map((b) => b.value).join('\n'));
+  late final _description =
+      TextEditingController(text: widget.product.description ?? '');
   String? _categoryId;
+  late String _profitMarginType;
   late bool _expiryTracking = widget.product.expiryTracking;
 
   @override
-  void initState() { super.initState(); _categoryId = widget.product.categoryId; }
+  void initState() {
+    super.initState();
+    _categoryId = widget.product.categoryId;
+    final margin = widget.product.profitMargin;
+    _profitMarginType = margin.isPercentage ? 'percentage' : 'fixed_amount';
+    _profitMargin.text = margin.isPercentage
+        ? _formatScaledAmount(margin.percentageBasisPoints!, 2)
+        : _formatScaledAmount(
+            margin.fixedAmount!.minorUnits,
+            widget.product.currency.fractionalDigits,
+          );
+  }
+
   @override
   void dispose() {
     for (final c in [
@@ -673,6 +723,7 @@ class _EditProductSheetState extends State<_EditProductSheet> {
       _sku,
       _sale,
       _purchase,
+      _profitMargin,
       _unit,
       _reorder,
       _barcodes,
@@ -682,24 +733,46 @@ class _EditProductSheetState extends State<_EditProductSheet> {
     }
     super.dispose();
   }
+
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     try {
-      final barcodes = _barcodes.text.split(RegExp(r'[,\n]')).map((v) => v.trim()).where((v) => v.isNotEmpty).map(PosBarcode.new).toList(growable: false);
+      final barcodes = _barcodes.text
+          .split(RegExp(r'[,\n]'))
+          .map((v) => v.trim())
+          .where((v) => v.isNotEmpty)
+          .map(PosBarcode.new)
+          .toList(growable: false);
       final edited = widget.product.updateDetails(
-        name: _name.text, sku: _sku.text,
-        salePrice: Money.fromMinorUnits(int.parse(_sale.text.trim()), widget.product.currency),
-        purchasePrice: Money.fromMinorUnits(int.parse(_purchase.text.trim()), widget.product.currency),
-        unitName: _unit.text, categoryId: _categoryId, clearCategory: _categoryId == null,
-        description: _description.text, clearDescription: _description.text.trim().isEmpty,
-        reorderLevel: PosQuantity.fromScaled(int.parse(_reorder.text.trim()), scale: widget.product.quantityScale),
-        expiryTracking: _expiryTracking, barcodes: barcodes,
+        name: _name.text,
+        sku: _sku.text,
+        salePrice: Money.fromMinorUnits(
+            int.parse(_sale.text.trim()), widget.product.currency),
+        purchasePrice: Money.fromMinorUnits(
+            int.parse(_purchase.text.trim()), widget.product.currency),
+        profitMargin: _parseProfitMargin(
+          _profitMargin.text,
+          _profitMarginType,
+          widget.product.currency,
+        ),
+        unitName: _unit.text,
+        categoryId: _categoryId,
+        clearCategory: _categoryId == null,
+        description: _description.text,
+        clearDescription: _description.text.trim().isEmpty,
+        reorderLevel: PosQuantity.fromScaled(int.parse(_reorder.text.trim()),
+            scale: widget.product.quantityScale),
+        expiryTracking: _expiryTracking,
+        barcodes: barcodes,
       );
       Navigator.of(context).pop(edited);
     } catch (error) {
-      ScaffoldMessenger.of(context)..hideCurrentSnackBar()..showSnackBar(SnackBar(content: Text(error.toString())));
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.toString())));
     }
   }
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
@@ -722,10 +795,17 @@ class _EditProductSheetState extends State<_EditProductSheet> {
               ),
               const SizedBox(height: SpacingTokens.md),
               PosProductFormFields(
+                currency: widget.product.currency,
                 nameController: _name,
                 skuController: _sku,
                 salePriceController: _sale,
                 purchasePriceController: _purchase,
+                profitMarginController: _profitMargin,
+                profitMarginType: _profitMarginType,
+                onProfitMarginTypeChanged: (value) => setState(() {
+                  _profitMarginType = value;
+                  _profitMargin.text = '0';
+                }),
                 unitNameController: _unit,
                 reorderLevelController: _reorder,
                 barcodeController: _barcodes,
@@ -747,4 +827,49 @@ class _EditProductSheetState extends State<_EditProductSheet> {
       ),
     );
   }
+}
+
+PosProfitMargin _parseProfitMargin(
+  String raw,
+  String type,
+  CurrencyCode currency,
+) {
+  final digits = type == 'percentage' ? 2 : currency.fractionalDigits;
+  final scaled = _parseScaledAmount(raw, digits);
+  if (scaled == null) throw const FormatException('Invalid profit margin');
+  return type == 'percentage'
+      ? PosProfitMargin.percentage(scaled)
+      : PosProfitMargin.fixedAmount(Money.fromMinorUnits(scaled, currency));
+}
+
+int? _parseScaledAmount(String raw, int digits) {
+  final text = raw.trim().replaceAll(',', '.');
+  if (text.isEmpty || digits < 0 || digits > 18) return null;
+  final parts = text.split('.');
+  if (parts.length > 2) return null;
+  final whole = parts.first.isEmpty ? '0' : parts.first;
+  final fraction = parts.length == 2 ? parts[1] : '';
+  if (!RegExp(r'^\d+$').hasMatch(whole) ||
+      (fraction.isNotEmpty && !RegExp(r'^\d+$').hasMatch(fraction)) ||
+      fraction.length > digits ||
+      (digits == 0 && parts.length > 1)) {
+    return null;
+  }
+  final factor = BigInt.from(10).pow(digits);
+  final minor = BigInt.parse(whole) * factor +
+      BigInt.parse(fraction.padRight(digits, '0').isEmpty
+          ? '0'
+          : fraction.padRight(digits, '0'));
+  if (minor > BigInt.parse('9223372036854775807')) return null;
+  return minor.toInt();
+}
+
+String _formatScaledAmount(int value, int digits) {
+  if (digits == 0) return value.toString();
+  final factor = BigInt.from(10).pow(digits);
+  final amount = BigInt.from(value);
+  final whole = amount ~/ factor;
+  final fraction = (amount % factor).toString().padLeft(digits, '0');
+  final trimmed = fraction.replaceFirst(RegExp(r'0+$'), '');
+  return trimmed.isEmpty ? '$whole' : '$whole.$trimmed';
 }

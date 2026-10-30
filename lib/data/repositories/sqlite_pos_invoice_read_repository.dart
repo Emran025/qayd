@@ -1,7 +1,9 @@
 import 'package:qayd/application/failure_mapping.dart';
 import 'package:qayd/core/result/result.dart';
+import 'package:qayd/domain/entities/pos_currency_rate.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_details.dart';
+import 'package:qayd/domain/entities/pos_invoice_line_conversion.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_invoice_signature.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
@@ -117,7 +119,8 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
     );
     final lines = (await Future.wait(
       lineRows.map((line) => _lineFromRow(line, currency)),
-    )).toList(growable: false);
+    ))
+        .toList(growable: false);
     final invoice = PosInvoice.fromPersistence(
       id: invoiceId,
       invoiceNumber: _string(row, 'invoice_number'),
@@ -158,6 +161,11 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
     if (costCurrency == null) {
       throw FormatException('Missing currency for POS invoice line cost');
     }
+    final conversion = await _conversionFromRow(row);
+    final proposedMinor = row['proposed_sale_price_minor'];
+    final proposedSalePrice = proposedMinor == null
+        ? null
+        : Money.fromMinorUnits(_asInt(proposedMinor), costCurrency);
     return PosInvoiceLine.fromPersistence(
       id: _string(row, 'id'),
       invoiceId: _string(row, 'invoice_id'),
@@ -179,7 +187,75 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
       lineTotal: _money(row, 'line_total_minor', currency),
       sourceLineId: row['source_line_id'] as String?,
       createdAt: DateTime.parse(_string(row, 'created_at')),
+      currencyConversion: conversion,
+      proposedSalePrice: proposedSalePrice,
+      proposedSalePriceApplied:
+          _asInt(row['proposed_sale_price_applied'] ?? 0) == 1,
+      productUpdatedAtSnapshot:
+          _nullableDate(row['product_updated_at_snapshot']),
     );
+  }
+
+  Future<PosInvoiceLineConversion?> _conversionFromRow(
+    Map<String, Object?> row,
+  ) async {
+    final purposeValue = row['conversion_purpose'] as String?;
+    if (purposeValue == null) return null;
+    final purpose = PosInvoiceLineConversionPurpose.values.firstWhere(
+      (value) => value.name == purposeValue,
+      orElse: () => throw FormatException('Unknown POS line conversion'),
+    );
+    final sourceCurrency = await _getCurrency(
+      _string(row, 'conversion_source_currency_code'),
+    );
+    final targetCurrency = await _getCurrency(
+      _string(row, 'conversion_target_currency_code'),
+    );
+    final rateId = row['fx_rate_id'] as String?;
+    PosCurrencyRateQuote? rate;
+    if (rateId != null) {
+      rate = PosCurrencyRateQuote(
+        rateId: rateId,
+        storedFromCurrency: await _getCurrency(
+          _string(row, 'fx_stored_from_code'),
+        ),
+        storedToCurrency: await _getCurrency(
+          _string(row, 'fx_stored_to_code'),
+        ),
+        storedRateScaled: _int(row, 'fx_rate_scaled'),
+        requestedFromCurrency: await _getCurrency(
+          _string(row, 'fx_requested_from_code'),
+        ),
+        requestedToCurrency: await _getCurrency(
+          _string(row, 'fx_requested_to_code'),
+        ),
+        effectiveAt: DateTime.parse(_string(row, 'fx_effective_at')),
+        recordedAt: DateTime.parse(_string(row, 'fx_recorded_at')),
+        createdAt: DateTime.parse(_string(row, 'fx_created_at')),
+        isInverted: _asInt(row['fx_is_inverted']) == 1,
+        note: row['fx_note'] as String?,
+      );
+    }
+    return PosInvoiceLineConversion(
+      purpose: purpose,
+      sourceAmount: Money.fromMinorUnits(
+        _int(row, 'conversion_source_minor'),
+        sourceCurrency,
+      ),
+      targetAmount: Money.fromMinorUnits(
+        _int(row, 'conversion_target_minor'),
+        targetCurrency,
+      ),
+      rateSnapshot: rate,
+    );
+  }
+
+  Future<CurrencyCode> _getCurrency(String code) async {
+    final result = await _currencyRepository.getByCode(code);
+    if (result.isFailure) throw result.failureOrNull!;
+    final currency = result.valueOrNull;
+    if (currency == null) throw FormatException('Missing currency $code');
+    return currency;
   }
 
   PosInvoicePayment _paymentFromRow(
@@ -229,6 +305,12 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
     if (value is int) return value;
     if (value is num) return value.toInt();
     throw FormatException('Expected integer column $key');
+  }
+
+  static int _asInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    throw FormatException('Expected numeric POS invoice value');
   }
 
   static String _string(Map<String, Object?> row, String key) {

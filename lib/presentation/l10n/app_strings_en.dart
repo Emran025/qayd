@@ -5163,11 +5163,75 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posPurchaseAddProduct => 'Add';
   @override
-  String get posPurchaseAlreadyAdded => 'This product is already in the receipt.';
+  String get posPurchaseAlreadyAdded =>
+      'This product is already in the receipt.';
   @override
   String get posPurchaseQuantity => 'Quantity';
   @override
   String get posPurchaseUnitCost => 'Unit cost';
+  @override
+  String get posPurchaseSourceUnitPrice =>
+      'Supplier unit price (invoice currency)';
+  @override
+  String get posPurchaseCurrencyLocked =>
+      'Clear the cart before changing the purchase invoice currency.';
+  @override
+  String get posPurchaseInventoryCost => 'Inventory cost after conversion';
+  @override
+  String get posPurchaseProposedSalePrice =>
+      'Suggested sale price after margin';
+  @override
+  String get posPurchaseCurrentCatalogSalePrice => 'Current catalog sale price';
+  @override
+  String get posPurchaseApplyProposedSalePrice =>
+      'Apply suggested price to catalog';
+  @override
+  String get posPurchaseEnterCostForCurrency =>
+      'Enter the purchase price in the invoice currency; no catalog price exists in that currency.';
+  @override
+  String get posProfitMarginTitle => 'Suggested profit margin';
+  @override
+  String get posProfitMarginPercentage => 'Percentage';
+  @override
+  String get posProfitMarginFixedAmount => 'Fixed amount in product currency';
+  @override
+  String get posProfitMarginAmount => 'Margin value';
+  @override
+  String get posProfitMarginHint =>
+      'A suggested sale price is calculated from cost and margin. The catalog price changes only when you approve it.';
+  @override
+  String get posCurrencyRatesTitle => 'Manual exchange rates';
+  @override
+  String get posCurrencyRatesDescription =>
+      'Rates are entered explicitly. Each change is appended as a new record; the app never fetches rates automatically.';
+  @override
+  String get posCurrencyRateFrom => 'From currency';
+  @override
+  String get posCurrencyRateTo => 'To currency';
+  @override
+  String get posCurrencyRateValue =>
+      'Target currency units per one source unit';
+  @override
+  String get posCurrencyRateNote => 'Rate note or reference (optional)';
+  @override
+  String get posCurrencyRateSave => 'Record new rate';
+  @override
+  String get posCurrencyRateSaved => 'Exchange rate saved as a new record.';
+  @override
+  String get posCurrencyRateHistory => 'Rate history (newest first)';
+  @override
+  String get posCurrencyRateNoHistory => 'No rates recorded for this pair.';
+  @override
+  String get posCurrencyRateInvalid =>
+      'Enter a positive rate with up to 8 decimals.';
+  @override
+  String get posCurrencyRateHistoryLoadFailed =>
+      'Could not load exchange-rate history.';
+  @override
+  String get posCheckoutRateSnapshotLabel => 'Recorded rate used';
+  @override
+  String get posCheckoutRateReverseApplied =>
+      'The recorded rate was applied in reverse';
   @override
   String get posPurchasePaymentMethod => 'Settlement';
   @override
@@ -5184,6 +5248,12 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posPurchaseAcknowledgeFailed =>
       'The purchase was posted, but its local confirmation could not be recorded. Submit the same form again to verify before entering a new purchase.';
+  @override
+  String get posPurchaseSnapshotRestored =>
+      'The exchange-rate snapshot from the earlier purchase attempt was restored. Review the preview, then submit again.';
+  @override
+  String get posPurchaseSnapshotRestoreFailed =>
+      'The earlier purchase attempt could not be restored safely. No new posting was submitted.';
   @override
   String get posPurchaseCartEmpty => 'Add at least one product.';
   @override
@@ -5211,7 +5281,7 @@ class AppStringsEn extends AppStringsBase {
   String get posCheckoutCatalogReference => 'Catalog price in product currency';
   @override
   String get posCheckoutPriceRequired =>
-      'Enter the price in this currency; no automatic conversion is applied.';
+      'No exchange rate is recorded for this currency yet.';
   @override
   String get posCheckoutSubtotal => 'Subtotal';
   @override
@@ -5260,7 +5330,8 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posSalesReturnTitle => 'Sales return';
   @override
-  String get posSalesReturnDescription => 'Select returned quantities. The refund and stock receipt are posted atomically.';
+  String get posSalesReturnDescription =>
+      'Select returned quantities. The refund and stock receipt are posted atomically.';
   @override
   String get posSalesReturnQuantity => 'Quantity to return';
   @override
@@ -5274,15 +5345,19 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posSalesReturnFailed => 'Could not post the return.';
   @override
-  String get posSalesReturnQuantityInvalid => 'Enter a valid quantity no greater than the sold quantity.';
+  String get posSalesReturnQuantityInvalid =>
+      'Enter a valid quantity no greater than the sold quantity.';
   @override
-  String get posSalesReturnNothingSelected => 'Select at least one quantity to return.';
+  String get posSalesReturnNothingSelected =>
+      'Select at least one quantity to return.';
   @override
-  String get posSalesReturnUnavailable => 'This invoice cannot be returned in its current state.';
+  String get posSalesReturnUnavailable =>
+      'This invoice cannot be returned in its current state.';
   @override
   String get posSalesVoidAction => 'Void invoice';
   @override
-  String get posSalesVoidConfirm => 'A full return will reverse inventory and accounting entries in one transaction. Continue?';
+  String get posSalesVoidConfirm =>
+      'A full return will reverse inventory and accounting entries in one transaction. Continue?';
   @override
   String get posSalesVoidSucceeded => 'Invoice voided with an atomic reversal.';
   @override
@@ -5294,6 +5369,9 @@ class AppStringsEn extends AppStringsBase {
       'Could not create the daily sales report.';
   @override
   String get posDailySalesInvoiceCount => 'invoices';
+  @override
+  String get posDailySalesOtherCurrenciesExcluded =>
+      'Invoices in other currencies excluded from this total';
   @override
   String get posDailySalesGross => 'Gross sales';
   @override
@@ -5588,5 +5666,6 @@ class AppStringsEn extends AppStringsBase {
   String get posCatalogQuantityScaleReadOnly =>
       'Quantity scale is fixed after product creation';
   @override
-  String get posCatalogEditValidationFailed => 'Correct the form before saving.';
+  String get posCatalogEditValidationFailed =>
+      'Correct the form before saving.';
 }

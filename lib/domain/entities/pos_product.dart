@@ -1,5 +1,6 @@
 import 'dart:collection';
 
+import 'package:qayd/domain/entities/pos_profit_margin.dart';
 import 'package:qayd/domain/exceptions/invalid_pos_product_exception.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
@@ -18,6 +19,7 @@ final class PosProduct {
     required this.currency,
     required this.salePrice,
     required this.purchasePrice,
+    required this.profitMargin,
     required this.quantityScale,
     required this.reorderLevel,
     required this.expiryTracking,
@@ -38,6 +40,7 @@ final class PosProduct {
     PosQuantity? reorderLevel,
     bool expiryTracking = false,
     List<PosBarcode> barcodes = const <PosBarcode>[],
+    PosProfitMargin? profitMargin,
     String? categoryId,
     String? description,
     String unitName = 'unit',
@@ -57,14 +60,19 @@ final class PosProduct {
     if (salePrice.isNegative || purchasePrice.isNegative) {
       throw InvalidPosProductException.priceNegative();
     }
+    final resolvedProfitMargin = profitMargin ?? const PosProfitMargin.zero();
+    if (!resolvedProfitMargin.matchesCurrency(currency)) {
+      throw InvalidPosProductException.currencyMismatch();
+    }
     if (quantityScale < PosQuantity.minScale ||
         quantityScale > PosQuantity.maxScale) {
       throw InvalidPosProductException.quantityScaleInvalid();
     }
-    final threshold = reorderLevel ?? PosQuantity.fromScaled(
-      0,
-      scale: quantityScale,
-    );
+    final threshold = reorderLevel ??
+        PosQuantity.fromScaled(
+          0,
+          scale: quantityScale,
+        );
     if (threshold.scale != quantityScale) {
       throw InvalidPosProductException.thresholdScaleMismatch();
     }
@@ -79,12 +87,14 @@ final class PosProduct {
       id: trimmedId,
       sku: trimmedSku,
       name: trimmedName,
-      categoryId: categoryId?.trim().isEmpty == true ? null : categoryId?.trim(),
+      categoryId:
+          categoryId?.trim().isEmpty == true ? null : categoryId?.trim(),
       description: description?.trim(),
       unitName: trimmedUnit,
       currency: currency,
       salePrice: salePrice,
       purchasePrice: purchasePrice,
+      profitMargin: resolvedProfitMargin,
       quantityScale: quantityScale,
       reorderLevel: threshold,
       expiryTracking: expiryTracking,
@@ -108,6 +118,7 @@ final class PosProduct {
     required bool expiryTracking,
     required bool isActive,
     required List<PosBarcode> barcodes,
+    PosProfitMargin? profitMargin,
     String? categoryId,
     String? description,
     String unitName = 'unit',
@@ -125,6 +136,7 @@ final class PosProduct {
       reorderLevel: reorderLevel,
       expiryTracking: expiryTracking,
       barcodes: barcodes,
+      profitMargin: profitMargin,
       categoryId: categoryId,
       description: description,
       unitName: unitName,
@@ -140,6 +152,7 @@ final class PosProduct {
       currency: created.currency,
       salePrice: created.salePrice,
       purchasePrice: created.purchasePrice,
+      profitMargin: created.profitMargin,
       quantityScale: created.quantityScale,
       reorderLevel: created.reorderLevel,
       expiryTracking: created.expiryTracking,
@@ -159,6 +172,7 @@ final class PosProduct {
   final CurrencyCode currency;
   final Money salePrice;
   final Money purchasePrice;
+  final PosProfitMargin profitMargin;
   final int quantityScale;
   final PosQuantity reorderLevel;
   final bool expiryTracking;
@@ -168,6 +182,11 @@ final class PosProduct {
   final DateTime updatedAt;
 
   PosBarcode? get primaryBarcode => barcodes.isEmpty ? null : barcodes.first;
+
+  /// Suggests a sale price from the product's purchase price and margin.
+  /// The editable [salePrice] is intentionally not changed.
+  Money calculateProposedSalePrice() =>
+      profitMargin.calculateProposedSalePrice(purchasePrice);
 
   PosProduct addBarcode(PosBarcode barcode) {
     if (barcodes.any((item) => item == barcode)) {
@@ -189,6 +208,7 @@ final class PosProduct {
     String? unitName,
     Money? salePrice,
     Money? purchasePrice,
+    PosProfitMargin? profitMargin,
     int? quantityScale,
     PosQuantity? reorderLevel,
     bool? expiryTracking,
@@ -207,6 +227,7 @@ final class PosProduct {
       currency: currency,
       salePrice: salePrice ?? this.salePrice,
       purchasePrice: purchasePrice ?? this.purchasePrice,
+      profitMargin: profitMargin ?? this.profitMargin,
       quantityScale: quantityScale ?? this.quantityScale,
       reorderLevel: reorderLevel ?? this.reorderLevel,
       expiryTracking: expiryTracking ?? this.expiryTracking,
@@ -223,6 +244,7 @@ final class PosProduct {
       currency: draft.currency,
       salePrice: draft.salePrice,
       purchasePrice: draft.purchasePrice,
+      profitMargin: draft.profitMargin,
       quantityScale: draft.quantityScale,
       reorderLevel: draft.reorderLevel,
       expiryTracking: draft.expiryTracking,
@@ -258,6 +280,7 @@ final class PosProduct {
       currency: currency,
       salePrice: salePrice,
       purchasePrice: purchasePrice,
+      profitMargin: profitMargin,
       quantityScale: quantityScale,
       reorderLevel: reorderLevel,
       expiryTracking: expiryTracking,

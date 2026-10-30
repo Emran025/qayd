@@ -2646,6 +2646,40 @@ class AppStrings {
   static String get posPurchaseAlreadyAdded => i.posPurchaseAlreadyAdded;
   static String get posPurchaseQuantity => i.posPurchaseQuantity;
   static String get posPurchaseUnitCost => i.posPurchaseUnitCost;
+  static String get posPurchaseSourceUnitPrice => i.posPurchaseSourceUnitPrice;
+  static String get posPurchaseCurrencyLocked => i.posPurchaseCurrencyLocked;
+  static String get posPurchaseInventoryCost => i.posPurchaseInventoryCost;
+  static String get posPurchaseProposedSalePrice =>
+      i.posPurchaseProposedSalePrice;
+  static String get posPurchaseCurrentCatalogSalePrice =>
+      i.posPurchaseCurrentCatalogSalePrice;
+  static String get posPurchaseApplyProposedSalePrice =>
+      i.posPurchaseApplyProposedSalePrice;
+  static String get posPurchaseEnterCostForCurrency =>
+      i.posPurchaseEnterCostForCurrency;
+  static String get posProfitMarginTitle => i.posProfitMarginTitle;
+  static String get posProfitMarginPercentage => i.posProfitMarginPercentage;
+  static String get posProfitMarginFixedAmount => i.posProfitMarginFixedAmount;
+  static String get posProfitMarginAmount => i.posProfitMarginAmount;
+  static String get posProfitMarginHint => i.posProfitMarginHint;
+  static String get posCurrencyRatesTitle => i.posCurrencyRatesTitle;
+  static String get posCurrencyRatesDescription =>
+      i.posCurrencyRatesDescription;
+  static String get posCurrencyRateFrom => i.posCurrencyRateFrom;
+  static String get posCurrencyRateTo => i.posCurrencyRateTo;
+  static String get posCurrencyRateValue => i.posCurrencyRateValue;
+  static String get posCurrencyRateNote => i.posCurrencyRateNote;
+  static String get posCurrencyRateSave => i.posCurrencyRateSave;
+  static String get posCurrencyRateSaved => i.posCurrencyRateSaved;
+  static String get posCurrencyRateHistory => i.posCurrencyRateHistory;
+  static String get posCurrencyRateNoHistory => i.posCurrencyRateNoHistory;
+  static String get posCurrencyRateInvalid => i.posCurrencyRateInvalid;
+  static String get posCurrencyRateHistoryLoadFailed =>
+      i.posCurrencyRateHistoryLoadFailed;
+  static String get posCheckoutRateSnapshotLabel =>
+      i.posCheckoutRateSnapshotLabel;
+  static String get posCheckoutRateReverseApplied =>
+      i.posCheckoutRateReverseApplied;
   static String get posPurchasePaymentMethod => i.posPurchasePaymentMethod;
   static String get posPurchaseCredit => i.posPurchaseCredit;
   static String get posPurchaseCash => i.posPurchaseCash;
@@ -2654,6 +2688,10 @@ class AppStrings {
   static String get posPurchaseSaved => i.posPurchaseSaved;
   static String get posPurchaseAcknowledgeFailed =>
       i.posPurchaseAcknowledgeFailed;
+  static String get posPurchaseSnapshotRestored =>
+      i.posPurchaseSnapshotRestored;
+  static String get posPurchaseSnapshotRestoreFailed =>
+      i.posPurchaseSnapshotRestoreFailed;
   static String get posPurchaseCartEmpty => i.posPurchaseCartEmpty;
   static String get posPurchaseExpiryNotice => i.posPurchaseExpiryNotice;
   static String get posPurchaseLoadFailed => i.posPurchaseLoadFailed;
@@ -2701,8 +2739,7 @@ class AppStrings {
       i.posSalesReturnQuantityInvalid;
   static String get posSalesReturnNothingSelected =>
       i.posSalesReturnNothingSelected;
-  static String get posSalesReturnUnavailable =>
-      i.posSalesReturnUnavailable;
+  static String get posSalesReturnUnavailable => i.posSalesReturnUnavailable;
   static String get posSalesVoidAction => i.posSalesVoidAction;
   static String get posSalesVoidConfirm => i.posSalesVoidConfirm;
   static String get posSalesVoidSucceeded => i.posSalesVoidSucceeded;
@@ -2710,6 +2747,8 @@ class AppStrings {
   static String get posDailySalesReportTitle => i.posDailySalesReportTitle;
   static String get posDailySalesReportFailed => i.posDailySalesReportFailed;
   static String get posDailySalesInvoiceCount => i.posDailySalesInvoiceCount;
+  static String get posDailySalesOtherCurrenciesExcluded =>
+      i.posDailySalesOtherCurrenciesExcluded;
   static String get posDailySalesGross => i.posDailySalesGross;
   static String get posDailySalesPaid => i.posDailySalesPaid;
   static String get posDailySalesDue => i.posDailySalesDue;
@@ -2733,32 +2772,41 @@ class AppStrings {
   static String get posStockAppendFailed => i.posStockAppendFailed;
   static String get posStockProductInactive => i.posStockProductInactive;
   static String get posStockMovementsTitle => i.posStockMovementsTitle;
-  static String get posStockMovementsDescription => i.posStockMovementsDescription;
+  static String get posStockMovementsDescription =>
+      i.posStockMovementsDescription;
   static String get posStockMovementsEmpty => i.posStockMovementsEmpty;
   static String get posStockMovementsLoadMore => i.posStockMovementsLoadMore;
-  static String get posStockMovementAllProducts => i.posStockMovementAllProducts;
+  static String get posStockMovementAllProducts =>
+      i.posStockMovementAllProducts;
   static String get posStockMovementAllTypes => i.posStockMovementAllTypes;
   static String posStockMovementTypeLabel(String type) =>
       i.posStockMovementTypeLabel(type);
   static String get posStockMovementInbound => i.posStockMovementInbound;
   static String get posStockMovementOutbound => i.posStockMovementOutbound;
   static String get posStockAdjustmentTitle => i.posStockAdjustmentTitle;
-  static String get posStockAdjustmentDescription => i.posStockAdjustmentDescription;
-  static String get posStockAdjustmentDirection => i.posStockAdjustmentDirection;
+  static String get posStockAdjustmentDescription =>
+      i.posStockAdjustmentDescription;
+  static String get posStockAdjustmentDirection =>
+      i.posStockAdjustmentDirection;
   static String get posStockAdjustmentIncrease => i.posStockAdjustmentIncrease;
   static String get posStockAdjustmentDecrease => i.posStockAdjustmentDecrease;
   static String get posStockAdjustmentQuantity => i.posStockAdjustmentQuantity;
   static String get posStockAdjustmentUnitCost => i.posStockAdjustmentUnitCost;
-  static String get posStockAdjustmentCounterAccount => i.posStockAdjustmentCounterAccount;
-  static String get posStockAdjustmentSelectAccount => i.posStockAdjustmentSelectAccount;
+  static String get posStockAdjustmentCounterAccount =>
+      i.posStockAdjustmentCounterAccount;
+  static String get posStockAdjustmentSelectAccount =>
+      i.posStockAdjustmentSelectAccount;
   static String get posStockAdjustmentReason => i.posStockAdjustmentReason;
-  static String get posStockAdjustmentReasonRequired => i.posStockAdjustmentReasonRequired;
-  static String get posStockAdjustmentValueRequired => i.posStockAdjustmentValueRequired;
+  static String get posStockAdjustmentReasonRequired =>
+      i.posStockAdjustmentReasonRequired;
+  static String get posStockAdjustmentValueRequired =>
+      i.posStockAdjustmentValueRequired;
   static String get posStockAdjustmentSave => i.posStockAdjustmentSave;
   static String get posStockAdjustmentSaved => i.posStockAdjustmentSaved;
   static String posStockAdjustmentVoucherDescription(String reason) =>
       i.posStockAdjustmentVoucherDescription(reason);
-  static String get posWorkspaceInventorySection => i.posWorkspaceInventorySection;
+  static String get posWorkspaceInventorySection =>
+      i.posWorkspaceInventorySection;
   static String get posWorkspaceSalesSection => i.posWorkspaceSalesSection;
   static String get posWorkspaceOpenSettings => i.posWorkspaceOpenSettings;
   static String get posCatalogManageCategories => i.posCatalogManageCategories;
@@ -2854,11 +2902,18 @@ class AppStrings {
   static String get posCatalogShowInactive => i.posCatalogShowInactive;
   static String get posCatalogNoCategories => i.posCatalogNoCategories;
   static String get posCatalogEditTitle => i.posCatalogEditTitle;
-  static String get posCatalogEditCategoryTitle => i.posCatalogEditCategoryTitle;
-  static String get posCatalogDeactivateCategoryMessage => i.posCatalogDeactivateCategoryMessage;
-  static String get posCatalogCategoryDeactivateTitle => i.posCatalogCategoryDeactivateTitle;
-  static String get posCatalogCategoryDeactivate => i.posCatalogCategoryDeactivate;
-  static String get posCatalogCategoryReactivate => i.posCatalogCategoryReactivate;
-  static String get posCatalogQuantityScaleReadOnly => i.posCatalogQuantityScaleReadOnly;
-  static String get posCatalogEditValidationFailed => i.posCatalogEditValidationFailed;
+  static String get posCatalogEditCategoryTitle =>
+      i.posCatalogEditCategoryTitle;
+  static String get posCatalogDeactivateCategoryMessage =>
+      i.posCatalogDeactivateCategoryMessage;
+  static String get posCatalogCategoryDeactivateTitle =>
+      i.posCatalogCategoryDeactivateTitle;
+  static String get posCatalogCategoryDeactivate =>
+      i.posCatalogCategoryDeactivate;
+  static String get posCatalogCategoryReactivate =>
+      i.posCatalogCategoryReactivate;
+  static String get posCatalogQuantityScaleReadOnly =>
+      i.posCatalogQuantityScaleReadOnly;
+  static String get posCatalogEditValidationFailed =>
+      i.posCatalogEditValidationFailed;
 }

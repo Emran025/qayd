@@ -6,8 +6,11 @@ import 'package:qayd/application/accounts/list_accounts_use_case.dart';
 import 'package:qayd/application/pos/build_pos_purchase_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_purchase_use_case.dart';
 import 'package:qayd/application/pos/list_pos_products_use_case.dart';
+import 'package:qayd/application/settings/list_currencies_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/entities/pos_currency_rate.dart';
+import 'package:qayd/domain/services/pos_currency_converter.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_purchase_request_identity.dart';
 import 'package:qayd/domain/repositories/pos_purchase_request_identity_repository.dart';
@@ -33,6 +36,8 @@ class PosPurchaseReceivingPage extends StatefulWidget {
     super.key,
     required this.warehouseId,
     required this.currency,
+    required this.listCurrencies,
+    required this.currencyConverter,
     required this.listProducts,
     required this.listAccounts,
     required this.completePurchase,
@@ -41,6 +46,8 @@ class PosPurchaseReceivingPage extends StatefulWidget {
 
   final String warehouseId;
   final CurrencyCode currency;
+  final ListCurrenciesUseCase listCurrencies;
+  final PosCurrencyConverter currencyConverter;
   final ListPosProductsUseCase listProducts;
   final ListAccountsUseCase listAccounts;
   final CompletePosPurchaseUseCase completePurchase;
@@ -64,13 +71,17 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
   String? _pendingInvoiceId;
   String? _pendingIdempotencyKey;
   DateTime? _pendingCreatedAt;
+  late CurrencyCode _purchaseCurrency;
+  List<CurrencyCode> _availableCurrencies = const [];
   List<PosProduct> _products = const [];
   final Map<String, _PurchaseLineDraft> _lines = {};
 
   @override
   void initState() {
     super.initState();
+    _purchaseCurrency = widget.currency;
     _loadProducts();
+    _loadCurrencies();
   }
 
   @override
@@ -91,14 +102,30 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
     setState(() {
       _loading = false;
       if (result.isFailure) {
-        _loadFailure = result.failureOrNull?.messageAr ??
-            AppStrings.posPurchaseLoadFailed;
+        _loadFailure =
+            result.failureOrNull?.messageAr ?? AppStrings.posPurchaseLoadFailed;
       } else {
-        _products = (result.valueOrNull ?? const [])
-            .where((product) => product.currency == widget.currency)
-            .toList(growable: false);
+        _products = (result.valueOrNull ?? const []).toList(growable: false);
       }
     });
+  }
+
+  Future<void> _loadCurrencies() async {
+    final result = await widget.listCurrencies(onlyActive: true);
+    if (!mounted || result.isFailure) return;
+    final currencies = result.valueOrNull ?? const <CurrencyCode>[];
+    setState(() {
+      _availableCurrencies = List.unmodifiable(
+        currencies.any((item) => item == widget.currency)
+            ? currencies
+            : [...currencies, widget.currency],
+      );
+    });
+  }
+
+  void _selectPurchaseCurrency(CurrencyCode? currency) {
+    if (currency == null || _lines.isNotEmpty || _submitting) return;
+    setState(() => _purchaseCurrency = currency);
   }
 
   Future<void> _selectSupplier() async {
@@ -127,14 +154,62 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
       _showMessage(AppStrings.posPurchaseAlreadyAdded);
       return;
     }
+    final line = _PurchaseLineDraft(
+      product: product,
+      unitCostText: product.currency == _purchaseCurrency
+          ? _minorUnitsToText(
+              product.purchasePrice.minorUnits,
+              _purchaseCurrency.fractionalDigits,
+            )
+          : '',
+    );
+    setState(() => _lines[product.id] = line);
+    _refreshLinePreview(line);
+  }
+
+  Future<void> _refreshLinePreview(_PurchaseLineDraft line) async {
+    final sourceCurrency = _purchaseCurrency;
+    final raw = line.unitCostController.text;
+    final sourceMinor = _parseScaled(raw, sourceCurrency.fractionalDigits);
+    if (sourceMinor == null) {
+      setState(() {
+        line.previewConversion = null;
+        line.proposedSalePrice = null;
+        line.previewFailure = null;
+        line.previewLoading = false;
+        line.applyProposedSalePrice = false;
+      });
+      return;
+    }
     setState(() {
-      _lines[product.id] = _PurchaseLineDraft(
-        product: product,
-        unitCostText: _minorUnitsToText(
-          product.purchasePrice.minorUnits,
-          widget.currency.fractionalDigits,
-        ),
-      );
+      line.previewLoading = true;
+      line.previewFailure = null;
+      line.previewConversion = null;
+      line.proposedSalePrice = null;
+    });
+    final result = await widget.currencyConverter.convertWithSnapshot(
+      Money.nonNegative(sourceMinor, sourceCurrency),
+      toCurrency: line.product.currency,
+    );
+    if (!mounted ||
+        !identical(_lines[line.product.id], line) ||
+        line.unitCostController.text != raw ||
+        _purchaseCurrency != sourceCurrency) {
+      return;
+    }
+    setState(() {
+      line.previewLoading = false;
+      if (result.isFailure) {
+        line.previewConversion = null;
+        line.proposedSalePrice = null;
+        line.applyProposedSalePrice = false;
+        line.previewFailure = result.failureOrNull?.messageAr;
+      } else {
+        line.previewConversion = result.valueOrNull;
+        line.proposedSalePrice = line.product.profitMargin
+            .calculateProposedSalePrice(result.valueOrNull!.targetAmount);
+        line.previewFailure = null;
+      }
     });
   }
 
@@ -153,7 +228,7 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
       );
       final costMinor = _parseScaled(
         line.unitCostController.text,
-        widget.currency.fractionalDigits,
+        _purchaseCurrency.fractionalDigits,
       );
       if (quantityScaled == null || quantityScaled == 0 || costMinor == null) {
         return null;
@@ -163,7 +238,7 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
           quantityScaled,
           scale: line.product.quantityScale,
         ),
-        Money.nonNegative(costMinor, widget.currency),
+        Money.nonNegative(costMinor, _purchaseCurrency),
       ).minorUnits;
     }
     return total;
@@ -192,9 +267,13 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
       );
       final costMinor = _parseScaled(
         line.unitCostController.text,
-        widget.currency.fractionalDigits,
+        _purchaseCurrency.fractionalDigits,
       );
-      if (quantityScaled == null || quantityScaled <= 0 || costMinor == null) {
+      if (quantityScaled == null ||
+          quantityScaled <= 0 ||
+          costMinor == null ||
+          line.previewConversion == null ||
+          line.proposedSalePrice == null) {
         _showMessage(AppStrings.posInvoiceInvalid);
         return;
       }
@@ -206,29 +285,33 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
             scale: line.product.quantityScale,
           ),
           unitCostMinor: costMinor,
+          applyProposedSalePrice: line.applyProposedSalePrice,
+          rateSnapshot: line.previewConversion!.rateSnapshot,
+          productUpdatedAtSnapshot: line.product.updatedAt,
         ),
       );
     }
 
     final fingerprint = _purchaseFingerprint(purchaseLines);
     final fingerprintHash = sha256.convert(utf8.encode(fingerprint)).toString();
+    final requestSnapshotJson = _purchaseSnapshotJson(purchaseLines);
+    final candidateIdentity = PosPurchaseRequestIdentity(
+      invoiceId: _pendingFingerprint == fingerprint && _pendingInvoiceId != null
+          ? _pendingInvoiceId!
+          : _uuid.v4(),
+      idempotencyKey:
+          _pendingFingerprint == fingerprint && _pendingIdempotencyKey != null
+              ? _pendingIdempotencyKey!
+              : _uuid.v4(),
+      createdAt: _pendingFingerprint == fingerprint && _pendingCreatedAt != null
+          ? _pendingCreatedAt!
+          : DateTime.now().toUtc(),
+      requestSnapshotJson: requestSnapshotJson,
+    );
     setState(() => _submitting = true);
     final identityResult = await widget.requestIdentityRepository.getOrCreate(
       fingerprintHash: fingerprintHash,
-      candidate: PosPurchaseRequestIdentity(
-        invoiceId: _pendingFingerprint == fingerprint &&
-                _pendingInvoiceId != null
-            ? _pendingInvoiceId!
-            : _uuid.v4(),
-        idempotencyKey: _pendingFingerprint == fingerprint &&
-                _pendingIdempotencyKey != null
-            ? _pendingIdempotencyKey!
-            : _uuid.v4(),
-        createdAt: _pendingFingerprint == fingerprint &&
-                _pendingCreatedAt != null
-            ? _pendingCreatedAt!
-            : DateTime.now().toUtc(),
-      ),
+      candidate: candidateIdentity,
     );
     if (!mounted) return;
     if (identityResult.isFailure) {
@@ -240,6 +323,26 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
       return;
     }
     final identity = identityResult.valueOrNull!;
+    if (identity.invoiceId != candidateIdentity.invoiceId &&
+        identity.requestSnapshotJson == null) {
+      setState(() => _submitting = false);
+      _showMessage(AppStrings.posPurchaseSnapshotRestoreFailed);
+      return;
+    }
+    if (identity.requestSnapshotJson != null &&
+        identity.requestSnapshotJson != requestSnapshotJson) {
+      final restored = _restorePurchaseSnapshot(
+        identity.requestSnapshotJson!,
+        purchaseLines,
+      );
+      setState(() => _submitting = false);
+      if (!restored) {
+        _showMessage(AppStrings.posPurchaseSnapshotRestoreFailed);
+      } else {
+        _showMessage(AppStrings.posPurchaseSnapshotRestored);
+      }
+      return;
+    }
     _pendingFingerprint = fingerprint;
     _pendingInvoiceId = identity.invoiceId;
     _pendingIdempotencyKey = identity.idempotencyKey;
@@ -253,14 +356,13 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
         invoiceId: invoiceId,
         invoiceNumber: invoiceNumber,
         warehouseId: widget.warehouseId,
-        currency: widget.currency,
+        currency: _purchaseCurrency,
         lines: purchaseLines,
         idempotencyKey: _pendingIdempotencyKey!,
         invoiceDate: now,
         createdAt: now,
-        supplierAccountId: _supplierAccountId == null
-            ? null
-            : AccountId(_supplierAccountId!),
+        supplierAccountId:
+            _supplierAccountId == null ? null : AccountId(_supplierAccountId!),
         advanceMinorUnits: _payInCash ? totalMinor : 0,
         paymentMethod:
             _payInCash ? PosPaymentMethod.cash : PosPaymentMethod.credit,
@@ -306,8 +408,137 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
         .map((line) =>
             '${line.productId}:${line.quantity.scaledUnits}/${line.quantity.scale}:${line.unitCostMinor}')
         .join(';');
-    return '${widget.warehouseId}|${widget.currency.code}|'
+    return '${widget.warehouseId}|${_purchaseCurrency.code}|'
         '${_supplierAccountId ?? ''}|$_payInCash|$lineData';
+  }
+
+  String _purchaseSnapshotJson(List<BuildPosPurchaseLineInput> lines) {
+    return jsonEncode({
+      'invoice_currency_code': _purchaseCurrency.code,
+      'lines': lines.map((line) {
+        final draft = _lines[line.productId]!;
+        final quote = draft.previewConversion!.rateSnapshot;
+        return {
+          'product_id': line.productId,
+          'source_unit_price_minor': line.unitCostMinor,
+          'product_updated_at':
+              draft.product.updatedAt.toUtc().toIso8601String(),
+          'apply_proposed_sale_price': draft.applyProposedSalePrice,
+          'quote': quote == null
+              ? null
+              : {
+                  'rate_id': quote.rateId,
+                  'stored_from_code': quote.storedFromCurrency.code,
+                  'stored_to_code': quote.storedToCurrency.code,
+                  'stored_rate_scaled': quote.storedRateScaled,
+                  'requested_from_code': quote.requestedFromCurrency.code,
+                  'requested_to_code': quote.requestedToCurrency.code,
+                  'effective_at': quote.effectiveAt.toUtc().toIso8601String(),
+                  'recorded_at': quote.recordedAt.toUtc().toIso8601String(),
+                  'created_at': quote.createdAt.toUtc().toIso8601String(),
+                  'is_inverted': quote.isInverted,
+                  'note': quote.note,
+                },
+        };
+      }).toList(growable: false),
+    });
+  }
+
+  bool _restorePurchaseSnapshot(
+    String snapshotJson,
+    List<BuildPosPurchaseLineInput> currentLines,
+  ) {
+    try {
+      final snapshot = jsonDecode(snapshotJson) as Map<String, dynamic>;
+      if (snapshot['invoice_currency_code'] != _purchaseCurrency.code) {
+        return false;
+      }
+      final savedLines =
+          (snapshot['lines'] as List<dynamic>).cast<Map<String, dynamic>>();
+      if (savedLines.length != currentLines.length) return false;
+      for (final current in currentLines) {
+        final saved = savedLines.firstWhere(
+          (line) => line['product_id'] == current.productId,
+        );
+        final draft = _lines[current.productId];
+        if (draft == null ||
+            saved['source_unit_price_minor'] != current.unitCostMinor ||
+            DateTime.parse(saved['product_updated_at'] as String).toUtc() !=
+                draft.product.updatedAt.toUtc()) {
+          return false;
+        }
+        final sourceAmount = Money.nonNegative(
+          current.unitCostMinor!,
+          _purchaseCurrency,
+        );
+        final rawQuote = saved['quote'];
+        PosCurrencyConversion conversion;
+        if (rawQuote == null) {
+          if (_purchaseCurrency != draft.product.currency) return false;
+          conversion = PosCurrencyConversion(
+            sourceAmount: sourceAmount,
+            targetAmount: Money.fromMinorUnits(
+              sourceAmount.minorUnits,
+              draft.product.currency,
+            ),
+            rateSnapshot: null,
+          );
+        } else {
+          final quoteData = rawQuote as Map<String, dynamic>;
+          if (quoteData['requested_from_code'] != _purchaseCurrency.code ||
+              quoteData['requested_to_code'] != draft.product.currency.code) {
+            return false;
+          }
+          final storedFrom = _currencyForPurchasePair(
+            quoteData['stored_from_code'] as String,
+            draft.product.currency,
+          );
+          final storedTo = _currencyForPurchasePair(
+            quoteData['stored_to_code'] as String,
+            draft.product.currency,
+          );
+          if (storedFrom == null || storedTo == null) return false;
+          final quote = PosCurrencyRateQuote(
+            rateId: quoteData['rate_id'] as String,
+            storedFromCurrency: storedFrom,
+            storedToCurrency: storedTo,
+            storedRateScaled: quoteData['stored_rate_scaled'] as int,
+            requestedFromCurrency: _purchaseCurrency,
+            requestedToCurrency: draft.product.currency,
+            effectiveAt: DateTime.parse(quoteData['effective_at'] as String),
+            recordedAt: DateTime.parse(quoteData['recorded_at'] as String),
+            createdAt: DateTime.parse(quoteData['created_at'] as String),
+            isInverted: quoteData['is_inverted'] as bool,
+            note: quoteData['note'] as String?,
+          );
+          conversion = PosCurrencyConversion(
+            sourceAmount: sourceAmount,
+            targetAmount: quote.convert(sourceAmount),
+            rateSnapshot: quote,
+          );
+        }
+        draft.previewConversion = conversion;
+        draft.proposedSalePrice = draft.product.profitMargin
+            .calculateProposedSalePrice(conversion.targetAmount);
+        draft.applyProposedSalePrice =
+            saved['apply_proposed_sale_price'] as bool;
+        draft.previewFailure = null;
+        draft.previewLoading = false;
+      }
+      setState(() {});
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
+  CurrencyCode? _currencyForPurchasePair(
+    String code,
+    CurrencyCode productCurrency,
+  ) {
+    if (code == _purchaseCurrency.code) return _purchaseCurrency;
+    if (code == productCurrency.code) return productCurrency;
+    return null;
   }
 
   void _showMessage(String message) {
@@ -334,6 +565,29 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
                     Text(
                       AppStrings.posPurchaseDescription,
                       style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                    const SizedBox(height: SpacingTokens.md),
+                    DropdownButtonFormField<CurrencyCode>(
+                      initialValue: _purchaseCurrency,
+                      decoration: InputDecoration(
+                        labelText: AppStrings.posCheckoutCurrencyLabel,
+                        helperText: _lines.isEmpty
+                            ? null
+                            : AppStrings.posPurchaseCurrencyLocked,
+                      ),
+                      items: (_availableCurrencies.isEmpty
+                              ? [widget.currency]
+                              : _availableCurrencies)
+                          .map((currency) => DropdownMenuItem(
+                                value: currency,
+                                child: Text(
+                                  '${currency.nameAr} (${currency.code})',
+                                ),
+                              ))
+                          .toList(growable: false),
+                      onChanged: _lines.isNotEmpty || _submitting
+                          ? null
+                          : _selectPurchaseCurrency,
                     ),
                     const SizedBox(height: SpacingTokens.md),
                     Card(
@@ -405,14 +659,19 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
                         trailing: Text(
                           total == null
                               ? '—'
-                              : formatPosMinor(total, widget.currency),
+                              : formatPosMinor(total, _purchaseCurrency),
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                       ),
                     ),
                     const SizedBox(height: SpacingTokens.md),
                     FilledButton.icon(
-                      onPressed: _submitting ? null : _submit,
+                      onPressed: _submitting ||
+                              _lines.values.any((line) =>
+                                  line.previewLoading ||
+                                  line.previewConversion == null)
+                          ? null
+                          : _submit,
                       icon: _submitting
                           ? const SizedBox.square(
                               dimension: 18,
@@ -451,8 +710,7 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
   Widget _lineCard(_PurchaseLineDraft line) {
     final quantityLabel =
         '${AppStrings.posPurchaseQuantity} (${line.product.unitName})';
-    final quantityHint =
-        '0${line.product.quantityScale > 0 ? '.0' : ''}';
+    final quantityHint = '0${line.product.quantityScale > 0 ? '.0' : ''}';
     final quantityField = line.product.quantityScale == 0
         ? QaydNumericField(
             controller: line.quantityController,
@@ -469,21 +727,21 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
             fractionalDigits: line.product.quantityScale,
             onChanged: (_) => setState(() {}),
           );
-    final costField = widget.currency.fractionalDigits == 0
+    final costField = _purchaseCurrency.fractionalDigits == 0
         ? QaydNumericField(
             controller: line.unitCostController,
             enabled: !_submitting,
-            label: AppStrings.posPurchaseUnitCost,
-            suffixText: widget.currency.symbol,
-            onChanged: (_) => setState(() {}),
+            label: AppStrings.posPurchaseSourceUnitPrice,
+            suffixText: _purchaseCurrency.symbol,
+            onChanged: (_) => _refreshLinePreview(line),
           )
         : QaydAmountField(
             controller: line.unitCostController,
             enabled: !_submitting,
-            label: AppStrings.posPurchaseUnitCost,
-            suffixText: widget.currency.symbol,
-            fractionalDigits: widget.currency.fractionalDigits,
-            onChanged: (_) => setState(() {}),
+            label: AppStrings.posPurchaseSourceUnitPrice,
+            suffixText: _purchaseCurrency.symbol,
+            fractionalDigits: _purchaseCurrency.fractionalDigits,
+            onChanged: (_) => _refreshLinePreview(line),
           );
     return Card(
       key: ValueKey('purchase-line-${line.product.id}'),
@@ -512,6 +770,49 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
             quantityField,
             const SizedBox(height: SpacingTokens.sm),
             costField,
+            const SizedBox(height: SpacingTokens.sm),
+            if (line.previewLoading)
+              const LinearProgressIndicator()
+            else if (line.previewFailure != null)
+              Text(
+                line.previewFailure!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              )
+            else if (line.previewConversion != null) ...[
+              Text(
+                '${AppStrings.posPurchaseInventoryCost}: '
+                '${formatPosMoney(line.previewConversion!.targetAmount)}',
+              ),
+              if (line.previewConversion!.rateSnapshot case final quote?) ...[
+                Text(
+                  '${AppStrings.posCheckoutRateSnapshotLabel}: '
+                  '1 ${quote.storedFromCurrency.code} = '
+                  '${_formatStoredRate(quote.storedRateScaled)} '
+                  '${quote.storedToCurrency.code}'
+                  '${quote.isInverted ? ' · ${AppStrings.posCheckoutRateReverseApplied}' : ''}',
+                ),
+                Text(quote.recordedAt.toLocal().toString()),
+              ],
+              const SizedBox(height: SpacingTokens.xs),
+              Text(
+                '${AppStrings.posPurchaseCurrentCatalogSalePrice}: '
+                '${formatPosMoney(line.product.salePrice)}',
+              ),
+              Text(
+                '${AppStrings.posPurchaseProposedSalePrice}: '
+                '${formatPosMoney(line.proposedSalePrice!)}',
+              ),
+              CheckboxListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: line.applyProposedSalePrice,
+                onChanged: _submitting
+                    ? null
+                    : (value) => setState(
+                          () => line.applyProposedSalePrice = value ?? false,
+                        ),
+                title: Text(AppStrings.posPurchaseApplyProposedSalePrice),
+              ),
+            ],
           ],
         ),
       ),
@@ -534,9 +835,8 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
       return null;
     }
     final divisor = _pow10(scale);
-    final fractionValue = fraction.isEmpty
-        ? 0
-        : int.parse(fraction.padRight(scale, '0'));
+    final fractionValue =
+        fraction.isEmpty ? 0 : int.parse(fraction.padRight(scale, '0'));
     return int.parse(whole) * divisor + fractionValue;
   }
 
@@ -546,6 +846,15 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
     final whole = minorUnits ~/ divisor;
     final fraction = (minorUnits % divisor).toString().padLeft(digits, '0');
     return '$whole.$fraction';
+  }
+
+  static String _formatStoredRate(int scaled) {
+    final factor = BigInt.from(posCurrencyRateScale);
+    final value = BigInt.from(scaled);
+    final whole = value ~/ factor;
+    final fraction = (value % factor).toString().padLeft(8, '0');
+    final trimmed = fraction.replaceFirst(RegExp(r'0+$'), '');
+    return trimmed.isEmpty ? '$whole' : '$whole.$trimmed';
   }
 
   static int _pow10(int digits) {
@@ -565,6 +874,11 @@ final class _PurchaseLineDraft {
   final PosProduct product;
   final TextEditingController quantityController;
   final TextEditingController unitCostController;
+  PosCurrencyConversion? previewConversion;
+  Money? proposedSalePrice;
+  String? previewFailure;
+  bool previewLoading = false;
+  bool applyProposedSalePrice = false;
 
   void dispose() {
     quantityController.dispose();

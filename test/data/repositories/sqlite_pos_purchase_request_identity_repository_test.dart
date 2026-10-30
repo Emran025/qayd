@@ -24,14 +24,14 @@ void main() {
 
     test('reuses the same UUID identity after repository recreation', () async {
       final fingerprint = List.filled(64, 'a').join();
-      final firstRepository =
-          SqlitePosPurchaseRequestIdentityRepository(db);
+      final firstRepository = SqlitePosPurchaseRequestIdentityRepository(db);
       final first = await firstRepository.getOrCreate(
         fingerprintHash: fingerprint,
         candidate: PosPurchaseRequestIdentity(
           invoiceId: 'invoice-first',
           idempotencyKey: 'key-first',
           createdAt: DateTime.utc(2026, 10, 30),
+          requestSnapshotJson: '{"rate_id":"rate-old"}',
         ),
       );
 
@@ -51,6 +51,10 @@ void main() {
       expect(replay.valueOrNull!.invoiceId, 'invoice-first');
       expect(replay.valueOrNull!.idempotencyKey, 'key-first');
       expect(replay.valueOrNull!.createdAt, DateTime.utc(2026, 10, 30));
+      expect(
+        replay.valueOrNull!.requestSnapshotJson,
+        '{"rate_id":"rate-old"}',
+      );
       expect(await db.query('app_settings'), hasLength(1));
     });
 

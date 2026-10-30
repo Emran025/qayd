@@ -13,7 +13,8 @@ import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
 /// Data-only atomic coordinator for a complete posted POS purchase.
-final class SqlitePosPurchasePostingRepository implements PosPurchasePostingRepository {
+final class SqlitePosPurchasePostingRepository
+    implements PosPurchasePostingRepository {
   SqlitePosPurchasePostingRepository(
     this._transactionRunner,
     this._stockRepository,
@@ -43,6 +44,34 @@ final class SqlitePosPurchasePostingRepository implements PosPurchasePostingRepo
           );
           if (result.isFailure) {
             throw _AtomicPurchaseFailure(result.failureOrNull!);
+          }
+        }
+
+        for (final line in posting.invoice.lines) {
+          final snapshot = line.productUpdatedAtSnapshot;
+          if (snapshot == null) continue;
+          final productValues = <String, Object?>{
+            'purchase_price_minor': line.unitCost.minorUnits,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          };
+          if (line.proposedSalePriceApplied) {
+            productValues['sale_price_minor'] =
+                line.proposedSalePrice!.minorUnits;
+          }
+          final updated = await txn.update(
+            'pos_products',
+            productValues,
+            where: 'id = ? AND updated_at = ?',
+            whereArgs: [
+              line.productId,
+              snapshot.toUtc().toIso8601String(),
+            ],
+          );
+          if (updated != 1) {
+            throw _AtomicPurchaseFailure(ValidationFailure(
+              messageAr: AppStrings.posProductSaveFailed,
+              code: 'pos_purchase_product_changed',
+            ));
           }
         }
 
@@ -167,9 +196,8 @@ final class SqlitePosPurchasePostingRepository implements PosPurchasePostingRepo
     final expectedVoucherIds = posting.postings
         .map((accountingPosting) => accountingPosting.voucher.id.value)
         .toSet();
-    final actualVoucherIds = sourceVoucherRows
-        .map((row) => row['id'] as String)
-        .toSet();
+    final actualVoucherIds =
+        sourceVoucherRows.map((row) => row['id'] as String).toSet();
     if (sourceVoucherRows.isNotEmpty &&
         (actualVoucherIds.length != expectedVoucherIds.length ||
             !actualVoucherIds.containsAll(expectedVoucherIds))) {

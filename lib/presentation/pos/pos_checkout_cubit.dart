@@ -6,13 +6,15 @@ import 'package:qayd/application/pos/resolve_pos_product_for_checkout_use_case.d
 import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
+import 'package:qayd/domain/entities/pos_currency_rate.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/services/pos_currency_converter.dart';
+import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
-import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 
 /// UI state for the fast POS checkout surface.
@@ -31,27 +33,34 @@ final class PosCheckoutLineState {
     required this.product,
     required this.quantity,
     required this.unitPrice,
+    this.rateSnapshot,
   });
 
   final PosProduct product;
   final PosQuantity quantity;
   final Money? unitPrice;
+  final PosCurrencyRateQuote? rateSnapshot;
 
   int get totalMinorUnits => unitPrice == null
       ? 0
       : PosMoneyMath.multiply(quantity, unitPrice!).minorUnits;
 
-  PosCheckoutLineState withQuantity(PosQuantity value) =>
-      PosCheckoutLineState(
+  PosCheckoutLineState withQuantity(PosQuantity value) => PosCheckoutLineState(
         product: product,
         quantity: value,
         unitPrice: unitPrice,
+        rateSnapshot: rateSnapshot,
       );
 
-  PosCheckoutLineState withUnitPrice(Money? value) => PosCheckoutLineState(
+  PosCheckoutLineState withConversion(
+    Money? value,
+    PosCurrencyRateQuote? quote,
+  ) =>
+      PosCheckoutLineState(
         product: product,
         quantity: quantity,
         unitPrice: value,
+        rateSnapshot: quote,
       );
 }
 
@@ -112,6 +121,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
   PosCheckoutCubit({
     required ResolvePosProductForCheckoutUseCase resolveProduct,
     required ListPosProductsUseCase listProducts,
+    this.currencyConverter,
     this.completeSale,
     this.idGenerator,
   })  : _resolveProduct = resolveProduct,
@@ -120,6 +130,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
 
   final ResolvePosProductForCheckoutUseCase _resolveProduct;
   final ListPosProductsUseCase _listProducts;
+  final PosCurrencyConverter? currencyConverter;
   final CompletePosSaleUseCase? completeSale;
   final IdGenerator? idGenerator;
   String? _pendingInvoiceId;
@@ -134,14 +145,21 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
     AccountId? customerAccountId,
     AccountId? paymentAccountId,
   }) async {
-    if (isClosed || state.isBusy || state.lines.isEmpty) return;
+    if (isClosed ||
+        state.isBusy ||
+        state.lines.isEmpty ||
+        state.lines.any((line) => line.unitPrice == null)) {
+      return;
+    }
     final action = completeSale;
     if (action == null) {
       emit(state.copyWith(status: PosCheckoutStatus.failure));
       return;
     }
     emit(state.copyWith(
-        status: PosCheckoutStatus.completing, clearFailure: true));
+      status: PosCheckoutStatus.completing,
+      clearFailure: true,
+    ));
     final id = _pendingInvoiceId ??
         (idGenerator?.next() ??
             'pos-${DateTime.now().toUtc().microsecondsSinceEpoch}');
@@ -162,6 +180,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
                 productId: line.product.id,
                 quantity: line.quantity,
                 unitPrice: line.unitPrice,
+                rateSnapshot: line.rateSnapshot,
               ))
           .toList(growable: false),
       idempotencyKey: idempotencyKey,
@@ -199,79 +218,83 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
       emit(state.copyWith(searchResults: const [], clearSearch: true));
       return;
     }
-    emit(
-      state.copyWith(
-        status: PosCheckoutStatus.loading,
-        searchQuery: query,
-        clearFailure: true,
-      ),
-    );
+    emit(state.copyWith(
+      status: PosCheckoutStatus.loading,
+      searchQuery: query,
+      clearFailure: true,
+    ));
     final result = await _listProducts(activeOnly: true, search: query);
     if (isClosed) return;
     result.fold(
-      (failure) => emit(
-        state.copyWith(status: PosCheckoutStatus.failure, failure: failure),
-      ),
-      (products) => emit(
-        state.copyWith(
-          status: PosCheckoutStatus.ready,
-          searchResults: List.unmodifiable(products),
-          clearFailure: true,
-        ),
-      ),
+      (failure) => emit(state.copyWith(
+        status: PosCheckoutStatus.failure,
+        failure: failure,
+      )),
+      (products) => emit(state.copyWith(
+        status: PosCheckoutStatus.ready,
+        searchResults: List.unmodifiable(products),
+        clearFailure: true,
+      )),
     );
   }
 
   Future<void> resolveAndAdd(String rawQuery) async {
     if (isClosed || state.isBusy) return;
     emit(state.copyWith(
-        status: PosCheckoutStatus.resolving, clearFailure: true));
+      status: PosCheckoutStatus.resolving,
+      clearFailure: true,
+    ));
     final result = await _resolveProduct(rawQuery);
     if (isClosed) return;
-    result.fold(
-      (failure) => emit(
-        state.copyWith(status: PosCheckoutStatus.failure, failure: failure),
-      ),
-      (product) => addProduct(product),
-    );
+    if (result.isFailure) {
+      emit(state.copyWith(
+        status: PosCheckoutStatus.failure,
+        failure: result.failureOrNull,
+      ));
+      return;
+    }
+    final product = result.valueOrNull;
+    if (product != null) await addProduct(product);
   }
 
-  void addProduct(PosProduct product, {int units = 1}) {
-    if (units <= 0) return;
+  Future<void> addProduct(PosProduct product, {int units = 1}) async {
+    if (isClosed || units <= 0) return;
     _clearPendingSale();
     final quantity = PosQuantity.fromScaled(
       PosMoneyMath.scaleFactor(product.quantityScale) * units,
       scale: product.quantityScale,
     );
     final saleCurrency = state.currency ?? product.currency;
-
     final index =
         state.lines.indexWhere((line) => line.product.id == product.id);
     final next = [...state.lines];
-    if (index < 0) {
-      next.add(
-        PosCheckoutLineState(
-          product: product,
-          quantity: quantity,
-          unitPrice: product.salePrice.currency == saleCurrency
-              ? product.salePrice
-              : null,
-        ),
-      );
-    } else {
+    if (index >= 0) {
       final existing = next[index];
       next[index] = existing.withQuantity(existing.quantity + quantity);
-    }
-    emit(
-      state.copyWith(
+      emit(state.copyWith(
         status: PosCheckoutStatus.ready,
         currency: saleCurrency,
         lines: List.unmodifiable(next),
         searchResults: const [],
         clearSearch: true,
         clearFailure: true,
-      ),
-    );
+      ));
+      return;
+    }
+    next.add(PosCheckoutLineState(
+      product: product,
+      quantity: quantity,
+      unitPrice: null,
+    ));
+    emit(state.copyWith(
+      status: PosCheckoutStatus.resolving,
+      currency: saleCurrency,
+      lines: List.unmodifiable(next),
+      searchResults: const [],
+      clearSearch: true,
+      clearFailure: true,
+    ));
+    await _populateLinePrice(product.id, saleCurrency);
   }
 
   void setQuantity(String productId, PosQuantity quantity) {
@@ -282,73 +305,104 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
     }
     final index =
         state.lines.indexWhere((line) => line.product.id == productId);
-    if (index < 0 || state.lines[index].quantity.scale != quantity.scale) {
+    if (index < 0 || state.lines[index].quantity.scale != quantity.scale)
       return;
-    }
     final next = [...state.lines];
     next[index] = next[index].withQuantity(quantity);
     emit(state.copyWith(lines: List.unmodifiable(next)));
   }
 
-  void setSaleCurrency(CurrencyCode currency) {
+  Future<void> setSaleCurrency(CurrencyCode currency) async {
     if (state.currency == currency) return;
     _clearPendingSale();
-    emit(
-      state.copyWith(
-        currency: currency,
-        status: PosCheckoutStatus.ready,
-        lines: List.unmodifiable(
-          state.lines.map(
-            (line) => line.withUnitPrice(
-              line.product.salePrice.currency == currency
-                  ? line.product.salePrice
-                  : null,
-            ),
-          ),
-        ),
-        clearFailure: true,
+    final productIds = state.lines.map((line) => line.product.id).toList();
+    emit(state.copyWith(
+      currency: currency,
+      status: productIds.isEmpty
+          ? PosCheckoutStatus.ready
+          : PosCheckoutStatus.resolving,
+      lines: List.unmodifiable(
+        state.lines.map((line) => line.withConversion(null, null)),
       ),
-    );
+      clearFailure: true,
+    ));
+    for (final productId in productIds) {
+      await _populateLinePrice(productId, currency);
+      if (state.status == PosCheckoutStatus.failure) return;
+    }
   }
 
-  void setUnitPrice(String productId, Money? unitPrice) {
-    final currency = state.currency;
-    if (unitPrice != null &&
-        (currency == null ||
-            unitPrice.currency != currency ||
-            unitPrice.isNegative)) {
-      return;
+  Future<void> _populateLinePrice(
+    String productId,
+    CurrencyCode currency,
+  ) async {
+    final index =
+        state.lines.indexWhere((line) => line.product.id == productId);
+    if (index < 0 || state.currency != currency) return;
+    final line = state.lines[index];
+    Money? unitPrice;
+    PosCurrencyRateQuote? quote;
+    if (line.product.salePrice.currency == currency) {
+      unitPrice = line.product.salePrice;
+    } else {
+      final converter = currencyConverter;
+      if (converter == null) {
+        emit(state.copyWith(
+          status: PosCheckoutStatus.failure,
+          failure: const ValidationFailure(
+            messageAr: 'لا يتوفر محول العملة في نقطة البيع.',
+            code: 'pos_currency_converter_unavailable',
+          ),
+        ));
+        return;
+      }
+      final result = await converter.convertWithSnapshot(
+        line.product.salePrice,
+        toCurrency: currency,
+      );
+      if (isClosed || state.currency != currency) return;
+      if (result.isFailure) {
+        emit(state.copyWith(
+          status: PosCheckoutStatus.failure,
+          failure: result.failureOrNull,
+        ));
+        return;
+      }
+      final conversion = result.valueOrNull!;
+      unitPrice = conversion.targetAmount;
+      quote = conversion.rateSnapshot;
     }
-    final index = state.lines.indexWhere((line) => line.product.id == productId);
-    if (index < 0) return;
-    _clearPendingSale();
+    final currentIndex =
+        state.lines.indexWhere((item) => item.product.id == productId);
+    if (currentIndex < 0 || state.currency != currency) return;
     final next = [...state.lines];
-    next[index] = next[index].withUnitPrice(unitPrice);
-    emit(state.copyWith(lines: List.unmodifiable(next), clearFailure: true));
+    next[currentIndex] = next[currentIndex].withConversion(unitPrice, quote);
+    final ready = next.every((item) => item.unitPrice != null);
+    emit(state.copyWith(
+      status: ready ? PosCheckoutStatus.ready : PosCheckoutStatus.resolving,
+      lines: List.unmodifiable(next),
+      clearFailure: true,
+    ));
   }
 
   void removeProduct(String productId) {
     _clearPendingSale();
-    emit(
-      state.copyWith(
-        lines: List.unmodifiable(
-          state.lines.where((line) => line.product.id != productId),
-        ),
+    emit(state.copyWith(
+      lines: List.unmodifiable(
+        state.lines.where((line) => line.product.id != productId),
       ),
-    );
+    ));
   }
 
   void clearCart() {
     _clearPendingSale();
-    emit(
-      state.copyWith(
-        lines: const [],
-        searchResults: const [],
-        clearSearch: true,
-        clearFailure: true,
-        status: PosCheckoutStatus.ready,
-      ),
-    );
+    emit(state.copyWith(
+      lines: const [],
+      searchResults: const [],
+      clearSearch: true,
+      clearFailure: true,
+      status: PosCheckoutStatus.ready,
+    ));
   }
 
   void _clearPendingSale() {

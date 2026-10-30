@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/data/database/migrations/migration_040_pos_foundation.dart';
 import 'package:qayd/data/database/migrations/migration_041_pos_invoice_metadata.dart';
+import 'package:qayd/data/database/migrations/migration_registry.dart';
 import 'package:qayd/data/database/transaction_runner.dart';
 import 'package:qayd/data/mappers/pos_invoice_mapper.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sales_return_posting_repository.dart';
@@ -101,6 +102,7 @@ Future<void> _createSchema(Database db) async {
   ''');
   await Migration040PosFoundation().up(db);
   await Migration041PosInvoiceMetadata().up(db);
+  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 45);
 }
 
 Future<void> _seed(Database db) async {
@@ -169,7 +171,8 @@ PosInvoice _sourceInvoice({int globalDiscount = 0, int globalTax = 0}) {
       );
 }
 
-PosInvoicePayment _sourcePayment({int amount = 1000}) => PosInvoicePayment.create(
+PosInvoicePayment _sourcePayment({int amount = 1000}) =>
+    PosInvoicePayment.create(
       id: 'sale-payment-1',
       invoiceId: 'sale-1',
       accountId: AccountId('cash'),
@@ -216,7 +219,8 @@ PosSalesReturnPosting _returnPosting({
       ),
     ],
   ).post(_returnDate).applyPayment(
-        Money.fromMinorUnits(quantity * 500 - globalDiscount + globalTax, _currency),
+        Money.fromMinorUnits(
+            quantity * 500 - globalDiscount + globalTax, _currency),
         _returnDate,
       );
   final refund = PosInvoicePayment.create(
@@ -280,7 +284,7 @@ PosSalesReturnPosting _returnPosting({
       part: 'refund',
       counterparty: 'cash',
       affected: 'sales-returns',
-    amount: invoice.total.minorUnits,
+      amount: invoice.total.minorUnits,
     ),
   ];
   if (quantity > 0) {
@@ -341,7 +345,9 @@ void main() {
 
     tearDown(() => db.close());
 
-    test('commits return, stock, refund payment, relation, voucher and ledger atomically', () async {
+    test(
+        'commits return, stock, refund payment, relation, voucher and ledger atomically',
+        () async {
       final result = await repository.saveAtomically(_returnPosting(
         invoiceId: 'return-1',
         idempotencyKey: 'return-key-1',
@@ -356,11 +362,13 @@ void main() {
       expect(await db.query('pos_stock_movements'), hasLength(1));
       expect(await db.query('vouchers'), hasLength(2));
       expect(await db.query('ledger_entries'), hasLength(4));
-      final source = await db.query('pos_invoices', where: 'id = ?', whereArgs: ['sale-1']);
+      final source = await db
+          .query('pos_invoices', where: 'id = ?', whereArgs: ['sale-1']);
       expect(source.single['status'], 'partiallyReturned');
     });
 
-    test('accepts an exact retry without duplicating any persisted component', () async {
+    test('accepts an exact retry without duplicating any persisted component',
+        () async {
       final posting = _returnPosting(
         invoiceId: 'return-1',
         idempotencyKey: 'return-key-1',
@@ -384,7 +392,8 @@ void main() {
       expect(await db.query('pos_invoice_lines', orderBy: 'id ASC'), before[1]);
       expect(await db.query('pos_payments', orderBy: 'id ASC'), before[2]);
       expect(await db.query('pos_returns', orderBy: 'id ASC'), before[3]);
-      expect(await db.query('pos_stock_movements', orderBy: 'id ASC'), before[4]);
+      expect(
+          await db.query('pos_stock_movements', orderBy: 'id ASC'), before[4]);
       expect(await db.query('vouchers', orderBy: 'id ASC'), before[5]);
       expect(await db.query('ledger_entries', orderBy: 'id ASC'), before[6]);
     });
@@ -395,7 +404,8 @@ void main() {
           invoiceId: 'return-1',
           idempotencyKey: 'return-key-1',
           quantity: 1,
-        ))).isSuccess,
+        )))
+            .isSuccess,
         isTrue,
       );
 
@@ -410,7 +420,8 @@ void main() {
       expect(await db.query('ledger_entries'), hasLength(4));
     });
 
-    test('fails closed when an invoice exists without its atomic children', () async {
+    test('fails closed when an invoice exists without its atomic children',
+        () async {
       final posting = _returnPosting(
         invoiceId: 'return-1',
         idempotencyKey: 'return-key-1',
@@ -427,7 +438,8 @@ void main() {
       expect(await db.query('vouchers'), isEmpty);
     });
 
-    test('rechecks cumulative returned quantities in the write transaction', () async {
+    test('rechecks cumulative returned quantities in the write transaction',
+        () async {
       final first = await repository.saveAtomically(_returnPosting(
         invoiceId: 'return-1',
         idempotencyKey: 'return-key-1',
@@ -456,11 +468,13 @@ void main() {
       ));
 
       expect(result.isSuccess, isTrue);
-      final source = await db.query('pos_invoices', where: 'id = ?', whereArgs: ['sale-1']);
+      final source = await db
+          .query('pos_invoices', where: 'id = ?', whereArgs: ['sale-1']);
       expect(source.single['status'], 'voided');
     });
 
-    test('rejects exact full-void replay when source status is not voided', () async {
+    test('rejects exact full-void replay when source status is not voided',
+        () async {
       final posting = _returnPosting(
         invoiceId: 'return-void',
         idempotencyKey: 'return-void-key',
@@ -480,7 +494,8 @@ void main() {
       expect(replay.isFailure, isTrue);
     });
 
-    test('rejects return replay when source status exceeds returned quantities', () async {
+    test('rejects return replay when source status exceeds returned quantities',
+        () async {
       final posting = _returnPosting(
         invoiceId: 'return-partial',
         idempotencyKey: 'return-partial-key',
@@ -499,13 +514,17 @@ void main() {
       expect(replay.isFailure, isTrue);
     });
 
-    test('allocates invoice-level discount and tax across sequential returns', () async {
-      await db.delete('pos_payments', where: 'invoice_id = ?', whereArgs: ['sale-1']);
-      await db.delete('pos_invoice_lines', where: 'invoice_id = ?', whereArgs: ['sale-1']);
+    test('allocates invoice-level discount and tax across sequential returns',
+        () async {
+      await db.delete('pos_payments',
+          where: 'invoice_id = ?', whereArgs: ['sale-1']);
+      await db.delete('pos_invoice_lines',
+          where: 'invoice_id = ?', whereArgs: ['sale-1']);
       await db.delete('pos_invoices', where: 'id = ?', whereArgs: ['sale-1']);
       final source = _sourceInvoice(globalDiscount: 101, globalTax: 51);
       await db.insert('pos_invoices', PosInvoiceMapper.toRow(source));
-      await db.insert('pos_invoice_lines', PosInvoiceMapper.lineToRow(source.lines.single));
+      await db.insert(
+          'pos_invoice_lines', PosInvoiceMapper.lineToRow(source.lines.single));
       await db.insert(
         'pos_payments',
         PosInvoiceMapper.paymentToRow(_sourcePayment(amount: 950), _sourceDate),

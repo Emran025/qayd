@@ -4,6 +4,8 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
+import 'package:qayd/domain/entities/pos_invoice_line_conversion.dart';
+import 'package:qayd/domain/entities/pos_currency_rate.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
@@ -14,6 +16,7 @@ import 'package:qayd/domain/repositories/pos_product_repository.dart';
 import 'package:qayd/domain/repositories/pos_stock_movement_repository.dart';
 import 'package:qayd/domain/repositories/pos_template_installation_repository.dart';
 import 'package:qayd/domain/services/entry_generator.dart';
+import 'package:qayd/domain/services/pos_currency_converter.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
@@ -75,11 +78,13 @@ final class BuildPosSaleLineInput {
     required this.productId,
     required this.quantity,
     this.unitPrice,
+    this.rateSnapshot,
   });
 
   final String productId;
   final PosQuantity quantity;
   final Money? unitPrice;
+  final PosCurrencyRateQuote? rateSnapshot;
 }
 
 /// Builds a sale payload without writing anything to SQLite.
@@ -90,12 +95,14 @@ final class BuildPosSalePostingUseCase {
     required PosTemplateInstallationRepository installationRepository,
     required AccountRepository accountRepository,
     required IdGenerator idGenerator,
+    required PosCurrencyConverter currencyConverter,
     EntryGenerator entryGenerator = const EntryGenerator(),
   })  : _productRepository = productRepository,
         _stockRepository = stockRepository,
         _installationRepository = installationRepository,
         _accountRepository = accountRepository,
         _idGenerator = idGenerator,
+        _currencyConverter = currencyConverter,
         _entryGenerator = entryGenerator;
 
   final PosProductRepository _productRepository;
@@ -103,6 +110,7 @@ final class BuildPosSalePostingUseCase {
   final PosTemplateInstallationRepository _installationRepository;
   final AccountRepository _accountRepository;
   final IdGenerator _idGenerator;
+  final PosCurrencyConverter _currencyConverter;
   final EntryGenerator _entryGenerator;
 
   Future<Result<PosSalePosting>> call(BuildPosSalePostingInput input) async {
@@ -153,12 +161,36 @@ final class BuildPosSalePostingUseCase {
         }
         final lineId = _idGenerator.next();
         final unitCost = balance.averageUnitCost;
-        final unitPrice = request.unitPrice ??
-            (product.salePrice.currency == input.currency ? product.salePrice : null);
-        if (unitPrice == null ||
-            unitPrice.currency != input.currency ||
-            unitPrice.isNegative) {
-          return _invalid('pos_sale_manual_price_required');
+        PosCurrencyConversion conversion;
+        final suppliedRate = request.rateSnapshot;
+        if (suppliedRate != null) {
+          if (suppliedRate.requestedFromCurrency !=
+                  product.salePrice.currency ||
+              suppliedRate.requestedToCurrency != input.currency) {
+            return _invalid('pos_sale_rate_currency_mismatch');
+          }
+          try {
+            conversion = PosCurrencyConversion(
+              sourceAmount: product.salePrice,
+              targetAmount: suppliedRate.convert(product.salePrice),
+              rateSnapshot: suppliedRate,
+            );
+          } on ArgumentError {
+            return _invalid('pos_sale_rate_invalid');
+          }
+        } else {
+          final conversionResult = await _currencyConverter.convertWithSnapshot(
+            product.salePrice,
+            toCurrency: input.currency,
+          );
+          if (conversionResult.isFailure) {
+            return FailureResult(conversionResult.failureOrNull!);
+          }
+          conversion = conversionResult.valueOrNull!;
+        }
+        final unitPrice = conversion.targetAmount;
+        if (request.unitPrice != null && request.unitPrice != unitPrice) {
+          return _invalid('pos_sale_price_rate_changed');
         }
         final line = PosInvoiceLine.create(
           id: lineId,
@@ -172,6 +204,12 @@ final class BuildPosSalePostingUseCase {
           discount: Money.zero(input.currency),
           tax: Money.zero(input.currency),
           createdAt: input.createdAt,
+          currencyConversion: PosInvoiceLineConversion(
+            purpose: PosInvoiceLineConversionPurpose.catalogSalePrice,
+            sourceAmount: conversion.sourceAmount,
+            targetAmount: conversion.targetAmount,
+            rateSnapshot: conversion.rateSnapshot,
+          ),
         );
         invoiceLines.add(line);
         final cogs = PosMoneyMath.multiply(request.quantity, unitCost);

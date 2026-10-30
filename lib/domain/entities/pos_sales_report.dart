@@ -11,12 +11,14 @@ final class PosSalesReport {
     required this.to,
     required this.currency,
     required List<PosInvoice> invoices,
+    this.excludedInvoiceCount = 0,
   }) : invoices = UnmodifiableListView(invoices);
 
   final DateTime from;
   final DateTime to;
   final CurrencyCode currency;
   final List<PosInvoice> invoices;
+  final int excludedInvoiceCount;
 
   Money get grossTotal => invoices.fold(
         Money.zero(currency),

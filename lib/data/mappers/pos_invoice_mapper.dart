@@ -31,6 +31,8 @@ abstract final class PosInvoiceMapper {
   }
 
   static Map<String, Object?> lineToRow(PosInvoiceLine line) {
+    final conversion = line.currencyConversion;
+    final rate = conversion?.rateSnapshot;
     return <String, Object?>{
       'id': line.id,
       'invoice_id': line.invoiceId,
@@ -47,6 +49,26 @@ abstract final class PosInvoiceMapper {
       'line_total_minor': line.lineTotal.minorUnits,
       'source_line_id': line.sourceLineId,
       'created_at': line.createdAt.toUtc().toIso8601String(),
+      'conversion_purpose': conversion?.purpose.name,
+      'conversion_source_minor': conversion?.sourceAmount.minorUnits,
+      'conversion_source_currency_code': conversion?.sourceAmount.currency.code,
+      'conversion_target_minor': conversion?.targetAmount.minorUnits,
+      'conversion_target_currency_code': conversion?.targetAmount.currency.code,
+      'fx_rate_id': rate?.rateId,
+      'fx_requested_from_code': rate?.requestedFromCurrency.code,
+      'fx_requested_to_code': rate?.requestedToCurrency.code,
+      'fx_stored_from_code': rate?.storedFromCurrency.code,
+      'fx_stored_to_code': rate?.storedToCurrency.code,
+      'fx_rate_scaled': rate?.storedRateScaled,
+      'fx_effective_at': rate?.effectiveAt.toUtc().toIso8601String(),
+      'fx_recorded_at': rate?.recordedAt.toUtc().toIso8601String(),
+      'fx_created_at': rate?.createdAt.toUtc().toIso8601String(),
+      'fx_is_inverted': rate == null ? null : (rate.isInverted ? 1 : 0),
+      'fx_note': rate?.note,
+      'proposed_sale_price_minor': line.proposedSalePrice?.minorUnits,
+      'proposed_sale_price_applied': line.proposedSalePriceApplied ? 1 : 0,
+      'product_updated_at_snapshot':
+          line.productUpdatedAtSnapshot?.toUtc().toIso8601String(),
     };
   }
 

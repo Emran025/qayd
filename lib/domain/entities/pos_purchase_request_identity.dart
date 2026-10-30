@@ -8,9 +8,11 @@ final class PosPurchaseRequestIdentity {
     required this.invoiceId,
     required this.idempotencyKey,
     required this.createdAt,
+    this.requestSnapshotJson,
   });
 
   final String invoiceId;
   final String idempotencyKey;
   final DateTime createdAt;
+  final String? requestSnapshotJson;
 }

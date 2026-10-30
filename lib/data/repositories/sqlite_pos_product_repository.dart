@@ -1,8 +1,10 @@
 import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/entities/pos_profit_margin.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
 import 'package:qayd/domain/repositories/pos_product_repository.dart';
+import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_barcode.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
@@ -143,6 +145,11 @@ final class SqlitePosProductRepository implements PosProductRepository {
           'currency_code': product.currency.code,
           'sale_price_minor': product.salePrice.minorUnits,
           'purchase_price_minor': product.purchasePrice.minorUnits,
+          'profit_margin_type':
+              product.profitMargin.isPercentage ? 'percentage' : 'fixed_amount',
+          'profit_margin_value': product.profitMargin.isPercentage
+              ? product.profitMargin.percentageBasisPoints!
+              : product.profitMargin.fixedAmount!.minorUnits,
           'quantity_scale': product.quantityScale,
           'reorder_level_scaled': product.reorderLevel.scaledUnits,
           'expiry_tracking': product.expiryTracking ? 1 : 0,
@@ -260,6 +267,7 @@ final class SqlitePosProductRepository implements PosProductRepository {
           _asInt(row['purchase_price_minor']),
           currency,
         ),
+        profitMargin: _profitMarginFromRow(row, currency),
         quantityScale: _asInt(row['quantity_scale']),
         reorderLevel: PosQuantity.fromScaled(
           _asInt(row['reorder_level_scaled']),
@@ -277,6 +285,23 @@ final class SqlitePosProductRepository implements PosProductRepository {
   }
 
   static int _asInt(Object? value) => (value as num).toInt();
+
+  static PosProfitMargin _profitMarginFromRow(
+    Map<String, Object?> row,
+    CurrencyCode currency,
+  ) {
+    final type = row['profit_margin_type'] as String? ?? 'percentage';
+    final value = row['profit_margin_value'] == null
+        ? 0
+        : _asInt(row['profit_margin_value']);
+    return switch (type) {
+      'percentage' => PosProfitMargin.percentage(value),
+      'fixed_amount' => PosProfitMargin.fixedAmount(
+          Money.fromMinorUnits(value, currency),
+        ),
+      _ => throw FormatException('Unknown POS product margin type $type'),
+    };
+  }
 
   FailureResult<PosProduct> _notFound() => FailureResult(
         ValidationFailure(messageAr: AppStrings.posProductNotFound),

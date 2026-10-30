@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:qayd/domain/entities/pos_product_category.dart';
+import 'package:qayd/domain/value_objects/currency_code.dart';
+import 'package:qayd/presentation/components/inputs/qayd_amount_field.dart';
 import 'package:qayd/presentation/components/inputs/qayd_numeric_field.dart';
 import 'package:qayd/presentation/components/inputs/qayd_text_field.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
@@ -10,10 +12,14 @@ import 'package:qayd/presentation/theme/spacing_tokens.dart';
 final class PosProductFormFields extends StatelessWidget {
   const PosProductFormFields({
     super.key,
+    required this.currency,
     required this.nameController,
     required this.skuController,
     required this.salePriceController,
     required this.purchasePriceController,
+    required this.profitMarginController,
+    required this.profitMarginType,
+    required this.onProfitMarginTypeChanged,
     required this.unitNameController,
     required this.reorderLevelController,
     required this.barcodeController,
@@ -29,10 +35,14 @@ final class PosProductFormFields extends StatelessWidget {
     this.onAddCategory,
   });
 
+  final CurrencyCode currency;
   final TextEditingController nameController;
   final TextEditingController skuController;
   final TextEditingController salePriceController;
   final TextEditingController purchasePriceController;
+  final TextEditingController profitMarginController;
+  final String profitMarginType;
+  final ValueChanged<String> onProfitMarginTypeChanged;
   final TextEditingController unitNameController;
   final TextEditingController reorderLevelController;
   final TextEditingController barcodeController;
@@ -47,12 +57,28 @@ final class PosProductFormFields extends StatelessWidget {
   final ValueChanged<bool> onExpiryTrackingChanged;
   final VoidCallback? onAddCategory;
 
+  bool get _marginIsPercentage => profitMarginType == 'percentage';
+
   String? _required(String? value, String message) =>
       value == null || value.trim().isEmpty ? message : null;
 
   String? _nonNegativeInteger(String? value, String message) {
     final parsed = int.tryParse(value?.trim() ?? '');
     return parsed == null || parsed < 0 ? message : null;
+  }
+
+  String? _nonNegativeDecimal(String? value, int scale) {
+    final text = value?.trim().replaceAll(',', '.') ?? '';
+    if (text.isEmpty) return AppStrings.posProductPriceInvalid;
+    final parts = text.split('.');
+    if (parts.length > 2 ||
+        !RegExp(r'^\d+$').hasMatch(parts.first) ||
+        (parts.length == 2 &&
+            (!RegExp(r'^\d*$').hasMatch(parts[1]) ||
+                parts[1].length > scale))) {
+      return AppStrings.posProductPriceInvalid;
+    }
+    return null;
   }
 
   String? _scaleValidator(String? value) {
@@ -98,6 +124,39 @@ final class PosProductFormFields extends StatelessWidget {
             ),
           ),
           const SizedBox(height: SpacingTokens.sm),
+          DropdownButtonFormField<String>(
+            initialValue: profitMarginType,
+            decoration:
+                InputDecoration(labelText: AppStrings.posProfitMarginTitle),
+            items: [
+              DropdownMenuItem(
+                value: 'percentage',
+                child: Text(AppStrings.posProfitMarginPercentage),
+              ),
+              DropdownMenuItem(
+                value: 'fixed_amount',
+                child: Text(AppStrings.posProfitMarginFixedAmount),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) onProfitMarginTypeChanged(value);
+            },
+          ),
+          const SizedBox(height: SpacingTokens.sm),
+          QaydAmountField(
+            controller: profitMarginController,
+            fractionalDigits:
+                _marginIsPercentage ? 2 : currency.fractionalDigits,
+            suffixText: _marginIsPercentage ? '%' : currency.symbol,
+            label: AppStrings.posProfitMarginAmount,
+            validator: (value) => _nonNegativeDecimal(
+              value,
+              _marginIsPercentage ? 2 : currency.fractionalDigits,
+            ),
+          ),
+          const SizedBox(height: SpacingTokens.xs),
+          Text(AppStrings.posProfitMarginHint),
+          const SizedBox(height: SpacingTokens.sm),
           QaydTextField(
             controller: unitNameController,
             label: AppStrings.posCatalogUnit,
@@ -107,7 +166,8 @@ final class PosProductFormFields extends StatelessWidget {
           const SizedBox(height: SpacingTokens.sm),
           DropdownButtonFormField<String?>(
             initialValue: categoryId,
-            decoration: InputDecoration(labelText: AppStrings.posCatalogCategory),
+            decoration:
+                InputDecoration(labelText: AppStrings.posCatalogCategory),
             items: [
               DropdownMenuItem<String?>(
                 value: null,

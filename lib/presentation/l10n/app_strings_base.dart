@@ -2835,6 +2835,39 @@ abstract class AppStringsBase {
   String get posPurchaseAlreadyAdded => 'الصنف موجود في قائمة الاستلام.';
   String get posPurchaseQuantity => 'الكمية';
   String get posPurchaseUnitCost => 'تكلفة الوحدة';
+  String get posPurchaseSourceUnitPrice => 'سعر الوحدة بعملة فاتورة المورد';
+  String get posPurchaseCurrencyLocked =>
+      'أفرغ السلة أولاً لتغيير عملة فاتورة الشراء.';
+  String get posPurchaseInventoryCost => 'تكلفة المخزون بعد التحويل';
+  String get posPurchaseProposedSalePrice => 'سعر البيع المقترح بعد الهامش';
+  String get posPurchaseCurrentCatalogSalePrice =>
+      'سعر البيع الحالي في الكتالوج';
+  String get posPurchaseApplyProposedSalePrice =>
+      'اعتماد السعر المقترح في الكتالوج';
+  String get posPurchaseEnterCostForCurrency =>
+      'أدخل سعر الشراء بعملة الفاتورة؛ لا يوجد سعر كتالوج بهذه العملة.';
+  String get posProfitMarginTitle => 'هامش الربح المقترح';
+  String get posProfitMarginPercentage => 'نسبة مئوية';
+  String get posProfitMarginFixedAmount => 'مبلغ ثابت بعملة الصنف';
+  String get posProfitMarginAmount => 'قيمة الهامش';
+  String get posProfitMarginHint =>
+      'يُحسب سعر مقترح من التكلفة والهامش، ولا يتغير سعر البيع إلا عند اعتمادك له.';
+  String get posCurrencyRatesTitle => 'أسعار الصرف اليدوية';
+  String get posCurrencyRatesDescription =>
+      'تُدخل الأسعار صراحةً. كل تعديل يُضاف كسجل جديد ولا يجلب التطبيق أسعاراً تلقائياً.';
+  String get posCurrencyRateFrom => 'من العملة';
+  String get posCurrencyRateTo => 'إلى العملة';
+  String get posCurrencyRateValue => 'كم وحدة من عملة الهدف لكل وحدة مصدر؟';
+  String get posCurrencyRateNote => 'ملاحظة أو مرجع السعر (اختياري)';
+  String get posCurrencyRateSave => 'تسجيل سعر جديد';
+  String get posCurrencyRateSaved => 'تم حفظ سعر الصرف كسجل جديد.';
+  String get posCurrencyRateHistory => 'سجل الأسعار (الأحدث أولاً)';
+  String get posCurrencyRateNoHistory => 'لا توجد أسعار مسجلة لهذا الزوج.';
+  String get posCurrencyRateInvalid => 'أدخل سعراً موجباً حتى 8 منازل عشرية.';
+  String get posCurrencyRateHistoryLoadFailed => 'تعذر تحميل سجل أسعار الصرف.';
+  String get posCheckoutRateSnapshotLabel => 'سعر الصرف المسجل المستخدم';
+  String get posCheckoutRateReverseApplied =>
+      'استُخدم السعر المسجل بالاتجاه العكسي';
   String get posPurchasePaymentMethod => 'تسوية الفاتورة';
   String get posPurchaseCredit => 'آجل على حساب المورد';
   String get posPurchaseCash => 'مدفوع نقداً بالكامل';
@@ -2843,6 +2876,10 @@ abstract class AppStringsBase {
   String get posPurchaseSaved => 'تم ترحيل الشراء والمخزون والقيد بنجاح.';
   String get posPurchaseAcknowledgeFailed =>
       'تم ترحيل الشراء، لكن تعذر تأكيد النتيجة محلياً. أعد إرسال النموذج نفسه للتحقق قبل إدخال شراء جديد.';
+  String get posPurchaseSnapshotRestored =>
+      'استُعيد سعر الصرف المحفوظ لمحاولة الشراء السابقة. راجع المعاينة ثم أعد الترحيل.';
+  String get posPurchaseSnapshotRestoreFailed =>
+      'تعذر استعادة تفاصيل محاولة الشراء السابقة بأمان. لم يُرسل ترحيل جديد.';
   String get posPurchaseCartEmpty => 'أضف صنفاً واحداً على الأقل.';
   String get posPurchaseExpiryNotice =>
       'الأصناف التي تتطلب تتبع الصلاحية غير متاحة للاستلام حتى تكتمل إدارة الدفعات.';
@@ -2857,7 +2894,7 @@ abstract class AppStringsBase {
   String get posCheckoutPricePerUnit => 'سعر الوحدة';
   String get posCheckoutCatalogReference => 'سعر الكتالوج بعملته الأصلية';
   String get posCheckoutPriceRequired =>
-      'أدخل السعر بهذه العملة؛ لا يحدث تحويل تلقائي.';
+      'لا يوجد سعر صرف مسجل لهذه العملة بعد.';
   String get posCheckoutSubtotal => 'الإجمالي الفرعي';
   String get posCheckoutClearCart => 'تفريغ السلة';
   String get posCheckoutCameraActive => 'المسح الخلفي مفعّل';
@@ -2882,23 +2919,30 @@ abstract class AppStringsBase {
   String get posInvoicePdfFailed => 'تعذر إنشاء PDF الفاتورة.';
   String get posSalesReturnAction => 'إرجاع أصناف';
   String get posSalesReturnTitle => 'مرتجع مبيعات';
-  String get posSalesReturnDescription => 'حدد الكميات المرتجعة. سيُسجل رد المبلغ محاسبياً مع إعادة الأصناف للمخزون.';
+  String get posSalesReturnDescription =>
+      'حدد الكميات المرتجعة. سيُسجل رد المبلغ محاسبياً مع إعادة الأصناف للمخزون.';
   String get posSalesReturnQuantity => 'الكمية المراد إرجاعها';
   String get posSalesReturnMaximum => 'المباع';
   String get posSalesReturnReason => 'سبب الإرجاع (اختياري)';
   String get posSalesReturnSubmit => 'ترحيل المرتجع ذرياً';
   String get posSalesReturnSucceeded => 'تم ترحيل المرتجع وإعادة المخزون.';
   String get posSalesReturnFailed => 'تعذر ترحيل المرتجع.';
-  String get posSalesReturnQuantityInvalid => 'أدخل كمية صحيحة لا تتجاوز الكمية المباعة.';
-  String get posSalesReturnNothingSelected => 'حدد كمية واحدة على الأقل للإرجاع.';
-  String get posSalesReturnUnavailable => 'لا يمكن إرجاع هذه الفاتورة في حالتها الحالية.';
+  String get posSalesReturnQuantityInvalid =>
+      'أدخل كمية صحيحة لا تتجاوز الكمية المباعة.';
+  String get posSalesReturnNothingSelected =>
+      'حدد كمية واحدة على الأقل للإرجاع.';
+  String get posSalesReturnUnavailable =>
+      'لا يمكن إرجاع هذه الفاتورة في حالتها الحالية.';
   String get posSalesVoidAction => 'إلغاء الفاتورة';
-  String get posSalesVoidConfirm => 'سيُنشأ مرتجع كامل وتُعكس حركة المخزون والقيود المحاسبية في معاملة واحدة. هل تريد المتابعة؟';
+  String get posSalesVoidConfirm =>
+      'سيُنشأ مرتجع كامل وتُعكس حركة المخزون والقيود المحاسبية في معاملة واحدة. هل تريد المتابعة؟';
   String get posSalesVoidSucceeded => 'تم إلغاء الفاتورة وترحيل عكسها الذري.';
   String get posSalesVoidFailed => 'تعذر إلغاء الفاتورة.';
   String get posDailySalesReportTitle => 'تقرير المبيعات اليومي';
   String get posDailySalesReportFailed => 'تعذر إنشاء تقرير المبيعات اليومي.';
   String get posDailySalesInvoiceCount => 'فاتورة';
+  String get posDailySalesOtherCurrenciesExcluded =>
+      'فواتير بعملات أخرى غير محتسبة هنا';
   String get posDailySalesGross => 'إجمالي المبيعات';
   String get posDailySalesPaid => 'إجمالي المدفوع';
   String get posDailySalesDue => 'إجمالي المتبقي';

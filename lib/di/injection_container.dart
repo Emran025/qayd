@@ -47,12 +47,16 @@ import 'package:qayd/application/pos/complete_pos_purchase_use_case.dart';
 import 'package:qayd/application/pos/list_pos_invoices_use_case.dart';
 import 'package:qayd/application/pos/get_pos_invoice_details_use_case.dart';
 import 'package:qayd/application/pos/build_pos_daily_sales_report_use_case.dart';
+import 'package:qayd/application/pos/manage_pos_currency_rates_use_cases.dart';
 import 'package:qayd/application/pos/sign_pos_invoice_use_case.dart';
 import 'package:qayd/application/pos/build_pos_invoice_pdf_use_case.dart';
 import 'package:qayd/domain/services/pos_invoice_signing_service.dart';
 import 'package:qayd/domain/repositories/pos_invoice_read_repository.dart';
 import 'package:qayd/data/pdf/cairo_pos_invoice_pdf_generator.dart';
 import 'package:qayd/data/repositories/sqlite_pos_invoice_read_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_currency_rate_repository.dart';
+import 'package:qayd/domain/repositories/pos_currency_rate_repository.dart';
+import 'package:qayd/domain/services/pos_currency_converter.dart';
 import 'package:qayd/domain/services/pos_invoice_pdf_generator.dart';
 import 'package:qayd/application/pos/save_pos_product_use_case.dart';
 import 'package:qayd/data/repositories/sqlite_pos_product_category_repository.dart';
@@ -334,6 +338,11 @@ abstract final class InjectionContainer {
   static late FiscalPeriodRepository fiscalPeriodRepository;
   static late VoucherRepository voucherRepository;
   static late CurrencyRepository currencyRepository;
+  static late PosCurrencyRateRepository posCurrencyRateRepository;
+  static late PosCurrencyConverter posCurrencyConverter;
+  static late RecordPosCurrencyRateUseCase recordPosCurrencyRateUseCase;
+  static late ListPosCurrencyRateHistoryUseCase
+      listPosCurrencyRateHistoryUseCase;
 
   // ── Accounting use cases ───────────────────────────────────────────────────
 
@@ -417,7 +426,8 @@ abstract final class InjectionContainer {
   static late BuildPosDailySalesReportUseCase buildPosDailySalesReportUseCase;
   static late BuildPosSalePostingUseCase buildPosSalePostingUseCase;
   static late CompletePosSaleUseCase completePosSaleUseCase;
-  static late BuildPosSalesReturnPostingUseCase buildPosSalesReturnPostingUseCase;
+  static late BuildPosSalesReturnPostingUseCase
+      buildPosSalesReturnPostingUseCase;
   static late CompletePosSalesReturnUseCase completePosSalesReturnUseCase;
   static late BuildPosPurchasePostingUseCase buildPosPurchasePostingUseCase;
   static late CompletePosPurchaseUseCase completePosPurchaseUseCase;
@@ -440,8 +450,10 @@ abstract final class InjectionContainer {
   static late DeactivatePosProductUseCase deactivatePosProductUseCase;
   static late ReactivatePosProductUseCase reactivatePosProductUseCase;
   static late SavePosProductCategoryUseCase savePosProductCategoryUseCase;
-  static late DeactivatePosProductCategoryUseCase deactivatePosProductCategoryUseCase;
-  static late ReactivatePosProductCategoryUseCase reactivatePosProductCategoryUseCase;
+  static late DeactivatePosProductCategoryUseCase
+      deactivatePosProductCategoryUseCase;
+  static late ReactivatePosProductCategoryUseCase
+      reactivatePosProductCategoryUseCase;
   static late PosCatalogCubit posCatalogCubit;
   static late PosWorkspaceCubit posWorkspaceCubit;
   static late PostPosOpeningBalanceAtomicallyUseCase
@@ -1019,6 +1031,19 @@ abstract final class InjectionContainer {
         SqliteVoucherRepository(database, transactionRunner);
     voucherRepository = sqliteVoucherRepository;
     currencyRepository = SqliteCurrencyRepository(database);
+    posCurrencyRateRepository = SqlitePosCurrencyRateRepository(
+      database,
+      currencyRepository,
+    );
+    posCurrencyConverter = PosCurrencyConverter(posCurrencyRateRepository);
+    recordPosCurrencyRateUseCase = RecordPosCurrencyRateUseCase(
+      rateRepository: posCurrencyRateRepository,
+      currencyRepository: currencyRepository,
+      writeGuard: governanceWriteGuard,
+      idGenerator: _idGenerator,
+    );
+    listPosCurrencyRateHistoryUseCase =
+        ListPosCurrencyRateHistoryUseCase(posCurrencyRateRepository);
     posInvoiceReadRepository = SqlitePosInvoiceReadRepository(
       database,
       currencyRepository,
@@ -1098,8 +1123,7 @@ abstract final class InjectionContainer {
       database,
       currencyRepository,
     );
-    posProductCategoryRepository =
-        SqlitePosProductCategoryRepository(database);
+    posProductCategoryRepository = SqlitePosProductCategoryRepository(database);
     listPosProductCategoriesUseCase = ListPosProductCategoriesUseCase(
       posProductCategoryRepository,
     );
@@ -1169,6 +1193,7 @@ abstract final class InjectionContainer {
       installationRepository: posTemplateInstallationRepository,
       accountRepository: accountRepository,
       idGenerator: _idGenerator,
+      currencyConverter: posCurrencyConverter,
     );
     postPosSaleAtomicallyUseCase = PostPosSaleAtomicallyUseCase(
       writeGuard: governanceWriteGuard,
@@ -1184,8 +1209,7 @@ abstract final class InjectionContainer {
       invoiceRepository: posInvoiceReadRepository,
       installationRepository: posTemplateInstallationRepository,
     );
-    postPosSalesReturnAtomicallyUseCase =
-        PostPosSalesReturnAtomicallyUseCase(
+    postPosSalesReturnAtomicallyUseCase = PostPosSalesReturnAtomicallyUseCase(
       writeGuard: governanceWriteGuard,
       fiscalPeriodRepository: fiscalPeriodRepository,
       postingRepository: posSalesReturnPostingRepository,
@@ -1201,6 +1225,7 @@ abstract final class InjectionContainer {
       productRepository: posProductRepository,
       installationRepository: posTemplateInstallationRepository,
       accountRepository: accountRepository,
+      currencyConverter: posCurrencyConverter,
     );
     postPosPurchaseAtomicallyUseCase = PostPosPurchaseAtomicallyUseCase(
       writeGuard: governanceWriteGuard,
@@ -1261,6 +1286,7 @@ abstract final class InjectionContainer {
     posCheckoutCubit = PosCheckoutCubit(
       resolveProduct: resolvePosProductForCheckoutUseCase,
       listProducts: listPosProductsUseCase,
+      currencyConverter: posCurrencyConverter,
       completeSale: completePosSaleUseCase,
       idGenerator: _idGenerator,
     );

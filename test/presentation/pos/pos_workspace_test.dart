@@ -161,6 +161,11 @@ void main() {
     expect(find.text(AppStrings.posWorkspaceInventorySection), findsOneWidget);
     expect(find.text(AppStrings.posCatalogTitle), findsOneWidget);
     expect(find.text(AppStrings.posPurchaseTitle), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text(AppStrings.posStockMovementsTitle),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text(AppStrings.posStockMovementsTitle), findsOneWidget);
     expect(find.text(AppStrings.posWorkspacePurchaseSubtitle), findsOneWidget);
     await tester.scrollUntilVisible(
@@ -170,6 +175,11 @@ void main() {
     );
     expect(find.text(AppStrings.posWorkspaceSalesSection), findsOneWidget);
     expect(find.text(AppStrings.posWorkspaceSalesTitle), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text(AppStrings.posInvoiceHistoryTitle),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text(AppStrings.posInvoiceHistoryTitle), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text(AppStrings.posDailySalesReportTitle),

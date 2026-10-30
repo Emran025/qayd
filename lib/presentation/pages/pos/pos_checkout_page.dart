@@ -7,11 +7,11 @@ import 'package:qayd/application/settings/list_currencies_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
+import 'package:qayd/domain/entities/pos_currency_rate.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
-import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
@@ -115,21 +115,11 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
 
   void _changeSaleCurrency(CurrencyCode currency) {
     if (currency == _selectedCurrency) return;
-    context.read<PosCheckoutCubit>().setSaleCurrency(currency);
+    unawaited(context.read<PosCheckoutCubit>().setSaleCurrency(currency));
     setState(() {
       _selectedCurrency = currency;
       _advanceController.text = '0';
     });
-  }
-
-  void _onSalePriceChanged(String productId, String rawAmount) {
-    final minorUnits = _parseMinorUnits(rawAmount, _selectedCurrency);
-    context.read<PosCheckoutCubit>().setUnitPrice(
-          productId,
-          minorUnits == null
-              ? null
-              : Money.fromMinorUnits(minorUnits, _selectedCurrency),
-        );
   }
 
   @override
@@ -184,9 +174,8 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
           customerAccountId: _customerAccountId == null
               ? null
               : AccountId(_customerAccountId!),
-          paymentAccountId: _paymentAccountId == null
-              ? null
-              : AccountId(_paymentAccountId!),
+          paymentAccountId:
+              _paymentAccountId == null ? null : AccountId(_paymentAccountId!),
         );
     if (mounted &&
         context.read<PosCheckoutCubit>().state.status ==
@@ -236,9 +225,10 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
               inputController: _inputController,
               onChanged: _onChanged,
               onSubmitted: (_) => _submitInput(),
-              onAddProduct: context.read<PosCheckoutCubit>().addProduct,
+              onAddProduct: (product) => unawaited(
+                context.read<PosCheckoutCubit>().addProduct(product),
+              ),
               onSetQuantity: context.read<PosCheckoutCubit>().setQuantity,
-              onSetUnitPrice: _onSalePriceChanged,
               onRemoveProduct: context.read<PosCheckoutCubit>().removeProduct,
               onClearCart: context.read<PosCheckoutCubit>().clearCart,
               onComplete: _complete,
@@ -280,7 +270,6 @@ class _CheckoutContent extends StatelessWidget {
     required this.onSubmitted,
     required this.onAddProduct,
     required this.onSetQuantity,
-    required this.onSetUnitPrice,
     required this.onRemoveProduct,
     required this.onClearCart,
     required this.onComplete,
@@ -305,7 +294,6 @@ class _CheckoutContent extends StatelessWidget {
   final ValueChanged<String> onSubmitted;
   final ValueChanged<PosProduct> onAddProduct;
   final void Function(String, PosQuantity) onSetQuantity;
-  final void Function(String, String) onSetUnitPrice;
   final ValueChanged<String> onRemoveProduct;
   final VoidCallback onClearCart;
   final VoidCallback onComplete;
@@ -399,8 +387,8 @@ class _CheckoutContent extends StatelessWidget {
               child: ListTile(
                 leading: const Icon(Icons.inventory_2_outlined),
                 title: Text(product.name),
-                subtitle:
-                    Text('${product.sku} · ${formatPosMoney(product.salePrice)}'),
+                subtitle: Text(
+                    '${product.sku} · ${formatPosMoney(product.salePrice)}'),
                 trailing: const Icon(Icons.add_circle_outline),
                 onTap: () => onAddProduct(product),
               ),
@@ -413,7 +401,6 @@ class _CheckoutContent extends StatelessWidget {
           currency: currency,
           onAddProduct: onAddProduct,
           onSetQuantity: onSetQuantity,
-          onSetUnitPrice: onSetUnitPrice,
           onRemoveProduct: onRemoveProduct,
           onClearCart: onClearCart,
         ),
@@ -441,7 +428,6 @@ class _CheckoutCartSection extends StatelessWidget {
     required this.currency,
     required this.onAddProduct,
     required this.onSetQuantity,
-    required this.onSetUnitPrice,
     required this.onRemoveProduct,
     required this.onClearCart,
   });
@@ -450,7 +436,6 @@ class _CheckoutCartSection extends StatelessWidget {
   final CurrencyCode currency;
   final ValueChanged<PosProduct> onAddProduct;
   final void Function(String, PosQuantity) onSetQuantity;
-  final void Function(String, String) onSetUnitPrice;
   final ValueChanged<String> onRemoveProduct;
   final VoidCallback onClearCart;
 
@@ -486,8 +471,6 @@ class _CheckoutCartSection extends StatelessWidget {
                 line: line,
                 currency: currency,
                 onIncrement: () => onAddProduct(line.product),
-                onUnitPriceChanged: (value) =>
-                    onSetUnitPrice(line.product.id, value),
                 onDecrement: () {
                   final step = PosMoneyMath.scaleFactor(line.quantity.scale);
                   final next = line.quantity.scaledUnits - step;
@@ -616,7 +599,6 @@ class _CheckoutLineTile extends StatelessWidget {
     required this.currency,
     required this.onIncrement,
     required this.onDecrement,
-    required this.onUnitPriceChanged,
     required this.onRemove,
   });
 
@@ -624,7 +606,6 @@ class _CheckoutLineTile extends StatelessWidget {
   final CurrencyCode currency;
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
-  final ValueChanged<String> onUnitPriceChanged;
   final VoidCallback onRemove;
 
   @override
@@ -663,31 +644,21 @@ class _CheckoutLineTile extends StatelessWidget {
                 ],
               ),
             ),
-            QaydNumericField(
-              key: ValueKey(
-                'pos-sale-unit-price-${line.product.id}-${currency.code}',
+            if (line.product.currency != currency)
+              Padding(
+                padding: const EdgeInsets.only(bottom: SpacingTokens.xs),
+                child: Text(
+                  '${AppStrings.posCheckoutCatalogReference}: '
+                  '${formatPosMoney(line.product.salePrice)}',
+                ),
               ),
-              initialValue: _formatMinorUnitsInput(
-                line.unitPrice?.minorUnits,
-                currency,
+            if (line.rateSnapshot != null)
+              Text(
+                '${AppStrings.posCheckoutRateSnapshotLabel}: '
+                '${_formatStoredRate(line.rateSnapshot!)}'
+                '${line.rateSnapshot!.isInverted ? ' · ${AppStrings.posCheckoutRateReverseApplied}' : ''}\n'
+                '${line.rateSnapshot!.recordedAt.toLocal()}',
               ),
-              label: '${AppStrings.posCheckoutPricePerUnit} (${currency.code})',
-              hint: line.product.currency == currency
-                  ? null
-                  : _formatMinorUnitsInput(
-                      line.product.salePrice.minorUnits,
-                      line.product.currency,
-                    ),
-              helperText: line.product.currency == currency
-                  ? null
-                  : '${AppStrings.posCheckoutCatalogReference}: ${formatPosMoney(line.product.salePrice)}',
-              errorText: line.unitPrice == null
-                  ? AppStrings.posCheckoutPriceRequired
-                  : null,
-              isDecimal: currency.fractionalDigits > 0,
-              maxLength: 20,
-              onChanged: onUnitPriceChanged,
-            ),
           ],
         ),
       ),
@@ -695,40 +666,10 @@ class _CheckoutLineTile extends StatelessWidget {
   }
 }
 
-
-int? _parseMinorUnits(String raw, CurrencyCode currency) {
-  final value = raw.trim().replaceAll(',', '.');
-  if (value.isEmpty) return null;
-  final parts = value.split('.');
-  final digits = currency.fractionalDigits;
-  if (parts.length > 2 || digits < 0 || digits > 9) return null;
-  if (digits == 0 && parts.length == 2) return null;
-
-  final wholeText = parts.first.isEmpty ? '0' : parts.first;
-  if (!RegExp(r'^\d+$').hasMatch(wholeText)) return null;
-  final fractionalText = parts.length == 2 ? parts[1] : '';
-  if (!RegExp(r'^\d*$').hasMatch(fractionalText) ||
-      fractionalText.length > digits ||
-      (parts.first.isEmpty && fractionalText.isEmpty)) {
-    return null;
-  }
-
-  final factor = BigInt.from(10).pow(digits);
-  final fractional = fractionalText.padRight(digits, '0');
-  final minorUnits = BigInt.parse(wholeText) * factor +
-      BigInt.parse(fractional.isEmpty ? '0' : fractional);
-  if (minorUnits > BigInt.parse('9223372036854775807')) return null;
-  return minorUnits.toInt();
-}
-
-String _formatMinorUnitsInput(int? minorUnits, CurrencyCode currency) {
-  if (minorUnits == null) return '';
-  final digits = currency.fractionalDigits;
-  if (digits == 0) return minorUnits.toString();
-  final factor = BigInt.from(10).pow(digits);
-  final amount = BigInt.from(minorUnits).abs();
-  final whole = amount ~/ factor;
-  final fractional = (amount % factor).toString().padLeft(digits, '0');
-  final sign = minorUnits < 0 ? '-' : '';
-  return '$sign$whole.$fractional';
+String _formatStoredRate(PosCurrencyRateQuote quote) {
+  final scaled = BigInt.from(quote.storedRateScaled);
+  final whole = scaled ~/ BigInt.from(100000000);
+  final fraction = (scaled % BigInt.from(100000000)).toString().padLeft(8, '0');
+  return '1 ${quote.storedFromCurrency.code} = '
+      '$whole.$fraction ${quote.storedToCurrency.code}';
 }

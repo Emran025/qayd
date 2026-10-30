@@ -1,4 +1,3 @@
-import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_sales_report.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
@@ -25,18 +24,16 @@ final class BuildPosDailySalesReportUseCase {
       limit: 1000,
     );
     if (result.isFailure) return FailureResult(result.failureOrNull!);
-    final invoices = result.valueOrNull!;
-    if (invoices.any((invoice) => invoice.currency != currency)) {
-      return const FailureResult(
-        ValidationFailure(
-            messageAr: 'توجد فواتير بعملة مختلفة عن عملة التقرير.'),
-      );
-    }
+    final allInvoices = result.valueOrNull!;
+    final invoices = allInvoices
+        .where((invoice) => invoice.currency == currency)
+        .toList(growable: false);
     return Success(PosSalesReport(
       from: from,
       to: to,
       currency: currency,
       invoices: invoices,
+      excludedInvoiceCount: allInvoices.length - invoices.length,
     ));
   }
 }

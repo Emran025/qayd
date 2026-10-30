@@ -3,6 +3,8 @@ import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
+import 'package:qayd/domain/entities/pos_invoice_line_conversion.dart';
+import 'package:qayd/domain/entities/pos_currency_rate.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_purchase_posting.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
@@ -12,6 +14,7 @@ import 'package:qayd/domain/repositories/account_repository.dart';
 import 'package:qayd/domain/repositories/pos_product_repository.dart';
 import 'package:qayd/domain/repositories/pos_template_installation_repository.dart';
 import 'package:qayd/domain/services/entry_generator.dart';
+import 'package:qayd/domain/services/pos_currency_converter.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/entry_id.dart';
@@ -57,11 +60,19 @@ final class BuildPosPurchaseLineInput {
     required this.productId,
     required this.quantity,
     this.unitCostMinor,
+    this.applyProposedSalePrice = false,
+    this.rateSnapshot,
+    this.productUpdatedAtSnapshot,
   });
 
   final String productId;
   final PosQuantity quantity;
+
+  /// Supplier unit price in the purchase invoice currency, not catalog cost.
   final int? unitCostMinor;
+  final bool applyProposedSalePrice;
+  final PosCurrencyRateQuote? rateSnapshot;
+  final DateTime? productUpdatedAtSnapshot;
 }
 
 /// Builds the complete immutable purchase payload without writing to SQLite.
@@ -70,15 +81,18 @@ final class BuildPosPurchasePostingUseCase {
     required PosProductRepository productRepository,
     required PosTemplateInstallationRepository installationRepository,
     required AccountRepository accountRepository,
+    required PosCurrencyConverter currencyConverter,
     EntryGenerator entryGenerator = const EntryGenerator(),
   })  : _products = productRepository,
         _installations = installationRepository,
         _accounts = accountRepository,
+        _currencyConverter = currencyConverter,
         _entries = entryGenerator;
 
   final PosProductRepository _products;
   final PosTemplateInstallationRepository _installations;
   final AccountRepository _accounts;
+  final PosCurrencyConverter _currencyConverter;
   final EntryGenerator _entries;
 
   Future<Result<PosPurchasePosting>> call(
@@ -141,18 +155,59 @@ final class BuildPosPurchasePostingUseCase {
         final product = productResult.valueOrNull;
         if (product == null ||
             !product.isActive ||
-            product.currency != input.currency ||
             request.quantity.scale != product.quantityScale) {
           return _invalid('pos_purchase_product_invalid');
+        }
+        if (request.productUpdatedAtSnapshot != null &&
+            request.productUpdatedAtSnapshot!.toUtc() !=
+                product.updatedAt.toUtc()) {
+          return _invalid('pos_purchase_product_changed');
         }
         if (product.expiryTracking) {
           return _invalid('pos_purchase_expiry_lot_required');
         }
 
-        final costMinor =
-            request.unitCostMinor ?? product.purchasePrice.minorUnits;
+        final costMinor = request.unitCostMinor ??
+            (product.currency == input.currency
+                ? product.purchasePrice.minorUnits
+                : null);
+        if (costMinor == null) {
+          return _invalid('pos_purchase_cost_required_for_currency');
+        }
         if (costMinor < 0) return _invalid('pos_purchase_cost_invalid');
-        final unitCost = Money.fromMinorUnits(costMinor, input.currency);
+        final sourceUnitPrice = Money.fromMinorUnits(costMinor, input.currency);
+        PosCurrencyConversion costConversion;
+        final suppliedRate = request.rateSnapshot;
+        if (suppliedRate != null) {
+          if (suppliedRate.requestedFromCurrency != input.currency ||
+              suppliedRate.requestedToCurrency != product.currency) {
+            return _invalid('pos_purchase_rate_currency_mismatch');
+          }
+          try {
+            costConversion = PosCurrencyConversion(
+              sourceAmount: sourceUnitPrice,
+              targetAmount: suppliedRate.convert(sourceUnitPrice),
+              rateSnapshot: suppliedRate,
+            );
+          } on RangeError {
+            return _invalid('pos_purchase_rate_invalid');
+          } on ArgumentError {
+            return _invalid('pos_purchase_rate_invalid');
+          }
+        } else {
+          final costConversionResult =
+              await _currencyConverter.convertWithSnapshot(
+            sourceUnitPrice,
+            toCurrency: product.currency,
+          );
+          if (costConversionResult.isFailure) {
+            return FailureResult(costConversionResult.failureOrNull!);
+          }
+          costConversion = costConversionResult.valueOrNull!;
+        }
+        final unitCost = costConversion.targetAmount;
+        final proposedSalePrice =
+            product.profitMargin.calculateProposedSalePrice(unitCost);
         final lineId = '${input.invoiceId}:line:${index + 1}';
         final line = PosInvoiceLine.create(
           id: lineId,
@@ -161,11 +216,20 @@ final class BuildPosPurchasePostingUseCase {
           productNameSnapshot: product.name,
           barcodeSnapshot: product.primaryBarcode?.value,
           quantity: request.quantity,
-          unitPrice: unitCost,
+          unitPrice: sourceUnitPrice,
           unitCost: unitCost,
           discount: Money.zero(input.currency),
           tax: Money.zero(input.currency),
           createdAt: input.createdAt,
+          currencyConversion: PosInvoiceLineConversion(
+            purpose: PosInvoiceLineConversionPurpose.purchaseCost,
+            sourceAmount: costConversion.sourceAmount,
+            targetAmount: costConversion.targetAmount,
+            rateSnapshot: costConversion.rateSnapshot,
+          ),
+          proposedSalePrice: proposedSalePrice,
+          proposedSalePriceApplied: request.applyProposedSalePrice,
+          productUpdatedAtSnapshot: product.updatedAt,
         );
         lines.add(line);
         movements.add(
@@ -233,7 +297,8 @@ final class BuildPosPurchasePostingUseCase {
       if (input.advanceMinorUnits > 0) {
         final paymentAccountId = switch (input.paymentMethod) {
           PosPaymentMethod.cash => posCashId,
-          PosPaymentMethod.bank || PosPaymentMethod.other =>
+          PosPaymentMethod.bank ||
+          PosPaymentMethod.other =>
             input.paymentAccountId,
           PosPaymentMethod.credit => null,
         };

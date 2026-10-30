@@ -244,18 +244,20 @@ void main() {
       of: productForm,
       matching: find.byType(TextFormField),
     );
-    expect(fields, findsNWidgets(9));
+    expect(fields, findsNWidgets(10));
     await tester.enterText(fields.at(0), 'New Coffee');
     await tester.enterText(fields.at(1), 'SKU-NEW');
     await tester.enterText(fields.at(2), '1250');
     await tester.enterText(fields.at(3), '900');
-    await tester.enterText(fields.at(7), '628000000002');
+    await tester.enterText(fields.at(4), '5');
+    await tester.enterText(fields.at(8), '628000000002');
     await tester.ensureVisible(find.text(AppStrings.save));
     await tester.tap(find.text(AppStrings.save));
     await tester.pumpAndSettle();
 
     expect(find.text('New Coffee'), findsOneWidget);
     expect(repository.products.single.salePrice.minorUnits, 1250);
+    expect(repository.products.single.profitMargin.percentageBasisPoints, 500);
     expect(repository.products.single.categoryId, 'widget-category-id');
     expect(categoryRepository.categories.single.code, 'DRINKS');
   });

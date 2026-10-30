@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/data/database/migrations/migration_040_pos_foundation.dart';
 import 'package:qayd/data/database/migrations/migration_041_pos_invoice_metadata.dart';
+import 'package:qayd/data/database/migrations/migration_registry.dart';
 import 'package:qayd/data/database/transaction_runner.dart';
 import 'package:qayd/data/mappers/pos_invoice_mapper.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sale_posting_repository.dart';
@@ -104,6 +105,7 @@ Future<void> _createSchema(Database db) async {
   ''');
   await Migration040PosFoundation().up(db);
   await Migration041PosInvoiceMetadata().up(db);
+  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 45);
 }
 
 Future<void> _seed(Database db) async {

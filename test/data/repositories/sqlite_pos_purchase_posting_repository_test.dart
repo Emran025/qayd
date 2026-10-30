@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/data/database/migrations/migration_040_pos_foundation.dart';
 import 'package:qayd/data/database/migrations/migration_041_pos_invoice_metadata.dart';
+import 'package:qayd/data/database/migrations/migration_registry.dart';
 import 'package:qayd/data/database/transaction_runner.dart';
 import 'package:qayd/data/mappers/pos_invoice_mapper.dart';
 import 'package:qayd/data/repositories/sqlite_pos_purchase_posting_repository.dart';
@@ -9,7 +10,9 @@ import 'package:qayd/data/repositories/sqlite_pos_purchase_request_identity_repo
 import 'package:qayd/data/repositories/sqlite_pos_stock_movement_repository.dart';
 import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
+import 'package:qayd/domain/entities/pos_currency_rate.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
+import 'package:qayd/domain/entities/pos_invoice_line_conversion.dart';
 import 'package:qayd/domain/entities/pos_purchase_posting.dart';
 import 'package:qayd/domain/entities/pos_purchase_request_identity.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
@@ -27,17 +30,22 @@ import 'package:qayd/domain/value_objects/voucher_type.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 final class _CurrencyRepository implements CurrencyRepository {
-  _CurrencyRepository(this.currency);
+  _CurrencyRepository(this.currency, [this.otherCurrencies = const []]);
 
   final CurrencyCode currency;
+  final List<CurrencyCode> otherCurrencies;
 
   @override
-  Future<Result<CurrencyCode?>> getByCode(String code) async =>
-      Success(code == currency.code ? currency : null);
+  Future<Result<CurrencyCode?>> getByCode(String code) async {
+    for (final item in [currency, ...otherCurrencies]) {
+      if (item.code == code) return Success(item);
+    }
+    return const Success(null);
+  }
 
   @override
   Future<Result<List<CurrencyCode>>> getAll({bool onlyActive = false}) async =>
-      Success([currency]);
+      Success([currency, ...otherCurrencies]);
 
   @override
   Future<Result<void>> save(CurrencyCode currency,
@@ -61,6 +69,7 @@ final _currency = CurrencyCode(
   nameAr: 'ريال سعودي',
   symbol: 'ر.س',
 );
+final _usd = CurrencyCode(code: 'USD', nameAr: 'دولار', symbol: r'$');
 
 Future<void> _createSchema(Database db) async {
   await db.execute('''
@@ -112,6 +121,7 @@ Future<void> _createSchema(Database db) async {
   ''');
   await Migration040PosFoundation().up(db);
   await Migration041PosInvoiceMetadata().up(db);
+  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 45);
 }
 
 Future<void> _seed(Database db) async {
@@ -149,9 +159,32 @@ Future<void> _seed(Database db) async {
   }
 }
 
-PosPurchasePosting _purchase({bool duplicateLedgerEntryId = false}) {
+PosPurchasePosting _purchase({
+  bool duplicateLedgerEntryId = false,
+  bool convertedCost = false,
+  bool applyProposedSalePrice = false,
+}) {
   final date = DateTime.utc(2026, 1, 10, 10);
   const invoiceId = 'purchase-1';
+  final costCurrency = convertedCost ? _usd : _currency;
+  final unitCost = Money.fromMinorUnits(
+    convertedCost ? 200 : 100,
+    costCurrency,
+  );
+  final rate = convertedCost
+      ? PosCurrencyRateQuote(
+          rateId: 'sar-usd-rate-1',
+          storedFromCurrency: _currency,
+          storedToCurrency: _usd,
+          storedRateScaled: 200000000,
+          requestedFromCurrency: _currency,
+          requestedToCurrency: _usd,
+          effectiveAt: DateTime.utc(2026, 1, 1),
+          recordedAt: DateTime.utc(2026, 1, 1),
+          createdAt: DateTime.utc(2026, 1, 1),
+          isInverted: false,
+        )
+      : null;
   final line = PosInvoiceLine.create(
     id: 'purchase-line-1',
     invoiceId: invoiceId,
@@ -159,10 +192,21 @@ PosPurchasePosting _purchase({bool duplicateLedgerEntryId = false}) {
     productNameSnapshot: 'Coffee',
     quantity: PosQuantity.whole(2),
     unitPrice: Money.fromMinorUnits(100, _currency),
-    unitCost: Money.fromMinorUnits(100, _currency),
+    unitCost: unitCost,
     discount: Money.zero(_currency),
     tax: Money.zero(_currency),
     createdAt: date,
+    currencyConversion: rate == null
+        ? null
+        : PosInvoiceLineConversion(
+            purpose: PosInvoiceLineConversionPurpose.purchaseCost,
+            sourceAmount: Money.fromMinorUnits(100, _currency),
+            targetAmount: unitCost,
+            rateSnapshot: rate,
+          ),
+    proposedSalePrice: rate == null ? null : Money.fromMinorUnits(250, _usd),
+    proposedSalePriceApplied: applyProposedSalePrice,
+    productUpdatedAtSnapshot: rate == null ? null : DateTime.utc(2026, 1, 1),
   );
   final invoice = PosInvoice.draft(
     id: invoiceId,
@@ -183,7 +227,7 @@ PosPurchasePosting _purchase({bool duplicateLedgerEntryId = false}) {
     type: PosStockMovementType.purchase,
     direction: PosStockMovementDirection.inbound,
     quantity: PosQuantity.whole(2),
-    unitCost: Money.fromMinorUnits(100, _currency),
+    unitCost: unitCost,
     sourceType: 'pos_invoice',
     sourceId: invoiceId,
     sourceLineId: line.id,
@@ -239,7 +283,7 @@ void main() {
       await _seed(db);
       final stockRepository = SqlitePosStockMovementRepository(
         db,
-        _CurrencyRepository(_currency),
+        _CurrencyRepository(_currency, [_usd]),
       );
       repository = SqlitePosPurchasePostingRepository(
         DatabaseTransactionRunner(db),
@@ -250,7 +294,8 @@ void main() {
 
     tearDown(() => db.close());
 
-    test('commits invoice, lines, stock, voucher and ledger atomically', () async {
+    test('commits invoice, lines, stock, voucher and ledger atomically',
+        () async {
       final result = await repository.saveAtomically(_purchase());
 
       expect(result.isSuccess, isTrue);
@@ -259,6 +304,51 @@ void main() {
       expect(await db.query('pos_stock_movements'), hasLength(1));
       expect(await db.query('vouchers'), hasLength(1));
       expect(await db.query('ledger_entries'), hasLength(2));
+    });
+
+    test(
+        'atomically saves converted cost and an explicitly approved sale price',
+        () async {
+      await db.update(
+        'pos_products',
+        {'currency_code': _usd.code},
+        where: 'id = ?',
+        whereArgs: ['product-1'],
+      );
+
+      final result = await repository.saveAtomically(
+        _purchase(convertedCost: true, applyProposedSalePrice: true),
+      );
+
+      expect(result.isSuccess, isTrue, reason: result.failureOrNull?.messageAr);
+      final product = (await db.query('pos_products')).single;
+      expect(product['purchase_price_minor'], 200);
+      expect(product['sale_price_minor'], 250);
+      expect(product['currency_code'], _usd.code);
+      final line = (await db.query('pos_invoice_lines')).single;
+      expect(line['unit_cost_currency_code'], _usd.code);
+      expect(line['conversion_source_minor'], 100);
+      expect(line['conversion_target_minor'], 200);
+      expect(line['fx_rate_id'], 'sar-usd-rate-1');
+    });
+
+    test('keeps the catalog sale price when the proposal is not approved',
+        () async {
+      await db.update(
+        'pos_products',
+        {'currency_code': _usd.code},
+        where: 'id = ?',
+        whereArgs: ['product-1'],
+      );
+
+      final result = await repository.saveAtomically(
+        _purchase(convertedCost: true),
+      );
+
+      expect(result.isSuccess, isTrue, reason: result.failureOrNull?.messageAr);
+      final product = (await db.query('pos_products')).single;
+      expect(product['purchase_price_minor'], 200);
+      expect(product['sale_price_minor'], 500);
     });
 
     test('retains retry identity through commit until UI acknowledges success',
@@ -281,9 +371,8 @@ void main() {
       expect(await db.query('app_settings'), hasLength(1));
       expect(await db.query('pos_invoices'), hasLength(1));
 
-      final acknowledged =
-          await SqlitePosPurchaseRequestIdentityRepository(db)
-              .acknowledgeCommitted(
+      final acknowledged = await SqlitePosPurchaseRequestIdentityRepository(db)
+          .acknowledgeCommitted(
         fingerprintHash: fingerprint,
         identity: identity,
       );
@@ -310,7 +399,9 @@ void main() {
       expect(await db.query('ledger_entries'), equals(beforeLedger));
     });
 
-    test('rolls back stock and invoice when ledger insertion conflicts', () async {
+    test(
+        'rolls back stock, invoice and catalog price when ledger insertion conflicts',
+        () async {
       final date = DateTime.utc(2026, 1, 10, 10).toIso8601String();
       await db.insert('ledger_entries', {
         'id': 'preexisting-ledger-id',
@@ -324,9 +415,18 @@ void main() {
         'created_at': date,
       });
 
-      final result = await repository.saveAtomically(
-        _purchase(duplicateLedgerEntryId: true),
+      await db.update(
+        'pos_products',
+        {'currency_code': _usd.code},
+        where: 'id = ?',
+        whereArgs: ['product-1'],
       );
+      final originalProduct = (await db.query('pos_products')).single;
+      final result = await repository.saveAtomically(_purchase(
+        duplicateLedgerEntryId: true,
+        convertedCost: true,
+        applyProposedSalePrice: true,
+      ));
 
       expect(result.isFailure, isTrue);
       expect(await db.query('pos_invoices'), isEmpty);
@@ -334,6 +434,12 @@ void main() {
       expect(await db.query('pos_stock_movements'), isEmpty);
       expect(await db.query('vouchers'), isEmpty);
       expect(await db.query('ledger_entries'), hasLength(1));
+      final productAfterFailure = (await db.query('pos_products')).single;
+      expect(productAfterFailure['purchase_price_minor'],
+          originalProduct['purchase_price_minor']);
+      expect(productAfterFailure['sale_price_minor'],
+          originalProduct['sale_price_minor']);
+      expect(productAfterFailure['updated_at'], originalProduct['updated_at']);
     });
 
     test('fails closed when invoice exists without its stock/accounting rows',
