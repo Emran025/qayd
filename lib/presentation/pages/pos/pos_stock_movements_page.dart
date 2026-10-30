@@ -13,7 +13,6 @@ import 'package:qayd/presentation/components/atomic/qayd_floating_action_button.
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/navigation/qayd_page_route.dart';
 import 'package:qayd/presentation/pages/pos/pos_stock_adjustment_page.dart';
-import 'package:qayd/presentation/pos/pos_money_display.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
 import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 

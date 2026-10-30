@@ -11,7 +11,6 @@ import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/pages/pos/widgets/pos_stock_adjustment_form.dart';
-import 'package:qayd/presentation/theme/spacing_tokens.dart';
 import 'package:qayd/presentation/widgets/account_picker_sheet.dart';
 import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
 import 'package:uuid/uuid.dart';
