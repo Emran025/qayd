@@ -443,14 +443,21 @@ class AppStringsEn extends AppStringsBase {
 
   @override
   String voucherTripartiteShareText(
-          String sender, String receiver, String amount, String reference) =>
+    String sender,
+    String receiver,
+    String amount,
+    String reference,
+  ) =>
       'Attached is a financial transfer notice from account $sender to account $receiver.\n'
       'Amount: $amount\n'
       'Reference: $reference\n';
 
   @override
   String voucherStandardShareText(
-          String voucherType, String counterpartyName, String amount) =>
+    String voucherType,
+    String counterpartyName,
+    String amount,
+  ) =>
       'Attached is a $voucherType for client $counterpartyName.\n'
       'Amount: $amount\n';
 
@@ -5168,6 +5175,22 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posPurchaseQuantity => 'Quantity';
   @override
+  String get posPurchaseBatchSection => 'Product batches';
+  @override
+  String get posPurchaseAddBatch => 'Add batch';
+  @override
+  String get posPurchaseBatchQuantity => 'Batch quantity';
+  @override
+  String get posPurchaseBatchExpiry => 'Batch expiry date';
+  @override
+  String get posPurchaseSupplierLot => 'Supplier lot number (optional)';
+  @override
+  String get posPurchaseBatchExpiryRequired =>
+      'Enter an expiry date for every batch of this product.';
+  @override
+  String get posPurchaseBatchSumInvalid =>
+      'Batch quantities must add up exactly to the purchase line quantity.';
+  @override
   String get posPurchaseUnitCost => 'Unit cost';
   @override
   String get posPurchaseSourceUnitPrice =>
@@ -5258,7 +5281,7 @@ class AppStringsEn extends AppStringsBase {
   String get posPurchaseCartEmpty => 'Add at least one product.';
   @override
   String get posPurchaseExpiryNotice =>
-      'Expiry-tracked products cannot be received until lot management is implemented.';
+      'Enter an expiry date for every batch of an expiry-tracked product.';
   @override
   String get posPurchaseLoadFailed => 'Could not load purchase products.';
   @override
@@ -5403,6 +5426,18 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posStockInsufficient => 'There is not enough stock available.';
   @override
+  String get posStockLotRequired =>
+      'This tracked product movement must reference a known lot and expiry date.';
+  @override
+  String get posStockLotlessBalance =>
+      'Unbatched legacy stock exists; stop the sale until it is reconciled.';
+  @override
+  String get posStockLotProjectionMismatch =>
+      'The lot balance does not match its stock movements; reconcile lots before continuing.';
+  @override
+  String get posStockLotsInsufficient =>
+      'There is not enough known, unexpired batch stock for this quantity.';
+  @override
   String get posStockNegativeResult => 'The stock movement result is invalid.';
   @override
   String get posStockIdempotencyExists =>
@@ -5502,6 +5537,19 @@ class AppStringsEn extends AppStringsBase {
       'Add a product to the catalog first.';
   @override
   String get posOpeningBalanceQuantity => 'Quantity in scaled units';
+  @override
+  String get posOpeningBalanceBatch => 'Opening-stock batch';
+  @override
+  String get posOpeningBalanceAddBatch => 'Add opening batch';
+  @override
+  String get posOpeningBalanceBatchQuantity => 'Batch quantity';
+  @override
+  String get posOpeningBalanceBatchExpiry => 'Batch expiry date';
+  @override
+  String get posOpeningBalanceSupplierLot => 'Supplier lot number (optional)';
+  @override
+  String get posOpeningBalanceBatchSumInvalid =>
+      'Batch quantities must add up exactly to the opening quantity.';
   @override
   String posOpeningBalanceQuantityHint(int scale) =>
       'Enter the quantity as an integer in scaled units (product scale: $scale).';

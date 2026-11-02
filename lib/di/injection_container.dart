@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:qayd/application/accruals/process_accrual_use_case.dart';
@@ -597,9 +598,7 @@ abstract final class InjectionContainer {
       baseUrl: ApiEndpoints.baseUrl,
       tokenProvider: () => licenseVault.readJwt(),
       deviceIdProvider: () async => currentDeviceId,
-      interceptors: <Interceptor>[
-        SentryDioObserver(),
-      ],
+      interceptors: <Interceptor>[SentryDioObserver()],
       onSecurityError: () {
         // As soon as any API call returns a 403 (Banned/Closed),
         // we force the security cubit to refresh its state and lock the UI.
@@ -779,8 +778,9 @@ abstract final class InjectionContainer {
     final dbFileExists = File(dbPath).existsSync();
 
     try {
-      database =
-          await DatabaseProvider.open(keyProvider: _encryptionKeyProvider);
+      database = await DatabaseProvider.open(
+        keyProvider: _encryptionKeyProvider,
+      );
     } on DatabaseException catch (e) {
       debugPrint('InjectionContainer: Database open failed: $e');
       if (dbFileExists) {
@@ -1027,8 +1027,10 @@ abstract final class InjectionContainer {
     ledgerRepository = SqliteLedgerRepository(database);
     fiscalPeriodRepository = SqliteFiscalPeriodRepository(database);
     final transactionRunner = DatabaseTransactionRunner(database);
-    final sqliteVoucherRepository =
-        SqliteVoucherRepository(database, transactionRunner);
+    final sqliteVoucherRepository = SqliteVoucherRepository(
+      database,
+      transactionRunner,
+    );
     voucherRepository = sqliteVoucherRepository;
     currencyRepository = SqliteCurrencyRepository(database);
     posCurrencyRateRepository = SqlitePosCurrencyRateRepository(
@@ -1042,8 +1044,9 @@ abstract final class InjectionContainer {
       writeGuard: governanceWriteGuard,
       idGenerator: _idGenerator,
     );
-    listPosCurrencyRateHistoryUseCase =
-        ListPosCurrencyRateHistoryUseCase(posCurrencyRateRepository);
+    listPosCurrencyRateHistoryUseCase = ListPosCurrencyRateHistoryUseCase(
+      posCurrencyRateRepository,
+    );
     posInvoiceReadRepository = SqlitePosInvoiceReadRepository(
       database,
       currencyRepository,
@@ -1144,8 +1147,10 @@ abstract final class InjectionContainer {
       posProductCategoryRepository,
       governanceWriteGuard,
     );
-    final sqliteStockMovementRepository =
-        SqlitePosStockMovementRepository(database, currencyRepository);
+    final sqliteStockMovementRepository = SqlitePosStockMovementRepository(
+      database,
+      currencyRepository,
+    );
     posStockMovementRepository = sqliteStockMovementRepository;
     posAccountingPostingRepository = SqlitePosAccountingPostingRepository(
       transactionRunner,
@@ -1208,6 +1213,7 @@ abstract final class InjectionContainer {
     buildPosSalesReturnPostingUseCase = BuildPosSalesReturnPostingUseCase(
       invoiceRepository: posInvoiceReadRepository,
       installationRepository: posTemplateInstallationRepository,
+      stockRepository: posStockMovementRepository,
     );
     postPosSalesReturnAtomicallyUseCase = PostPosSalesReturnAtomicallyUseCase(
       writeGuard: governanceWriteGuard,
@@ -1281,8 +1287,9 @@ abstract final class InjectionContainer {
     findPosProductByBarcodeUseCase = FindPosProductByBarcodeUseCase(
       posProductRepository,
     );
-    resolvePosProductForCheckoutUseCase =
-        ResolvePosProductForCheckoutUseCase(posProductRepository);
+    resolvePosProductForCheckoutUseCase = ResolvePosProductForCheckoutUseCase(
+      posProductRepository,
+    );
     posCheckoutCubit = PosCheckoutCubit(
       resolveProduct: resolvePosProductForCheckoutUseCase,
       listProducts: listPosProductsUseCase,
@@ -1356,8 +1363,9 @@ abstract final class InjectionContainer {
       governanceWriteGuard,
       auditLogService: auditLogService,
     );
-    listArchivedAccountsUseCase =
-        ListArchivedAccountsUseCase(accountRepository);
+    listArchivedAccountsUseCase = ListArchivedAccountsUseCase(
+      accountRepository,
+    );
     deactivateAccountUseCase = DeactivateAccountUseCase(
       accountRepository,
       ledgerRepository,
@@ -1370,8 +1378,10 @@ abstract final class InjectionContainer {
       ledgerRepository,
       balanceCalculator,
     );
-    findAccountByPhoneUseCase =
-        FindAccountByPhoneUseCase(accountRepository, licenseVault);
+    findAccountByPhoneUseCase = FindAccountByPhoneUseCase(
+      accountRepository,
+      licenseVault,
+    );
     manageAccountDefaultCostCentersUseCase =
         ManageAccountDefaultCostCentersUseCase(accountRepository);
     listAccountsUseCase = ListAccountsUseCase(
@@ -1671,8 +1681,10 @@ abstract final class InjectionContainer {
       _idGenerator,
       auditLogService: auditLogService,
     );
-    processAccrualUseCase =
-        ProcessAccrualUseCase(accrualRepository, createVoucherUseCase);
+    processAccrualUseCase = ProcessAccrualUseCase(
+      accrualRepository,
+      createVoucherUseCase,
+    );
 
     // ── Legacy Migration ─────────────────────────────────────────────────────
     legacyMigrationUseCase = LegacyMigrationUseCase(

@@ -10,6 +10,7 @@ import 'package:qayd/domain/entities/account.dart';
 import 'package:qayd/domain/entities/fiscal_period.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_activation_result.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/entities/pos_template_definition.dart';
@@ -26,19 +27,22 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/governance_status.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/submit_activation_request.dart';
 
 final class _GovernanceRepository implements GovernanceRepository {
   GovernanceStatus status = GovernanceStatus.activated;
 
   @override
-  Future<Result<GovernanceStatus>> getStatus(
-          {bool forceRefresh = false}) async =>
+  Future<Result<GovernanceStatus>> getStatus({
+    bool forceRefresh = false,
+  }) async =>
       Success(status);
 
   @override
   Future<Result<void>> submitActivation(
-          SubmitActivationRequest request) async =>
+    SubmitActivationRequest request,
+  ) async =>
       const Success(null);
 }
 
@@ -86,15 +90,21 @@ final class _ProductRepository implements PosProductRepository {
 
 final class _PostingRepository implements PosAccountingPostingRepository {
   PosStockMovement? movement;
+  List<PosStockMovement> movements = [];
+  List<PosStockLot> lots = [];
   PosAccountingPosting? posting;
   Result<void> result = const Success(null);
 
   @override
   Future<Result<void>> saveOpeningBalance({
     required PosStockMovement movement,
+    List<PosStockMovement> additionalMovements = const [],
+    List<PosStockLot> lots = const [],
     required PosAccountingPosting posting,
   }) async {
     this.movement = movement;
+    movements = [movement, ...additionalMovements];
+    this.lots = lots;
     this.posting = posting;
     return result;
   }
@@ -122,13 +132,11 @@ final class _MockAccountRepository extends Mock implements AccountRepository {}
 final class _MockFiscalPeriodRepository extends Mock
     implements FiscalPeriodRepository {}
 
-CurrencyCode _currency() => CurrencyCode(
-      code: 'SAR',
-      nameAr: 'ريال سعودي',
-      symbol: 'ر.س',
-    );
+CurrencyCode _currency() =>
+    CurrencyCode(code: 'SAR', nameAr: 'ريال سعودي', symbol: 'ر.س');
 
-PosProduct _product(CurrencyCode currency) => PosProduct.create(
+PosProduct _product(CurrencyCode currency, {bool expiry = false}) =>
+    PosProduct.create(
       id: 'product-1',
       sku: 'SKU-1',
       name: 'Coffee',
@@ -136,6 +144,7 @@ PosProduct _product(CurrencyCode currency) => PosProduct.create(
       salePrice: Money.fromMinorUnits(300, currency),
       purchasePrice: Money.fromMinorUnits(100, currency),
       quantityScale: 1,
+      expiryTracking: expiry,
       reorderLevel: PosQuantity.fromScaled(0, scale: 1),
       now: DateTime.utc(2026, 1, 1),
     );
@@ -156,13 +165,9 @@ Account _account(String id, AccountNature nature) => Account.createRoot(
       name: id,
       classification: nature == AccountNature.debit
           ? AccountClassification.custom(
-              name: 'POS',
-              nature: AccountNature.debit,
-            )
+              name: 'POS', nature: AccountNature.debit)
           : AccountClassification.custom(
-              name: 'POS',
-              nature: AccountNature.credit,
-            ),
+              name: 'POS', nature: AccountNature.credit),
       createdAt: DateTime.utc(2026, 1, 1),
     );
 
@@ -186,7 +191,10 @@ PostPosOpeningBalanceAtomicallyUseCase _useCase({
   );
 }
 
-PostPosOpeningBalanceInput _input() => PostPosOpeningBalanceInput(
+PostPosOpeningBalanceInput _input({
+  List<PostPosOpeningBalanceBatchInput> batches = const [],
+}) =>
+    PostPosOpeningBalanceInput(
       productId: 'product-1',
       quantityScaled: 15,
       quantityScale: 1,
@@ -196,6 +204,7 @@ PostPosOpeningBalanceInput _input() => PostPosOpeningBalanceInput(
       sourceId: 'opening-source-1',
       occurredAt: DateTime.utc(2026, 1, 2, 10),
       createdAt: DateTime.utc(2026, 1, 2, 10),
+      batches: batches,
     );
 
 void main() {
@@ -221,33 +230,34 @@ void main() {
     when(() => accounts.getById(AccountId('clearing-account'))).thenAnswer(
       (_) async => Success(_account('clearing-account', AccountNature.credit)),
     );
-    when(() => periods.listAllOrdered()).thenAnswer(
-      (_) async => const Success(<FiscalPeriod>[]),
-    );
+    when(() => periods.listAllOrdered())
+        .thenAnswer((_) async => const Success(<FiscalPeriod>[]));
   });
 
-  test('blocks suspended governance before reading or writing POS data',
-      () async {
-    governance.status = const GovernanceStatus(
-      kind: GovernanceStatusKind.suspended,
-    );
-    final useCase = _useCase(
-      governance: governance,
-      installation: installation,
-      product: product,
-      accounts: accounts,
-      periods: periods,
-      posting: posting,
-    );
+  test(
+    'blocks suspended governance before reading or writing POS data',
+    () async {
+      governance.status = const GovernanceStatus(
+        kind: GovernanceStatusKind.suspended,
+      );
+      final useCase = _useCase(
+        governance: governance,
+        installation: installation,
+        product: product,
+        accounts: accounts,
+        periods: periods,
+        posting: posting,
+      );
 
-    final result = await useCase(_input());
+      final result = await useCase(_input());
 
-    expect(result.isFailure, isTrue);
-    expect(installation.calls, 0);
-    expect(posting.posting, isNull);
-    verifyNever(() => accounts.getById(AccountId('inventory-account')));
-    verifyNever(() => accounts.getById(AccountId('clearing-account')));
-  });
+      expect(result.isFailure, isTrue);
+      expect(installation.calls, 0);
+      expect(posting.posting, isNull);
+      verifyNever(() => accounts.getById(AccountId('inventory-account')));
+      verifyNever(() => accounts.getById(AccountId('clearing-account')));
+    },
+  );
 
   test('rejects a closed fiscal date before coordinator invocation', () async {
     when(() => periods.listAllOrdered()).thenAnswer(
@@ -303,27 +313,83 @@ void main() {
     expect(posting.posting, isNull);
   });
 
-  test('builds a governed posting using real warehouse and exact total amount',
-      () async {
+  test(
+    'builds a governed posting using real warehouse and exact total amount',
+    () async {
+      final useCase = _useCase(
+        governance: governance,
+        installation: installation,
+        product: product,
+        accounts: accounts,
+        periods: periods,
+        posting: posting,
+      );
+
+      final result = await useCase(_input());
+
+      expect(result.isSuccess, isTrue);
+      expect(posting.movement?.warehouseId, 'warehouse-real-id');
+      expect(posting.movement?.sourceId, 'opening-source-1');
+      expect(posting.posting?.sourceId, 'opening-source-1');
+      expect(posting.posting?.voucher.amount.minorUnits, 150);
+      expect(posting.posting?.entries, hasLength(2));
+      expect(posting.posting?.voucher.referenceNumber, 'opening-source-1');
+      verify(() => accounts.getById(AccountId('inventory-account'))).called(1);
+      verify(() => accounts.getById(AccountId('clearing-account'))).called(1);
+    },
+  );
+
+  test('posts a tracked opening balance with its dated lot', () async {
+    final trackedProduct = _product(currency, expiry: true);
     final useCase = _useCase(
       governance: governance,
       installation: installation,
-      product: product,
+      product: trackedProduct,
       accounts: accounts,
       periods: periods,
       posting: posting,
     );
 
-    final result = await useCase(_input());
+    final result = await useCase(_input(
+      batches: [
+        PostPosOpeningBalanceBatchInput(
+          id: 'opening-lot-1',
+          quantity: PosQuantity.fromScaled(15, scale: 1),
+          expiryDate: PosDate.fromParts(2026, 12, 31),
+          supplierLotNumber: 'OPEN-1',
+        ),
+      ],
+    ));
 
     expect(result.isSuccess, isTrue);
-    expect(posting.movement?.warehouseId, 'warehouse-real-id');
-    expect(posting.movement?.sourceId, 'opening-source-1');
-    expect(posting.posting?.sourceId, 'opening-source-1');
-    expect(posting.posting?.voucher.amount.minorUnits, 150);
-    expect(posting.posting?.entries, hasLength(2));
-    expect(posting.posting?.voucher.referenceNumber, 'opening-source-1');
-    verify(() => accounts.getById(AccountId('inventory-account'))).called(1);
-    verify(() => accounts.getById(AccountId('clearing-account'))).called(1);
+    expect(posting.lots.single.id, 'opening-lot-1');
+    expect(posting.movement?.lotId, 'opening-lot-1');
+    expect(posting.movement?.quantity.scaledUnits, 15);
+  });
+
+  test('rejects an opening lot whose quantity differs from the balance',
+      () async {
+    final trackedProduct = _product(currency, expiry: true);
+    final useCase = _useCase(
+      governance: governance,
+      installation: installation,
+      product: trackedProduct,
+      accounts: accounts,
+      periods: periods,
+      posting: posting,
+    );
+
+    final result = await useCase(_input(
+      batches: [
+        PostPosOpeningBalanceBatchInput(
+          id: 'opening-lot-1',
+          quantity: PosQuantity.fromScaled(10, scale: 1),
+          expiryDate: PosDate.fromParts(2026, 12, 31),
+        ),
+      ],
+    ));
+
+    expect(result.isFailure, isTrue);
+    expect(posting.movement, isNull);
   });
 }

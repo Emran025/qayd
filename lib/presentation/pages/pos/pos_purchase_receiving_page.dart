@@ -18,6 +18,7 @@ import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/components/inputs/qayd_amount_field.dart';
@@ -144,12 +145,6 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
   }
 
   void _addProduct(PosProduct product) {
-    if (product.expiryTracking) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.posPurchaseExpiryNotice)),
-      );
-      return;
-    }
     if (_lines.containsKey(product.id)) {
       _showMessage(AppStrings.posPurchaseAlreadyAdded);
       return;
@@ -162,9 +157,41 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
               _purchaseCurrency.fractionalDigits,
             )
           : '',
+      batches: product.expiryTracking ? [_newBatchDraft()] : const [],
     );
     setState(() => _lines[product.id] = line);
     _refreshLinePreview(line);
+  }
+
+  _PurchaseBatchDraft _newBatchDraft() => _PurchaseBatchDraft(id: _uuid.v4());
+
+  void _addBatch(_PurchaseLineDraft line) {
+    setState(() => line.batches.add(_newBatchDraft()));
+  }
+
+  void _removeBatch(_PurchaseLineDraft line, _PurchaseBatchDraft batch) {
+    setState(() {
+      line.batches.remove(batch);
+      batch.dispose();
+    });
+  }
+
+  Future<void> _selectBatchExpiry(_PurchaseBatchDraft batch) async {
+    final today = DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: batch.expiryDate == null
+          ? today
+          : DateTime(
+              batch.expiryDate!.year,
+              batch.expiryDate!.month,
+              batch.expiryDate!.day,
+            ),
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2200),
+    );
+    if (!mounted || selected == null) return;
+    setState(() => batch.expiryDate = PosDate.fromDateTime(selected));
   }
 
   Future<void> _refreshLinePreview(_PurchaseLineDraft line) async {
@@ -234,10 +261,7 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
         return null;
       }
       total += PosMoneyMath.multiply(
-        PosQuantity.positive(
-          quantityScaled,
-          scale: line.product.quantityScale,
-        ),
+        PosQuantity.positive(quantityScaled, scale: line.product.quantityScale),
         Money.nonNegative(costMinor, _purchaseCurrency),
       ).minorUnits;
     }
@@ -277,6 +301,41 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
         _showMessage(AppStrings.posInvoiceInvalid);
         return;
       }
+      final batches = <BuildPosPurchaseBatchInput>[];
+      if (line.product.expiryTracking) {
+        if (line.batches.isEmpty ||
+            line.batches.any((batch) => batch.expiryDate == null)) {
+          _showMessage(AppStrings.posPurchaseBatchExpiryRequired);
+          return;
+        }
+        var batchTotal = 0;
+        for (final batch in line.batches) {
+          final batchQuantity = _parseScaled(
+            batch.quantityController.text,
+            line.product.quantityScale,
+          );
+          if (batchQuantity == null || batchQuantity <= 0) {
+            _showMessage(AppStrings.posPurchaseBatchSumInvalid);
+            return;
+          }
+          batchTotal += batchQuantity;
+          batches.add(
+            BuildPosPurchaseBatchInput(
+              id: batch.id,
+              quantity: PosQuantity.positive(
+                batchQuantity,
+                scale: line.product.quantityScale,
+              ),
+              expiryDate: batch.expiryDate!,
+              supplierLotNumber: batch.supplierLotController.text,
+            ),
+          );
+        }
+        if (batchTotal != quantityScaled) {
+          _showMessage(AppStrings.posPurchaseBatchSumInvalid);
+          return;
+        }
+      }
       purchaseLines.add(
         BuildPosPurchaseLineInput(
           productId: line.product.id,
@@ -288,6 +347,7 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
           applyProposedSalePrice: line.applyProposedSalePrice,
           rateSnapshot: line.previewConversion!.rateSnapshot,
           productUpdatedAtSnapshot: line.product.updatedAt,
+          batches: batches,
         ),
       );
     }
@@ -404,10 +464,15 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
   }
 
   String _purchaseFingerprint(List<BuildPosPurchaseLineInput> lines) {
-    final lineData = lines
-        .map((line) =>
-            '${line.productId}:${line.quantity.scaledUnits}/${line.quantity.scale}:${line.unitCostMinor}')
-        .join(';');
+    final lineData = lines.map((line) {
+      final batchData = line.batches
+          .map(
+            (batch) =>
+                '${batch.quantity.scaledUnits}/${batch.quantity.scale}:${batch.expiryDate.isoDate}:${batch.supplierLotNumber ?? ''}',
+          )
+          .join(',');
+      return '${line.productId}:${line.quantity.scaledUnits}/${line.quantity.scale}:${line.unitCostMinor}:$batchData';
+    }).join(';');
     return '${widget.warehouseId}|${_purchaseCurrency.code}|'
         '${_supplierAccountId ?? ''}|$_payInCash|$lineData';
   }
@@ -424,6 +489,17 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
           'product_updated_at':
               draft.product.updatedAt.toUtc().toIso8601String(),
           'apply_proposed_sale_price': draft.applyProposedSalePrice,
+          'batches': line.batches
+              .map(
+                (batch) => {
+                  'id': batch.id,
+                  'quantity_scaled': batch.quantity.scaledUnits,
+                  'quantity_scale': batch.quantity.scale,
+                  'expiry_date': batch.expiryDate.isoDate,
+                  'supplier_lot_number': batch.supplierLotNumber,
+                },
+              )
+              .toList(growable: false),
           'quote': quote == null
               ? null
               : {
@@ -467,6 +543,30 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
                 draft.product.updatedAt.toUtc()) {
           return false;
         }
+        final savedBatches = (saved['batches'] as List<dynamic>? ?? const [])
+            .cast<Map<String, dynamic>>();
+        if (draft.product.expiryTracking && savedBatches.isEmpty) return false;
+        for (final batch in draft.batches) {
+          batch.dispose();
+        }
+        draft.batches
+          ..clear()
+          ..addAll(
+            savedBatches.map((batch) {
+              final quantityScaled = batch['quantity_scaled'] as int;
+              final scale = batch['quantity_scale'] as int;
+              if (scale != draft.product.quantityScale || quantityScaled <= 0) {
+                throw const FormatException('Invalid saved batch quantity');
+              }
+              return _PurchaseBatchDraft(
+                id: batch['id'] as String,
+                quantityText: _minorUnitsToText(quantityScaled, scale),
+                supplierLotNumber:
+                    batch['supplier_lot_number'] as String? ?? '',
+                expiryDate: PosDate.parse(batch['expiry_date'] as String),
+              );
+            }),
+          );
         final sourceAmount = Money.nonNegative(
           current.unitCostMinor!,
           _purchaseCurrency,
@@ -542,9 +642,8 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -555,10 +654,7 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _loadFailure != null
-              ? _LoadFailureView(
-                  message: _loadFailure!,
-                  onRetry: _loadProducts,
-                )
+              ? _LoadFailureView(message: _loadFailure!, onRetry: _loadProducts)
               : ListView(
                   padding: const EdgeInsets.all(SpacingTokens.lg),
                   children: [
@@ -578,12 +674,14 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
                       items: (_availableCurrencies.isEmpty
                               ? [widget.currency]
                               : _availableCurrencies)
-                          .map((currency) => DropdownMenuItem(
-                                value: currency,
-                                child: Text(
-                                  '${currency.nameAr} (${currency.code})',
-                                ),
-                              ))
+                          .map(
+                            (currency) => DropdownMenuItem(
+                              value: currency,
+                              child: Text(
+                                '${currency.nameAr} (${currency.code})',
+                              ),
+                            ),
+                          )
                           .toList(growable: false),
                       onChanged: _lines.isNotEmpty || _submitting
                           ? null
@@ -667,9 +765,13 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
                     const SizedBox(height: SpacingTokens.md),
                     FilledButton.icon(
                       onPressed: _submitting ||
-                              _lines.values.any((line) =>
-                                  line.previewLoading ||
-                                  line.previewConversion == null)
+                              _lines.values.any(
+                                (line) =>
+                                    line.previewLoading ||
+                                    line.previewConversion == null ||
+                                    (line.product.expiryTracking &&
+                                        !_purchaseBatchesMatch(line)),
+                              )
                           ? null
                           : _submit,
                       icon: _submitting
@@ -686,7 +788,6 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
   }
 
   Widget _productCard(PosProduct product) {
-    final unavailable = product.expiryTracking;
     return Card(
       child: ListTile(
         title: Text(product.name),
@@ -695,13 +796,9 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
           '${formatPosMoney(product.purchasePrice)}',
         ),
         trailing: IconButton(
-          tooltip: unavailable
-              ? AppStrings.posPurchaseExpiryNotice
-              : AppStrings.posPurchaseAddProduct,
-          onPressed: unavailable ? null : () => _addProduct(product),
-          icon: Icon(
-            unavailable ? Icons.block_outlined : Icons.add_circle_outline,
-          ),
+          tooltip: AppStrings.posPurchaseAddProduct,
+          onPressed: () => _addProduct(product),
+          icon: const Icon(Icons.add_circle_outline),
         ),
       ),
     );
@@ -770,6 +867,27 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
             quantityField,
             const SizedBox(height: SpacingTokens.sm),
             costField,
+            if (line.product.expiryTracking) ...[
+              const SizedBox(height: SpacingTokens.md),
+              Text(
+                AppStrings.posPurchaseBatchSection,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: SpacingTokens.xs),
+              ...line.batches.asMap().entries.map(
+                    (entry) => _batchCard(line, entry.value, entry.key),
+                  ),
+              OutlinedButton.icon(
+                onPressed: _submitting ? null : () => _addBatch(line),
+                icon: const Icon(Icons.add),
+                label: Text(AppStrings.posPurchaseAddBatch),
+              ),
+              if (!_purchaseBatchesMatch(line))
+                Text(
+                  AppStrings.posPurchaseBatchSumInvalid,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+            ],
             const SizedBox(height: SpacingTokens.sm),
             if (line.previewLoading)
               const LinearProgressIndicator()
@@ -817,6 +935,94 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
         ),
       ),
     );
+  }
+
+  Widget _batchCard(
+    _PurchaseLineDraft line,
+    _PurchaseBatchDraft batch,
+    int index,
+  ) {
+    final label =
+        '${AppStrings.posPurchaseBatchQuantity} (${line.product.unitName})';
+    final quantityField = line.product.quantityScale == 0
+        ? QaydNumericField(
+            controller: batch.quantityController,
+            enabled: !_submitting,
+            label: label,
+            onChanged: (_) => setState(() {}),
+          )
+        : QaydAmountField(
+            controller: batch.quantityController,
+            enabled: !_submitting,
+            label: label,
+            fractionalDigits: line.product.quantityScale,
+            onChanged: (_) => setState(() {}),
+          );
+    return Container(
+      key: ValueKey('purchase-batch-${line.product.id}-$index'),
+      margin: const EdgeInsets.only(bottom: SpacingTokens.sm),
+      padding: const EdgeInsets.all(SpacingTokens.sm),
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${AppStrings.posPurchaseBatchSection} ${index + 1}',
+                ),
+              ),
+              IconButton(
+                tooltip: AppStrings.actionDelete,
+                onPressed: _submitting ? null : () => _removeBatch(line, batch),
+                icon: const Icon(Icons.delete_outline),
+              ),
+            ],
+          ),
+          quantityField,
+          const SizedBox(height: SpacingTokens.xs),
+          TextField(
+            controller: batch.supplierLotController,
+            enabled: !_submitting,
+            decoration: InputDecoration(
+              labelText: AppStrings.posPurchaseSupplierLot,
+            ),
+          ),
+          const SizedBox(height: SpacingTokens.xs),
+          OutlinedButton.icon(
+            onPressed: _submitting ? null : () => _selectBatchExpiry(batch),
+            icon: const Icon(Icons.event_outlined),
+            label: Text(
+              batch.expiryDate?.isoDate ?? AppStrings.posPurchaseBatchExpiry,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _purchaseBatchesMatch(_PurchaseLineDraft line) {
+    if (line.batches.isEmpty) return false;
+    final requested = _parseScaled(
+      line.quantityController.text,
+      line.product.quantityScale,
+    );
+    if (requested == null || requested <= 0) return false;
+    var allocated = 0;
+    for (final batch in line.batches) {
+      if (batch.expiryDate == null) return false;
+      final quantity = _parseScaled(
+        batch.quantityController.text,
+        line.product.quantityScale,
+      );
+      if (quantity == null || quantity <= 0) return false;
+      allocated += quantity;
+    }
+    return allocated == requested;
   }
 
   static int? _parseScaled(String raw, int scale) {
@@ -867,13 +1073,18 @@ class _PosPurchaseReceivingPageState extends State<PosPurchaseReceivingPage> {
 }
 
 final class _PurchaseLineDraft {
-  _PurchaseLineDraft({required this.product, required String unitCostText})
-      : quantityController = TextEditingController(text: '1'),
-        unitCostController = TextEditingController(text: unitCostText);
+  _PurchaseLineDraft({
+    required this.product,
+    required String unitCostText,
+    List<_PurchaseBatchDraft> batches = const [],
+  })  : quantityController = TextEditingController(text: '1'),
+        unitCostController = TextEditingController(text: unitCostText),
+        batches = List<_PurchaseBatchDraft>.of(batches);
 
   final PosProduct product;
   final TextEditingController quantityController;
   final TextEditingController unitCostController;
+  final List<_PurchaseBatchDraft> batches;
   PosCurrencyConversion? previewConversion;
   Money? proposedSalePrice;
   String? previewFailure;
@@ -883,6 +1094,29 @@ final class _PurchaseLineDraft {
   void dispose() {
     quantityController.dispose();
     unitCostController.dispose();
+    for (final batch in batches) {
+      batch.dispose();
+    }
+  }
+}
+
+final class _PurchaseBatchDraft {
+  _PurchaseBatchDraft({
+    required this.id,
+    String quantityText = '1',
+    String supplierLotNumber = '',
+    this.expiryDate,
+  })  : quantityController = TextEditingController(text: quantityText),
+        supplierLotController = TextEditingController(text: supplierLotNumber);
+
+  String id;
+  final TextEditingController quantityController;
+  final TextEditingController supplierLotController;
+  PosDate? expiryDate;
+
+  void dispose() {
+    quantityController.dispose();
+    supplierLotController.dispose();
   }
 }
 

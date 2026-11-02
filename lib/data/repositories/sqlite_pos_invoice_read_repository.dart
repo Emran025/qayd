@@ -49,7 +49,9 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
         orderBy: 'invoice_date ASC, created_at ASC',
       );
       final result = <PosInvoiceDetails>[];
-      for (final row in rows) result.add(await _mapDetails(row));
+      for (final row in rows) {
+        result.add(await _mapDetails(row));
+      }
       return Success(List.unmodifiable(result));
     } catch (error) {
       return FailureResult(failureFromDomainException(error));
@@ -177,11 +179,7 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
         scale: _int(row, 'quantity_scale'),
       ),
       unitPrice: _money(row, 'unit_price_minor', currency),
-      unitCost: _money(
-        row,
-        'unit_cost_minor',
-        costCurrency,
-      ),
+      unitCost: _money(row, 'unit_cost_minor', costCurrency),
       discount: _money(row, 'discount_minor', currency),
       tax: _money(row, 'tax_minor', currency),
       lineTotal: _money(row, 'line_total_minor', currency),
@@ -191,8 +189,12 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
       proposedSalePrice: proposedSalePrice,
       proposedSalePriceApplied:
           _asInt(row['proposed_sale_price_applied'] ?? 0) == 1,
-      productUpdatedAtSnapshot:
-          _nullableDate(row['product_updated_at_snapshot']),
+      productUpdatedAtSnapshot: _nullableDate(
+        row['product_updated_at_snapshot'],
+      ),
+      expiryTrackingSnapshot: row['expiry_tracking_snapshot'] == null
+          ? null
+          : _asInt(row['expiry_tracking_snapshot']) == 1,
     );
   }
 
@@ -219,9 +221,7 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
         storedFromCurrency: await _getCurrency(
           _string(row, 'fx_stored_from_code'),
         ),
-        storedToCurrency: await _getCurrency(
-          _string(row, 'fx_stored_to_code'),
-        ),
+        storedToCurrency: await _getCurrency(_string(row, 'fx_stored_to_code')),
         storedRateScaled: _int(row, 'fx_rate_scaled'),
         requestedFromCurrency: await _getCurrency(
           _string(row, 'fx_requested_from_code'),

@@ -33,6 +33,7 @@ final class PosInvoiceLine {
     this.proposedSalePrice,
     this.proposedSalePriceApplied = false,
     this.productUpdatedAtSnapshot,
+    this.expiryTrackingSnapshot,
   });
 
   factory PosInvoiceLine.create({
@@ -52,6 +53,7 @@ final class PosInvoiceLine {
     Money? proposedSalePrice,
     bool proposedSalePriceApplied = false,
     DateTime? productUpdatedAtSnapshot,
+    bool? expiryTrackingSnapshot,
   }) {
     if (id.trim().isEmpty ||
         invoiceId.trim().isEmpty ||
@@ -112,6 +114,7 @@ final class PosInvoiceLine {
       proposedSalePrice: proposedSalePrice,
       proposedSalePriceApplied: proposedSalePriceApplied,
       productUpdatedAtSnapshot: productUpdatedAtSnapshot?.toUtc(),
+      expiryTrackingSnapshot: expiryTrackingSnapshot,
     );
   }
 
@@ -133,6 +136,7 @@ final class PosInvoiceLine {
     Money? proposedSalePrice,
     bool proposedSalePriceApplied = false,
     DateTime? productUpdatedAtSnapshot,
+    bool? expiryTrackingSnapshot,
   }) {
     final line = PosInvoiceLine.create(
       id: id,
@@ -151,6 +155,7 @@ final class PosInvoiceLine {
       proposedSalePrice: proposedSalePrice,
       proposedSalePriceApplied: proposedSalePriceApplied,
       productUpdatedAtSnapshot: productUpdatedAtSnapshot,
+      expiryTrackingSnapshot: expiryTrackingSnapshot,
     );
     if (line.lineTotal != lineTotal) {
       throw InvalidPosInvoiceException.invalidTotals();
@@ -175,12 +180,9 @@ final class PosInvoiceLine {
   final Money? proposedSalePrice;
   final bool proposedSalePriceApplied;
   final DateTime? productUpdatedAtSnapshot;
+  final bool? expiryTrackingSnapshot;
 
-  static void _assertCurrency(
-    Money unitPrice,
-    Money discount,
-    Money tax,
-  ) {
+  static void _assertCurrency(Money unitPrice, Money discount, Money tax) {
     final currency = unitPrice.currency;
     if (discount.currency != currency || tax.currency != currency) {
       throw InvalidPosInvoiceException.currencyMismatch();
@@ -279,7 +281,9 @@ final class PosInvoice {
       lines: UnmodifiableListView(immutableLines),
       subtotal: Money.fromMinorUnits(subtotalMinor, currency),
       discount: Money.fromMinorUnits(
-          lineDiscountMinor + appliedDiscount.minorUnits, currency),
+        lineDiscountMinor + appliedDiscount.minorUnits,
+        currency,
+      ),
       tax: Money.fromMinorUnits(
         immutableLines.fold<int>(0, (sum, line) => sum + line.tax.minorUnits) +
             appliedTax.minorUnits,

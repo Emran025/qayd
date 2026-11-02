@@ -6,8 +6,10 @@ import 'package:qayd/domain/entities/pos_activation_result.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_details.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
+import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/entities/pos_template_definition.dart';
 import 'package:qayd/domain/repositories/pos_invoice_read_repository.dart';
+import 'package:qayd/domain/repositories/pos_stock_movement_repository.dart';
 import 'package:qayd/domain/repositories/pos_template_installation_repository.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
@@ -16,6 +18,8 @@ import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 
 class _Invoices extends Mock implements PosInvoiceReadRepository {}
+
+class _Stock extends Mock implements PosStockMovementRepository {}
 
 class _Installation extends Mock implements PosTemplateInstallationRepository {}
 
@@ -35,6 +39,7 @@ void main() {
     int globalDiscount = 0,
     int globalTax = 0,
     bool includeFreeLine = false,
+    bool tracked = false,
   }) {
     final line = PosInvoiceLine.create(
       id: 'sale-line-1',
@@ -47,6 +52,7 @@ void main() {
       discount: Money.zero(currency),
       tax: Money.zero(currency),
       createdAt: at,
+      expiryTrackingSnapshot: tracked,
     );
     final invoiceLines = includeFreeLine
         ? <PosInvoiceLine>[
@@ -57,7 +63,8 @@ void main() {
               productNameSnapshot: 'Free sample',
               quantity: PosQuantity.whole(1),
               unitPrice: Money.fromMinorUnits(500, currency),
-              unitCost: Money.fromMinorUnits(unitCost, costCurrency ?? currency),
+              unitCost:
+                  Money.fromMinorUnits(unitCost, costCurrency ?? currency),
               discount: Money.fromMinorUnits(500, currency),
               tax: Money.zero(currency),
               createdAt: at,
@@ -69,17 +76,16 @@ void main() {
               productNameSnapshot: 'Paid item',
               quantity: PosQuantity.whole(1),
               unitPrice: Money.fromMinorUnits(500, currency),
-              unitCost: Money.fromMinorUnits(unitCost, costCurrency ?? currency),
+              unitCost:
+                  Money.fromMinorUnits(unitCost, costCurrency ?? currency),
               discount: Money.zero(currency),
               tax: Money.zero(currency),
               createdAt: at,
             ),
           ]
         : <PosInvoiceLine>[line];
-    final totalMinor = 1000 -
-        (includeFreeLine ? 500 : 0) -
-        globalDiscount +
-        globalTax;
+    final totalMinor =
+        1000 - (includeFreeLine ? 500 : 0) - globalDiscount + globalTax;
     return PosInvoice.draft(
       id: 'sale-1',
       invoiceNumber: 'S-1',
@@ -123,6 +129,8 @@ void main() {
     int globalDiscount = 0,
     int globalTax = 0,
     bool includeFreeLine = false,
+    bool tracked = false,
+    List<PosStockMovement> sourceMovements = const [],
   }) {
     final invoices = _Invoices();
     final installation = _Installation();
@@ -132,18 +140,20 @@ void main() {
       globalDiscount: globalDiscount,
       globalTax: globalTax,
       includeFreeLine: includeFreeLine,
+      tracked: tracked,
     );
     when(() => invoices.getById('sale-1')).thenAnswer(
       (_) async => Success(PosInvoiceDetails(
         invoice: source,
-        payments: payments ?? [
-          payment(
-            id: 'sale-payment-1',
-            accountId: 'cash',
-            method: PosPaymentMethod.cash,
-            amount: source.total.minorUnits,
-          ),
-        ],
+        payments: payments ??
+            [
+              payment(
+                id: 'sale-payment-1',
+                accountId: 'cash',
+                method: PosPaymentMethod.cash,
+                amount: source.total.minorUnits,
+              ),
+            ],
       )),
     );
     when(() => invoices.getReturnsForSource('sale-1'))
@@ -165,9 +175,16 @@ void main() {
         ),
       ),
     );
+    final stock = _Stock();
+    when(() => stock.listMovementsForSource(
+          sourceType: 'pos_invoice',
+          sourceId: 'sale-1',
+          type: PosStockMovementType.sale,
+        )).thenAnswer((_) async => Success(sourceMovements));
     return BuildPosSalesReturnPostingUseCase(
       invoiceRepository: invoices,
       installationRepository: installation,
+      stockRepository: tracked ? stock : null,
     );
   }
 
@@ -176,7 +193,8 @@ void main() {
     bool voidSource = false,
     String returnInvoiceId = 'return-1',
     String idempotencyKey = 'return-key-1',
-  }) => BuildPosSalesReturnPostingInput(
+  }) =>
+      BuildPosSalesReturnPostingInput(
         returnInvoiceId: returnInvoiceId,
         returnInvoiceNumber: 'R-${returnInvoiceId.replaceAll('return-', '')}',
         sourceInvoiceId: 'sale-1',
@@ -232,7 +250,44 @@ void main() {
     );
   });
 
-  test('reverses COGS in source cost currency while refund stays in invoice currency',
+  test('returns tracked stock to the original sale lot', () async {
+    final soldMovement = PosStockMovement.create(
+      id: 'sale-movement-1',
+      productId: 'product-1',
+      warehouseId: 'warehouse-1',
+      type: PosStockMovementType.sale,
+      direction: PosStockMovementDirection.outbound,
+      quantity: PosQuantity.whole(2),
+      unitCost: Money.fromMinorUnits(100, currency),
+      sourceType: 'pos_invoice',
+      sourceId: 'sale-1',
+      sourceLineId: 'sale-line-1',
+      lotId: 'lot-original',
+      occurredAt: at,
+      idempotencyKey: 'sale-stock-key-1',
+      createdAt: at,
+    );
+    final result = await createUseCase(
+      tracked: true,
+      sourceMovements: [soldMovement],
+    )(input(
+      lines: [
+        BuildPosSalesReturnLineInput(
+          sourceLineId: 'sale-line-1',
+          quantity: PosQuantity.whole(1),
+        ),
+      ],
+    ));
+
+    expect(result.isSuccess, isTrue);
+    final posting = result.valueOrNull!;
+    expect(posting.invoice.lines.single.expiryTrackingSnapshot, isTrue);
+    expect(posting.movements.single.lotId, 'lot-original');
+    expect(posting.movements.single.quantity, PosQuantity.whole(1));
+  });
+
+  test(
+      'reverses COGS in source cost currency while refund stays in invoice currency',
       () async {
     const usd = CurrencyCode(code: 'USD', nameAr: 'دولار', symbol: r'$');
     final result = await createUseCase(costCurrency: usd)(input(
@@ -266,7 +321,8 @@ void main() {
     );
   });
 
-  test('gives equal split refunds unique voucher and ledger identities', () async {
+  test('gives equal split refunds unique voucher and ledger identities',
+      () async {
     final payments = [
       payment(
         id: 'sale-payment-1',
@@ -301,11 +357,16 @@ void main() {
       hasLength(2),
     );
     expect(
-      refundPostings.expand((item) => item.entries).map((entry) => entry.id.value).toSet(),
+      refundPostings
+          .expand((item) => item.entries)
+          .map((entry) => entry.id.value)
+          .toSet(),
       hasLength(4),
     );
     expect(
-      refundPostings.expand((item) => item.entries).where((e) => e.side == EntrySide.debit),
+      refundPostings
+          .expand((item) => item.entries)
+          .where((e) => e.side == EntrySide.debit),
       hasLength(2),
     );
   });
@@ -353,8 +414,10 @@ void main() {
     expect(result.isFailure, isTrue);
   });
 
-  test('builds full-void request for every source line and no partial lines', () async {
-    final result = await createUseCase()(input(lines: const [], voidSource: true));
+  test('builds full-void request for every source line and no partial lines',
+      () async {
+    final result =
+        await createUseCase()(input(lines: const [], voidSource: true));
 
     expect(result.isSuccess, isTrue);
     final posting = result.valueOrNull!;
@@ -375,12 +438,15 @@ void main() {
 
     expect(result.isSuccess, isTrue);
     expect(
-      result.valueOrNull!.postings.where((p) => p.voucher.id.value.contains('cogs-reversal')),
+      result.valueOrNull!.postings
+          .where((p) => p.voucher.id.value.contains('cogs-reversal')),
       isEmpty,
     );
   });
 
-  test('allocates global invoice discount and tax cumulatively without losing pennies', () async {
+  test(
+      'allocates global invoice discount and tax cumulatively without losing pennies',
+      () async {
     final firstResult = await createUseCase(
       globalDiscount: 101,
       globalTax: 51,
@@ -427,10 +493,12 @@ void main() {
       101,
     );
     expect(first.invoice.tax.minorUnits + second.invoice.tax.minorUnits, 51);
-    expect(first.invoice.total.minorUnits + second.invoice.total.minorUnits, 950);
+    expect(
+        first.invoice.total.minorUnits + second.invoice.total.minorUnits, 950);
   });
 
-  test('returns a fully discounted item without inventing a zero-value refund', () async {
+  test('returns a fully discounted item without inventing a zero-value refund',
+      () async {
     final result = await createUseCase(includeFreeLine: true)(input(
       lines: [
         BuildPosSalesReturnLineInput(
@@ -446,6 +514,7 @@ void main() {
     expect(posting.refundPayments, isEmpty);
     expect(posting.postings, hasLength(1));
     expect(posting.postings.single.voucher.amount.minorUnits, 100);
-    expect(posting.postings.single.voucher.affectedAccountId.value, 'inventory');
+    expect(
+        posting.postings.single.voucher.affectedAccountId.value, 'inventory');
   });
 }

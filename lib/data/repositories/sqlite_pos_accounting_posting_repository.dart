@@ -6,6 +6,7 @@ import 'package:qayd/data/mappers/voucher_mapper.dart';
 import 'package:qayd/data/repositories/sqlite_pos_stock_movement_repository.dart';
 import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/repositories/pos_accounting_posting_repository.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
@@ -27,14 +28,25 @@ final class SqlitePosAccountingPostingRepository
   @override
   Future<Result<void>> saveOpeningBalance({
     required PosStockMovement movement,
+    List<PosStockMovement> additionalMovements = const [],
+    List<PosStockLot> lots = const [],
     required PosAccountingPosting posting,
   }) async {
-    if (!_sameUtcCalendarDate(posting.voucher.date, movement.occurredAt)) {
+    final movements = [movement, ...additionalMovements];
+    if (movements.any(
+      (item) => !_sameUtcCalendarDate(posting.voucher.date, item.occurredAt),
+    )) {
       return FailureResult(
         ValidationFailure(messageAr: AppStrings.posAccountingDateMismatch),
       );
     }
-    if (movement.sourceId?.trim() != posting.sourceId.trim() ||
+    if (movements.any(
+          (item) =>
+              item.sourceId?.trim() != posting.sourceId.trim() ||
+              item.type != PosStockMovementType.opening ||
+              item.sourceType != 'opening_balance' ||
+              item.direction != PosStockMovementDirection.inbound,
+        ) ||
         posting.voucher.referenceNumber?.trim() != posting.sourceId.trim()) {
       return FailureResult(
         ValidationFailure(messageAr: AppStrings.posAccountingSourceMismatch),
@@ -42,23 +54,75 @@ final class SqlitePosAccountingPostingRepository
     }
     try {
       await _transactionRunner.run<void>((txn) async {
-        final stockResult =
-            await _stockRepository.getByIdempotencyKeyInTransaction(
-          txn,
-          movement.idempotencyKey,
-        );
-        if (stockResult.isFailure) {
-          throw _AtomicPostingFailure(stockResult.failureOrNull!);
+        var existingMovementCount = 0;
+        for (final item in movements) {
+          final stockResult = await _stockRepository
+              .getByIdempotencyKeyInTransaction(txn, item.idempotencyKey);
+          if (stockResult.isFailure) {
+            throw _AtomicPostingFailure(stockResult.failureOrNull!);
+          }
+          final existing = stockResult.valueOrNull;
+          if (existing == null) continue;
+          if (!_sameMovement(existing, item)) {
+            throw _AtomicPostingFailure(
+              ValidationFailure(
+                messageAr: AppStrings.posAccountingPartialState,
+              ),
+            );
+          }
+          existingMovementCount++;
         }
-        final existingMovement = stockResult.valueOrNull;
+        final referencedLotIds =
+            movements.map((item) => item.lotId).whereType<String>().toSet();
+        final expectedLotIds = lots.map((lot) => lot.id).toSet();
+        if (referencedLotIds.length !=
+                movements.where((item) => item.lotId != null).length ||
+            referencedLotIds.length != expectedLotIds.length ||
+            !referencedLotIds.containsAll(expectedLotIds)) {
+          throw _AtomicPostingFailure(
+            ValidationFailure(
+              messageAr: AppStrings.posAccountingSourceMismatch,
+            ),
+          );
+        }
+        var existingLotCount = 0;
+        for (final lot in lots) {
+          final rows = await txn.query(
+            'pos_stock_lots',
+            where: 'id = ?',
+            whereArgs: [lot.id],
+            limit: 1,
+          );
+          if (rows.isEmpty) continue;
+          existingLotCount++;
+          final row = rows.first;
+          if (row['product_id'] != lot.productId ||
+              row['warehouse_id'] != lot.warehouseId ||
+              row['lot_number'] != lot.supplierLotNumber ||
+              row['expiry_date'] != lot.expiryDate?.isoDate ||
+              (row['received_quantity_scaled'] as num).toInt() !=
+                  lot.receivedQuantity.scaledUnits ||
+              (row['quantity_scale'] as num).toInt() !=
+                  lot.receivedQuantity.scale ||
+              (row['unit_cost_minor'] as num).toInt() !=
+                  lot.unitCost.minorUnits ||
+              row['currency_code'] != lot.unitCost.currency.code) {
+            throw _AtomicPostingFailure(
+              ValidationFailure(
+                messageAr: AppStrings.posAccountingPartialState,
+              ),
+            );
+          }
+        }
         final postingState = await _inspectPosting(txn, posting);
-
-        if (existingMovement != null &&
-            postingState == _PostingState.exact &&
-            _sameMovement(existingMovement, movement)) {
+        if (existingMovementCount == movements.length &&
+            existingLotCount == lots.length &&
+            postingState == _PostingState.exact) {
           return;
         }
-        if (existingMovement != null || postingState != _PostingState.absent) {
+        if (existingMovementCount > 0 ||
+            existingLotCount > 0 ||
+            postingState != _PostingState.absent) {
           throw _AtomicPostingFailure(
             ValidationFailure(messageAr: _failureMessage(postingState)),
           );
@@ -78,13 +142,23 @@ final class SqlitePosAccountingPostingRepository
             ),
           );
         }
-
-        final appendResult = await _stockRepository.appendInTransaction(
-          txn,
-          movement,
-        );
-        if (appendResult.isFailure) {
-          throw _AtomicPostingFailure(appendResult.failureOrNull!);
+        for (final lot in lots) {
+          final lotResult = await _stockRepository.createLotInTransaction(
+            txn,
+            lot,
+          );
+          if (lotResult.isFailure) {
+            throw _AtomicPostingFailure(lotResult.failureOrNull!);
+          }
+        }
+        for (final item in movements) {
+          final appendResult = await _stockRepository.appendInTransaction(
+            txn,
+            item,
+          );
+          if (appendResult.isFailure) {
+            throw _AtomicPostingFailure(appendResult.failureOrNull!);
+          }
         }
         final voucherResult =
             await _voucherRepository.saveWithLedgerEntriesInTransaction(
@@ -134,11 +208,8 @@ final class SqlitePosAccountingPostingRepository
     }
     try {
       await _transactionRunner.run<void>((txn) async {
-        final stockResult =
-            await _stockRepository.getByIdempotencyKeyInTransaction(
-          txn,
-          movement.idempotencyKey,
-        );
+        final stockResult = await _stockRepository
+            .getByIdempotencyKeyInTransaction(txn, movement.idempotencyKey);
         if (stockResult.isFailure) {
           throw _AtomicPostingFailure(stockResult.failureOrNull!);
         }
@@ -178,8 +249,8 @@ final class SqlitePosAccountingPostingRepository
         if (appendResult.isFailure) {
           throw _AtomicPostingFailure(appendResult.failureOrNull!);
         }
-        final voucherResult = await _voucherRepository
-            .saveWithLedgerEntriesInTransaction(
+        final voucherResult =
+            await _voucherRepository.saveWithLedgerEntriesInTransaction(
           txn,
           voucher: posting.voucher,
           ledgerEntries: posting.entries,

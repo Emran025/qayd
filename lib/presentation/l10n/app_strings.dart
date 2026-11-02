@@ -229,10 +229,17 @@ class AppStrings {
   static String accountStatementShareText(String accountName, String format) =>
       i.accountStatementShareText(accountName, format);
   static String voucherTripartiteShareText(
-          String sender, String receiver, String amount, String reference) =>
+    String sender,
+    String receiver,
+    String amount,
+    String reference,
+  ) =>
       i.voucherTripartiteShareText(sender, receiver, amount, reference);
   static String voucherStandardShareText(
-          String voucherType, String counterpartyName, String amount) =>
+    String voucherType,
+    String counterpartyName,
+    String amount,
+  ) =>
       i.voucherStandardShareText(voucherType, counterpartyName, amount);
   static String shareTextAccount(String name) => i.shareTextAccount(name);
   static String shareTextDescription(String desc) =>
@@ -2645,6 +2652,14 @@ class AppStrings {
   static String get posPurchaseAddProduct => i.posPurchaseAddProduct;
   static String get posPurchaseAlreadyAdded => i.posPurchaseAlreadyAdded;
   static String get posPurchaseQuantity => i.posPurchaseQuantity;
+  static String get posPurchaseBatchSection => i.posPurchaseBatchSection;
+  static String get posPurchaseAddBatch => i.posPurchaseAddBatch;
+  static String get posPurchaseBatchQuantity => i.posPurchaseBatchQuantity;
+  static String get posPurchaseBatchExpiry => i.posPurchaseBatchExpiry;
+  static String get posPurchaseSupplierLot => i.posPurchaseSupplierLot;
+  static String get posPurchaseBatchExpiryRequired =>
+      i.posPurchaseBatchExpiryRequired;
+  static String get posPurchaseBatchSumInvalid => i.posPurchaseBatchSumInvalid;
   static String get posPurchaseUnitCost => i.posPurchaseUnitCost;
   static String get posPurchaseSourceUnitPrice => i.posPurchaseSourceUnitPrice;
   static String get posPurchaseCurrencyLocked => i.posPurchaseCurrencyLocked;
@@ -2765,6 +2780,11 @@ class AppStrings {
   static String get posStockScaleMismatch => i.posStockScaleMismatch;
   static String get posStockCurrencyMismatch => i.posStockCurrencyMismatch;
   static String get posStockInsufficient => i.posStockInsufficient;
+  static String get posStockLotRequired => i.posStockLotRequired;
+  static String get posStockLotlessBalance => i.posStockLotlessBalance;
+  static String get posStockLotProjectionMismatch =>
+      i.posStockLotProjectionMismatch;
+  static String get posStockLotsInsufficient => i.posStockLotsInsufficient;
   static String get posStockNegativeResult => i.posStockNegativeResult;
   static String get posStockIdempotencyExists => i.posStockIdempotencyExists;
   static String get posStockInvalidMovement => i.posStockInvalidMovement;
@@ -2819,6 +2839,16 @@ class AppStrings {
   static String get posOpeningBalanceNoProducts =>
       i.posOpeningBalanceNoProducts;
   static String get posOpeningBalanceQuantity => i.posOpeningBalanceQuantity;
+  static String get posOpeningBalanceBatch => i.posOpeningBalanceBatch;
+  static String get posOpeningBalanceAddBatch => i.posOpeningBalanceAddBatch;
+  static String get posOpeningBalanceBatchQuantity =>
+      i.posOpeningBalanceBatchQuantity;
+  static String get posOpeningBalanceBatchExpiry =>
+      i.posOpeningBalanceBatchExpiry;
+  static String get posOpeningBalanceSupplierLot =>
+      i.posOpeningBalanceSupplierLot;
+  static String get posOpeningBalanceBatchSumInvalid =>
+      i.posOpeningBalanceBatchSumInvalid;
   static String posOpeningBalanceQuantityHint(int scale) =>
       i.posOpeningBalanceQuantityHint(scale);
   static String get posOpeningBalanceUnitCost => i.posOpeningBalanceUnitCost;

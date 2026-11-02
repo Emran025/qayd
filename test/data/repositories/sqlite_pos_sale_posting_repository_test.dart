@@ -11,6 +11,7 @@ import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/entities/voucher.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
@@ -20,6 +21,7 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/entry_id.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/transaction_id.dart';
 import 'package:qayd/domain/value_objects/voucher_id.dart';
 import 'package:qayd/domain/value_objects/voucher_type.dart';
@@ -39,8 +41,10 @@ final class _CurrencyRepository implements CurrencyRepository {
       Success([currency]);
 
   @override
-  Future<Result<void>> save(CurrencyCode currency,
-          {bool isPredefined = false}) async =>
+  Future<Result<void>> save(
+    CurrencyCode currency, {
+    bool isPredefined = false,
+  }) async =>
       const Success(null);
 
   @override
@@ -105,7 +109,7 @@ Future<void> _createSchema(Database db) async {
   ''');
   await Migration040PosFoundation().up(db);
   await Migration041PosInvoiceMetadata().up(db);
-  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 45);
+  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 46);
 }
 
 Future<void> _seed(Database db) async {
@@ -196,21 +200,31 @@ PosAccountingPosting _posting({
   );
 }
 
-PosSalePosting _sale({bool invalidCogs = false}) {
+PosSalePosting _sale({
+  bool invalidCogs = false,
+  bool tracked = false,
+  String productId = 'product-1',
+  String? lotId,
+  int quantity = 1,
+  List<PosStockMovement>? stockMovements,
+}) {
   final date = DateTime.utc(2026, 1, 1, 10);
   const invoiceId = 'invoice-1';
+  final salesAmount = quantity * 500;
+  final cogsAmount = quantity * 100;
   final line = PosInvoiceLine.create(
     id: 'line-1',
     invoiceId: invoiceId,
-    productId: 'product-1',
+    productId: productId,
     productNameSnapshot: 'Coffee',
     barcodeSnapshot: '6290001',
-    quantity: PosQuantity.whole(1),
+    quantity: PosQuantity.whole(quantity),
     unitPrice: Money.fromMinorUnits(500, _currency),
     unitCost: Money.fromMinorUnits(100, _currency),
     discount: Money.zero(_currency),
     tax: Money.zero(_currency),
     createdAt: date,
+    expiryTrackingSnapshot: tracked,
   );
   final invoice = PosInvoice.draft(
     id: invoiceId,
@@ -225,23 +239,25 @@ PosSalePosting _sale({bool invalidCogs = false}) {
   ).post(date);
   return PosSalePosting(
     invoice: invoice,
-    movements: [
-      PosStockMovement.create(
-        id: 'sale-movement-1',
-        productId: 'product-1',
-        warehouseId: 'warehouse-1',
-        type: PosStockMovementType.sale,
-        direction: PosStockMovementDirection.outbound,
-        quantity: PosQuantity.whole(1),
-        unitCost: Money.fromMinorUnits(100, _currency),
-        sourceType: 'pos_invoice',
-        sourceId: invoiceId,
-        sourceLineId: 'line-1',
-        occurredAt: date,
-        idempotencyKey: 'sale-stock-key-1',
-        createdAt: date,
-      ),
-    ],
+    movements: stockMovements ??
+        [
+          PosStockMovement.create(
+            id: 'sale-movement-1',
+            productId: productId,
+            warehouseId: 'warehouse-1',
+            type: PosStockMovementType.sale,
+            direction: PosStockMovementDirection.outbound,
+            quantity: PosQuantity.whole(quantity),
+            unitCost: Money.fromMinorUnits(100, _currency),
+            sourceType: 'pos_invoice',
+            sourceId: invoiceId,
+            sourceLineId: 'line-1',
+            lotId: lotId,
+            occurredAt: date,
+            idempotencyKey: 'sale-stock-key-1',
+            createdAt: date,
+          ),
+        ],
     postings: [
       _posting(
         voucherId: 'sale-voucher-1',
@@ -252,7 +268,7 @@ PosSalePosting _sale({bool invalidCogs = false}) {
         type: VoucherType.receipt,
         counterpartyId: 'revenue',
         affectedAccountId: 'cash',
-        amount: 500,
+        amount: salesAmount,
         date: date,
       ),
       _posting(
@@ -265,7 +281,7 @@ PosSalePosting _sale({bool invalidCogs = false}) {
         type: VoucherType.payment,
         counterpartyId: 'cogs',
         affectedAccountId: 'inventory',
-        amount: 100,
+        amount: cogsAmount,
         date: date,
       ),
     ],
@@ -286,8 +302,10 @@ void main() {
       await _createSchema(db);
       await _seed(db);
       final currencyRepository = _CurrencyRepository(_currency);
-      stockRepository =
-          SqlitePosStockMovementRepository(db, currencyRepository);
+      stockRepository = SqlitePosStockMovementRepository(
+        db,
+        currencyRepository,
+      );
       final voucherRepository = SqliteVoucherRepository(
         db,
         DatabaseTransactionRunner(db),
@@ -315,13 +333,163 @@ void main() {
       expect((await db.query('ledger_entries')), hasLength(4));
     });
 
+    test('persists a multi-lot tracked sale and replays it exactly', () async {
+      await db.insert('pos_products', <String, Object?>{
+        'id': 'product-2',
+        'sku': 'SKU-2',
+        'name': 'Tracked coffee',
+        'unit_name': 'unit',
+        'currency_code': _currency.code,
+        'sale_price_minor': 500,
+        'purchase_price_minor': 100,
+        'quantity_scale': 0,
+        'reorder_level_scaled': 0,
+        'expiry_tracking': 1,
+        'is_active': 1,
+        'created_at': '2026-01-01T00:00:00.000Z',
+        'updated_at': '2026-01-01T00:00:00.000Z',
+      });
+      Future<void> receiveLot({
+        required String id,
+        required PosDate expiryDate,
+        required int quantity,
+      }) async {
+        final receivedAt = DateTime.utc(2026, 1, 1, 9);
+        final lot = PosStockLot.create(
+          id: id,
+          productId: 'product-2',
+          warehouseId: 'warehouse-1',
+          supplierLotNumber: 'SUP-$id',
+          expiryDate: expiryDate,
+          receivedQuantity: PosQuantity.whole(quantity),
+          unitCost: Money.fromMinorUnits(100, _currency),
+          createdAt: receivedAt,
+        );
+        expect(
+          (await stockRepository.createLotInTransaction(db, lot)).isSuccess,
+          isTrue,
+        );
+        final receipt = await stockRepository.append(
+          PosStockMovement.create(
+            id: '$id:receipt',
+            productId: 'product-2',
+            warehouseId: 'warehouse-1',
+            type: PosStockMovementType.purchase,
+            direction: PosStockMovementDirection.inbound,
+            quantity: PosQuantity.whole(quantity),
+            unitCost: Money.fromMinorUnits(100, _currency),
+            sourceType: 'test',
+            sourceId: '$id:receipt',
+            lotId: lot.id,
+            occurredAt: receivedAt,
+            idempotencyKey: '$id:receipt-key',
+            createdAt: receivedAt,
+          ),
+        );
+        expect(receipt.isSuccess, isTrue,
+            reason: receipt.failureOrNull?.messageAr);
+      }
+
+      const earlierLotId = 'product-2-lot-early';
+      const laterLotId = 'product-2-lot-late';
+      await receiveLot(
+        id: earlierLotId,
+        expiryDate: PosDate.fromParts(2099, 12, 31),
+        quantity: 2,
+      );
+      await receiveLot(
+        id: laterLotId,
+        expiryDate: PosDate.fromParts(2100, 1, 15),
+        quantity: 2,
+      );
+      final sale = _sale(
+        tracked: true,
+        productId: 'product-2',
+        quantity: 3,
+        stockMovements: [
+          PosStockMovement.create(
+            id: 'sale-movement-1',
+            productId: 'product-2',
+            warehouseId: 'warehouse-1',
+            type: PosStockMovementType.sale,
+            direction: PosStockMovementDirection.outbound,
+            quantity: PosQuantity.whole(2),
+            unitCost: Money.fromMinorUnits(100, _currency),
+            sourceType: 'pos_invoice',
+            sourceId: 'invoice-1',
+            sourceLineId: 'line-1',
+            lotId: earlierLotId,
+            occurredAt: DateTime.utc(2026, 1, 1, 10),
+            idempotencyKey: 'sale-stock-key-1',
+            createdAt: DateTime.utc(2026, 1, 1, 10),
+          ),
+          PosStockMovement.create(
+            id: 'sale-movement-2',
+            productId: 'product-2',
+            warehouseId: 'warehouse-1',
+            type: PosStockMovementType.sale,
+            direction: PosStockMovementDirection.outbound,
+            quantity: PosQuantity.whole(1),
+            unitCost: Money.fromMinorUnits(100, _currency),
+            sourceType: 'pos_invoice',
+            sourceId: 'invoice-1',
+            sourceLineId: 'line-1',
+            lotId: laterLotId,
+            occurredAt: DateTime.utc(2026, 1, 1, 10),
+            idempotencyKey: 'sale-stock-key-2',
+            createdAt: DateTime.utc(2026, 1, 1, 10),
+          ),
+        ],
+      );
+
+      final first = await repository.saveAtomically(sale);
+      final replay = await repository.saveAtomically(sale);
+
+      expect(first.isSuccess, isTrue, reason: first.failureOrNull?.messageAr);
+      expect(replay.isSuccess, isTrue, reason: replay.failureOrNull?.messageAr);
+      final saleMovements = await db.query(
+        'pos_stock_movements',
+        where: 'movement_type = ? AND product_id = ?',
+        whereArgs: ['sale', 'product-2'],
+        orderBy: 'id ASC',
+      );
+      expect(saleMovements, hasLength(2));
+      expect(saleMovements.map((row) => row['lot_id']), [
+        earlierLotId,
+        laterLotId,
+      ]);
+      expect(
+        saleMovements.map((row) => row['quantity_scaled']),
+        [-2, -1],
+      );
+      expect(
+        (await db.query('pos_stock_lots', orderBy: 'id ASC'))
+            .map((row) => row['remaining_quantity_scaled']),
+        [0, 1],
+      );
+      expect(
+          (await db.query('pos_invoice_lines'))
+              .single['expiry_tracking_snapshot'],
+          1);
+      expect(
+        await db.query(
+          'pos_stock_movements',
+          where: 'product_id = ?',
+          whereArgs: ['product-2'],
+        ),
+        hasLength(4),
+      );
+    });
+
     test('replays exact sale without changing persisted rows', () async {
       final sale = _sale();
       expect((await repository.saveAtomically(sale)).isSuccess, isTrue);
       final beforeInvoices = await db.query('pos_invoices');
       final beforeLines = await db.query('pos_invoice_lines');
-      final beforeStock =
-          await db.query('pos_stock_movements', orderBy: 'id ASC');
+      final beforeStock = await db.query(
+        'pos_stock_movements',
+        orderBy: 'id ASC',
+      );
       final beforeVouchers = await db.query('vouchers', orderBy: 'id ASC');
       final beforeLedger = await db.query('ledger_entries', orderBy: 'id ASC');
 
@@ -330,25 +498,35 @@ void main() {
       expect(replay.isSuccess, isTrue);
       expect(await db.query('pos_invoices'), equals(beforeInvoices));
       expect(await db.query('pos_invoice_lines'), equals(beforeLines));
-      expect(await db.query('pos_stock_movements', orderBy: 'id ASC'),
-          equals(beforeStock));
-      expect(await db.query('vouchers', orderBy: 'id ASC'),
-          equals(beforeVouchers));
-      expect(await db.query('ledger_entries', orderBy: 'id ASC'),
-          equals(beforeLedger));
+      expect(
+        await db.query('pos_stock_movements', orderBy: 'id ASC'),
+        equals(beforeStock),
+      );
+      expect(
+        await db.query('vouchers', orderBy: 'id ASC'),
+        equals(beforeVouchers),
+      );
+      expect(
+        await db.query('ledger_entries', orderBy: 'id ASC'),
+        equals(beforeLedger),
+      );
     });
 
-    test('rolls back stock and invoice when a voucher write is invalid',
-        () async {
-      final result = await repository.saveAtomically(_sale(invalidCogs: true));
+    test(
+      'rolls back stock and invoice when a voucher write is invalid',
+      () async {
+        final result = await repository.saveAtomically(
+          _sale(invalidCogs: true),
+        );
 
-      expect(result.isFailure, isTrue);
-      expect((await db.query('pos_invoices')), isEmpty);
-      expect((await db.query('pos_invoice_lines')), isEmpty);
-      expect((await db.query('pos_stock_movements')), hasLength(1));
-      expect((await db.query('vouchers')), isEmpty);
-      expect((await db.query('ledger_entries')), isEmpty);
-    });
+        expect(result.isFailure, isTrue);
+        expect((await db.query('pos_invoices')), isEmpty);
+        expect((await db.query('pos_invoice_lines')), isEmpty);
+        expect((await db.query('pos_stock_movements')), hasLength(1));
+        expect((await db.query('vouchers')), isEmpty);
+        expect((await db.query('ledger_entries')), isEmpty);
+      },
+    );
 
     test('fails closed for a partial invoice state', () async {
       final sale = _sale();

@@ -22,6 +22,7 @@ import 'package:qayd/domain/value_objects/account_nature.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 
 class _Products extends Mock implements PosProductRepository {}
 
@@ -37,8 +38,10 @@ void main() {
   Account account(String id) => Account.createRoot(
         id: AccountId(id),
         name: id,
-        classification:
-            AccountClassification.custom(name: id, nature: AccountNature.debit),
+        classification: AccountClassification.custom(
+          name: id,
+          nature: AccountNature.debit,
+        ),
         createdAt: DateTime.utc(2026),
       );
   PosProduct product({bool expiry = false}) => PosProduct.create(
@@ -50,26 +53,34 @@ void main() {
         purchasePrice: Money.fromMinorUnits(100, currency),
         expiryTracking: expiry,
       );
-  BuildPosPurchasePostingUseCase useCase(PosProduct value,
-      {Map<String, String>? mapping}) {
+  BuildPosPurchasePostingUseCase useCase(
+    PosProduct value, {
+    Map<String, String>? mapping,
+  }) {
     final products = _Products(),
         installation = _Installation(),
         accounts = _Accounts();
     when(() => products.getById('product-1'))
         .thenAnswer((_) async => Success(value));
-    when(() => installation.getEnabledInstallation(
-            template: any(named: 'template')))
-        .thenAnswer((_) async => Success(PosActivationResult(
-            templateKey: PosTemplateDefinition.coreTemplateKey,
-            templateVersion: PosTemplateDefinition.currentVersion,
-            warehouseId: 'warehouse-1',
-            alreadyInstalled: true,
-            accountIdsByKey: mapping ??
-                {
-                  PosTemplateAccountKey.inventoryAsset.value: 'inventory',
-                  PosTemplateAccountKey.supplierPayables.value: 'payables',
-                  PosTemplateAccountKey.posCash.value: 'cash',
-                })));
+    when(
+      () =>
+          installation.getEnabledInstallation(template: any(named: 'template')),
+    ).thenAnswer(
+      (_) async => Success(
+        PosActivationResult(
+          templateKey: PosTemplateDefinition.coreTemplateKey,
+          templateVersion: PosTemplateDefinition.currentVersion,
+          warehouseId: 'warehouse-1',
+          alreadyInstalled: true,
+          accountIdsByKey: mapping ??
+              {
+                PosTemplateAccountKey.inventoryAsset.value: 'inventory',
+                PosTemplateAccountKey.supplierPayables.value: 'payables',
+                PosTemplateAccountKey.posCash.value: 'cash',
+              },
+        ),
+      ),
+    );
     for (final id in ['inventory', 'payables', 'cash', 'supplier']) {
       when(() => accounts.getById(AccountId(id)))
           .thenAnswer((_) async => Success(account(id)));
@@ -82,10 +93,12 @@ void main() {
     );
   }
 
-  BuildPosPurchasePostingInput input(
-          {PosPaymentMethod method = PosPaymentMethod.credit,
-          int advance = 0,
-          bool withSupplier = true}) =>
+  BuildPosPurchasePostingInput input({
+    PosPaymentMethod method = PosPaymentMethod.credit,
+    int advance = 0,
+    bool withSupplier = true,
+    List<BuildPosPurchaseBatchInput> batches = const [],
+  }) =>
       BuildPosPurchasePostingInput(
         invoiceId: 'purchase-1',
         invoiceNumber: 'P-1',
@@ -93,7 +106,10 @@ void main() {
         currency: currency,
         lines: [
           BuildPosPurchaseLineInput(
-              productId: 'product-1', quantity: PosQuantity.whole(2))
+            productId: 'product-1',
+            quantity: PosQuantity.whole(2),
+            batches: batches,
+          ),
         ],
         idempotencyKey: 'purchase-key-1',
         invoiceDate: DateTime.utc(2026, 1, 10),
@@ -103,120 +119,174 @@ void main() {
         paymentMethod: method,
       );
 
-  test('builds a credit purchase with inbound movement and balanced payable',
-      () async {
-    final result = await useCase(product())(input());
+  test(
+    'builds a credit purchase with inbound movement and balanced payable',
+    () async {
+      final result = await useCase(product())(input());
+      expect(result.isSuccess, isTrue);
+      final posting = result.valueOrNull!;
+      expect(posting.invoice.type, PosInvoiceType.purchase);
+      expect(posting.movements.single.direction.name, 'inbound');
+      expect(posting.movements.single.type, PosStockMovementType.purchase);
+      expect(posting.postings.single.voucher.amount.minorUnits, 200);
+    },
+  );
+
+  test(
+    'rebuilds the same request with stable invoice, movement, and ledger IDs',
+    () async {
+      final builder = useCase(product());
+      final request = input();
+      final first = (await builder(request)).valueOrNull!;
+      final replay = (await builder(request)).valueOrNull!;
+      expect(replay.invoice.lines.single.id, first.invoice.lines.single.id);
+      expect(replay.movements.single.id, first.movements.single.id);
+      expect(
+        replay.postings.single.voucher.id,
+        first.postings.single.voucher.id,
+      );
+      expect(
+        replay.postings.single.entries.map((entry) => entry.id).toList(),
+        first.postings.single.entries.map((entry) => entry.id).toList(),
+      );
+    },
+  );
+
+  test('receives a tracked purchase across two dated lots', () async {
+    final result = await useCase(product(expiry: true))(
+      input(
+        batches: [
+          BuildPosPurchaseBatchInput(
+            id: 'lot-1',
+            quantity: PosQuantity.whole(1),
+            expiryDate: PosDate.fromParts(2026, 1, 20),
+            supplierLotNumber: 'SUP-20',
+          ),
+          BuildPosPurchaseBatchInput(
+            id: 'lot-2',
+            quantity: PosQuantity.whole(1),
+            expiryDate: PosDate.fromParts(2026, 1, 11),
+            supplierLotNumber: 'SUP-11',
+          ),
+        ],
+      ),
+    );
+
     expect(result.isSuccess, isTrue);
     final posting = result.valueOrNull!;
-    expect(posting.invoice.type, PosInvoiceType.purchase);
-    expect(posting.movements.single.direction.name, 'inbound');
-    expect(posting.movements.single.type, PosStockMovementType.purchase);
-    expect(posting.postings.single.voucher.amount.minorUnits, 200);
+    expect(posting.invoice.lines.single.expiryTrackingSnapshot, isTrue);
+    expect(posting.lots.map((lot) => lot.id), ['lot-1', 'lot-2']);
+    expect(posting.lots.last.expiryDate, PosDate.fromParts(2026, 1, 11));
+    expect(posting.movements.map((movement) => movement.lotId), [
+      'lot-1',
+      'lot-2',
+    ]);
   });
 
   test(
-      'rebuilds the same request with stable invoice, movement, and ledger IDs',
-      () async {
-    final builder = useCase(product());
-    final request = input();
-    final first = (await builder(request)).valueOrNull!;
-    final replay = (await builder(request)).valueOrNull!;
-    expect(replay.invoice.lines.single.id, first.invoice.lines.single.id);
-    expect(replay.movements.single.id, first.movements.single.id);
-    expect(replay.postings.single.voucher.id, first.postings.single.voucher.id);
-    expect(
-      replay.postings.single.entries.map((entry) => entry.id).toList(),
-      first.postings.single.entries.map((entry) => entry.id).toList(),
-    );
-  });
-
-  test('rejects expiry-tracked products until lot persistence is available',
-      () async {
-    final result = await useCase(product(expiry: true))(input());
-    expect(result.isFailure, isTrue);
-  });
+    'rejects tracked purchases whose lot quantities do not match the line',
+    () async {
+      final result = await useCase(product(expiry: true))(
+        input(
+          batches: [
+            BuildPosPurchaseBatchInput(
+              id: 'lot-1',
+              quantity: PosQuantity.whole(1),
+              expiryDate: PosDate.fromParts(2026, 1, 20),
+            ),
+          ],
+        ),
+      );
+      expect(result.isFailure, isTrue);
+    },
+  );
 
   test('rejects bank payment when no mapped bank account exists', () async {
     final result = await useCase(product())(
-        input(method: PosPaymentMethod.bank, advance: 50));
+      input(method: PosPaymentMethod.bank, advance: 50),
+    );
     expect(result.isFailure, isTrue);
   });
 
-  test('builds a fully paid cash purchase with a matching payment voucher',
-      () async {
-    final result = await useCase(product())(
-      input(method: PosPaymentMethod.cash, advance: 200),
-    );
-    expect(result.isSuccess, isTrue);
-    final posting = result.valueOrNull!;
-    expect(posting.invoice.status.name, 'paid');
-    expect(posting.payments.single.amount.minorUnits, 200);
-    expect(posting.postings.single.voucher.counterpartyId, AccountId('cash'));
-  });
+  test(
+    'builds a fully paid cash purchase with a matching payment voucher',
+    () async {
+      final result = await useCase(product())(
+        input(method: PosPaymentMethod.cash, advance: 200),
+      );
+      expect(result.isSuccess, isTrue);
+      final posting = result.valueOrNull!;
+      expect(posting.invoice.status.name, 'paid');
+      expect(posting.payments.single.amount.minorUnits, 200);
+      expect(posting.postings.single.voucher.counterpartyId, AccountId('cash'));
+    },
+  );
 
   test('requires a supplier account when any amount remains due', () async {
     final result = await useCase(product())(input(withSupplier: false));
     expect(result.isFailure, isTrue);
   });
 
-  test('converts purchase cost and preserves the proposed price until approved',
-      () async {
-    const usd = CurrencyCode(code: 'USD', nameAr: 'دولار', symbol: r'$');
-    final usdProduct = PosProduct.create(
-      id: 'product-1',
-      sku: 'SKU-1',
-      name: 'Item',
-      currency: usd,
-      salePrice: Money.fromMinorUnits(500, usd),
-      purchasePrice: Money.fromMinorUnits(80, usd),
-      profitMargin: PosProfitMargin.percentage(5000),
-    );
-    final recordedAt = DateTime.utc(2026, 1, 9, 12);
-    final quote = PosCurrencyRateQuote(
-      rateId: 'rate-sar-usd',
-      storedFromCurrency: currency,
-      storedToCurrency: usd,
-      storedRateScaled: 50000000,
-      requestedFromCurrency: currency,
-      requestedToCurrency: usd,
-      effectiveAt: recordedAt,
-      recordedAt: recordedAt,
-      createdAt: recordedAt,
-      isInverted: false,
-    );
-    final request = BuildPosPurchasePostingInput(
-      invoiceId: 'purchase-fx',
-      invoiceNumber: 'P-FX',
-      warehouseId: 'warehouse-1',
-      currency: currency,
-      lines: [
-        BuildPosPurchaseLineInput(
-          productId: usdProduct.id,
-          quantity: PosQuantity.whole(2),
-          unitCostMinor: 200,
-          rateSnapshot: quote,
-          productUpdatedAtSnapshot: usdProduct.updatedAt,
-        ),
-      ],
-      idempotencyKey: 'purchase-fx-key',
-      invoiceDate: DateTime.utc(2026, 1, 10),
-      createdAt: DateTime.utc(2026, 1, 10),
-      supplierAccountId: AccountId('supplier'),
-    );
+  test(
+    'converts purchase cost and preserves the proposed price until approved',
+    () async {
+      const usd = CurrencyCode(code: 'USD', nameAr: 'دولار', symbol: r'$');
+      final usdProduct = PosProduct.create(
+        id: 'product-1',
+        sku: 'SKU-1',
+        name: 'Item',
+        currency: usd,
+        salePrice: Money.fromMinorUnits(500, usd),
+        purchasePrice: Money.fromMinorUnits(80, usd),
+        profitMargin: PosProfitMargin.percentage(5000),
+      );
+      final recordedAt = DateTime.utc(2026, 1, 9, 12);
+      final quote = PosCurrencyRateQuote(
+        rateId: 'rate-sar-usd',
+        storedFromCurrency: currency,
+        storedToCurrency: usd,
+        storedRateScaled: 50000000,
+        requestedFromCurrency: currency,
+        requestedToCurrency: usd,
+        effectiveAt: recordedAt,
+        recordedAt: recordedAt,
+        createdAt: recordedAt,
+        isInverted: false,
+      );
+      final request = BuildPosPurchasePostingInput(
+        invoiceId: 'purchase-fx',
+        invoiceNumber: 'P-FX',
+        warehouseId: 'warehouse-1',
+        currency: currency,
+        lines: [
+          BuildPosPurchaseLineInput(
+            productId: usdProduct.id,
+            quantity: PosQuantity.whole(2),
+            unitCostMinor: 200,
+            rateSnapshot: quote,
+            productUpdatedAtSnapshot: usdProduct.updatedAt,
+          ),
+        ],
+        idempotencyKey: 'purchase-fx-key',
+        invoiceDate: DateTime.utc(2026, 1, 10),
+        createdAt: DateTime.utc(2026, 1, 10),
+        supplierAccountId: AccountId('supplier'),
+      );
 
-    final result = await useCase(usdProduct)(request);
+      final result = await useCase(usdProduct)(request);
 
-    expect(result.isSuccess, isTrue);
-    final line = result.valueOrNull!.invoice.lines.single;
-    expect(line.unitPrice.currency, currency);
-    expect(line.unitCost.currency, usd);
-    expect(line.unitCost.minorUnits, 100);
-    expect(line.currencyConversion?.sourceAmount.minorUnits, 200);
-    expect(line.currencyConversion?.targetAmount.minorUnits, 100);
-    expect(line.currencyConversion?.rateSnapshot?.rateId, 'rate-sar-usd');
-    expect(line.proposedSalePrice?.minorUnits, 150);
-    expect(line.proposedSalePriceApplied, isFalse);
-    expect(result.valueOrNull!.movements.single.unitCost.currency, usd);
-    expect(result.valueOrNull!.postings.single.voucher.currency, currency);
-  });
+      expect(result.isSuccess, isTrue);
+      final line = result.valueOrNull!.invoice.lines.single;
+      expect(line.unitPrice.currency, currency);
+      expect(line.unitCost.currency, usd);
+      expect(line.unitCost.minorUnits, 100);
+      expect(line.currencyConversion?.sourceAmount.minorUnits, 200);
+      expect(line.currencyConversion?.targetAmount.minorUnits, 100);
+      expect(line.currencyConversion?.rateSnapshot?.rateId, 'rate-sar-usd');
+      expect(line.proposedSalePrice?.minorUnits, 150);
+      expect(line.proposedSalePriceApplied, isFalse);
+      expect(result.valueOrNull!.movements.single.unitCost.currency, usd);
+      expect(result.valueOrNull!.postings.single.voucher.currency, currency);
+    },
+  );
 }

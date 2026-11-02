@@ -1,22 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/data/database/migrations/migration_040_pos_foundation.dart';
+import 'package:qayd/data/database/migrations/migration_046_pos_stock_lots_fefo.dart';
 import 'package:qayd/data/database/transaction_runner.dart';
 import 'package:qayd/data/repositories/sqlite_pos_accounting_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_stock_movement_repository.dart';
 import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
-import 'package:qayd/domain/entities/ledger_entry.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
-import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
-import 'package:qayd/domain/value_objects/entry_id.dart';
-import 'package:qayd/domain/value_objects/entry_side.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
-import 'package:qayd/domain/value_objects/transaction_id.dart';
-import 'package:qayd/domain/value_objects/voucher_id.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/application/pos/build_pos_opening_balance_posting_use_case.dart';
 import 'package:qayd/application/pos/build_pos_stock_adjustment_posting_use_case.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -127,6 +124,7 @@ Future<void> _createSchema(Database db) async {
     )
   ''');
   await Migration040PosFoundation().up(db);
+  await Migration046PosStockLotsFefo().up(db);
 }
 
 Future<void> _seed(Database db, CurrencyCode currency) async {
@@ -172,6 +170,7 @@ PosStockMovement _movement(
   CurrencyCode currency, {
   String key = 'opening-key',
   String sourceId = 'source-1',
+  String? lotId,
   DateTime? occurredAt,
 }) {
   final date = occurredAt ?? DateTime.utc(2026, 1, 1, 10);
@@ -183,13 +182,26 @@ PosStockMovement _movement(
     direction: PosStockMovementDirection.inbound,
     quantity: PosQuantity.whole(5),
     unitCost: Money.fromMinorUnits(100, currency),
-    sourceType: 'opening',
+    sourceType: 'opening_balance',
     sourceId: sourceId,
+    lotId: lotId,
     occurredAt: date,
     idempotencyKey: key,
     createdAt: date,
   );
 }
+
+PosStockLot _openingLot(CurrencyCode currency, {String id = 'opening-lot-1'}) =>
+    PosStockLot.create(
+      id: id,
+      productId: 'product-1',
+      warehouseId: 'warehouse-1',
+      supplierLotNumber: 'OPEN-1',
+      expiryDate: PosDate.fromParts(2026, 12, 31),
+      receivedQuantity: PosQuantity.whole(5),
+      unitCost: Money.fromMinorUnits(100, currency),
+      createdAt: DateTime.utc(2026, 1, 1, 10),
+    );
 
 Future<PosAccountingPosting> _buildPosting(
   CurrencyCode currency, {
@@ -330,6 +342,41 @@ void main() {
       expect(afterReplay, equals(beforeReplay));
     });
 
+    test('atomically saves and replays a tracked opening lot', () async {
+      await db.update(
+        'pos_products',
+        {'expiry_tracking': 1},
+        where: 'id = ?',
+        whereArgs: ['product-1'],
+      );
+      final lot = _openingLot(currency);
+      final movement = _movement(currency, lotId: lot.id);
+      final posting = await _buildPosting(currency);
+
+      final first = await repository.saveOpeningBalance(
+        movement: movement,
+        lots: [lot],
+        posting: posting,
+      );
+      final replay = await repository.saveOpeningBalance(
+        movement: movement,
+        lots: [lot],
+        posting: posting,
+      );
+
+      expect(first.isSuccess, isTrue, reason: first.failureOrNull?.messageAr);
+      expect(replay.isSuccess, isTrue, reason: replay.failureOrNull?.messageAr);
+      expect(await db.query('pos_stock_lots'), hasLength(1));
+      expect(await db.query('pos_stock_movements'), hasLength(1));
+      expect((await db.query('pos_stock_movements')).single['lot_id'], lot.id);
+      expect(
+          (await db.query('pos_stock_lots'))
+              .single['remaining_quantity_scaled'],
+          5);
+      expect(await db.query('vouchers'), hasLength(1));
+      expect(await db.query('ledger_entries'), hasLength(2));
+    });
+
     test('compares posting and movement by UTC business date', () async {
       final movement = _movement(
         currency,
@@ -416,34 +463,43 @@ void main() {
       expect((await db.query('ledger_entries')), isEmpty);
     });
 
-    test('rolls back stock when voucher validation fails', () async {
+    test('rolls back tracked lot and stock when ledger insertion conflicts',
+        () async {
+      await db.update(
+        'pos_products',
+        {'expiry_tracking': 1},
+        where: 'id = ?',
+        whereArgs: ['product-1'],
+      );
+      final lot = _openingLot(currency);
       final valid = await _buildPosting(currency, voucherId: 'voucher-bad');
-      final invalidEntry = LedgerEntry.create(
-        id: EntryId('bad-entry'),
-        transactionId: TransactionId('transaction-bad'),
-        accountId: AccountId('inventory-account'),
-        side: EntrySide.debit,
-        amount: Money.fromMinorUnits(500, currency),
-        currency: currency,
-        voucherId: VoucherId('different-voucher'),
-        date: valid.voucher.date,
-        createdAt: valid.voucher.createdAt,
-      );
-      final invalidPosting = PosAccountingPosting(
-        sourceId: valid.sourceId,
-        voucher: valid.voucher,
-        entries: [invalidEntry],
-      );
+      await db.insert('ledger_entries', <String, Object?>{
+        'id': 'debit-voucher-bad',
+        'transaction_id': 'existing-transaction',
+        'account_id': 'inventory-account',
+        'side': 'debit',
+        'amount_minor': 1,
+        'currency_code': currency.code,
+        'voucher_id': 'existing-voucher',
+        'date': valid.voucher.date.toIso8601String(),
+        'created_at': valid.voucher.createdAt.toIso8601String(),
+      });
 
       final result = await repository.saveOpeningBalance(
-        movement: _movement(currency, key: 'rollback-key'),
-        posting: invalidPosting,
+        movement: _movement(
+          currency,
+          key: 'rollback-key',
+          lotId: lot.id,
+        ),
+        lots: [lot],
+        posting: valid,
       );
 
       expect(result.isFailure, isTrue);
+      expect((await db.query('pos_stock_lots')), isEmpty);
       expect((await db.query('pos_stock_movements')), isEmpty);
       expect((await db.query('vouchers')), isEmpty);
-      expect((await db.query('ledger_entries')), isEmpty);
+      expect((await db.query('ledger_entries')), hasLength(1));
     });
 
     test('commits a stock-count adjustment and balanced ledger atomically',
