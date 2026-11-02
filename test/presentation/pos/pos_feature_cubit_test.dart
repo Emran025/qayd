@@ -30,10 +30,15 @@ final class _GovernanceRepo implements GovernanceRepository {
 }
 
 final class _PosRepo implements PosActivationRepository {
-  _PosRepo({this.enabled = false, this.failInstall = false});
+  _PosRepo({
+    this.enabled = false,
+    this.failInstall = false,
+    this.templateVersion = PosTemplateDefinition.currentVersion,
+  });
 
   bool enabled;
   bool failInstall;
+  int templateVersion;
   int installCalls = 0;
   int disableCalls = 0;
 
@@ -50,6 +55,7 @@ final class _PosRepo implements PosActivationRepository {
       );
     }
     enabled = true;
+    templateVersion = template.version;
     return Success(
       PosActivationResult(
         templateKey: template.templateKey,
@@ -63,6 +69,10 @@ final class _PosRepo implements PosActivationRepository {
 
   @override
   Future<Result<bool>> isEnabled() async => Success(enabled);
+
+  @override
+  Future<Result<int?>> getInstalledTemplateVersion() async =>
+      Success(enabled ? templateVersion : null);
 
   @override
   Future<Result<String?>> getEnabledWarehouseId() async =>
@@ -127,6 +137,26 @@ void main() {
       expect(cubit.state.status, PosFeatureStatus.disabled);
       expect(cubit.state.isEnabled, isFalse);
       expect(repo.disableCalls, 1);
+    });
+
+    test('requires an explicit activation to upgrade an older template',
+        () async {
+      final repo = _PosRepo(enabled: true, templateVersion: 2);
+      final cubit = _createCubit(repo);
+      addTearDown(cubit.close);
+
+      await cubit.load();
+
+      expect(cubit.state.isEnabled, isTrue);
+      expect(cubit.state.requiresUpgrade, isTrue);
+      expect(repo.installCalls, 0);
+
+      await cubit.activate();
+
+      expect(cubit.state.status, PosFeatureStatus.upgraded);
+      expect(cubit.state.requiresUpgrade, isFalse);
+      expect(repo.templateVersion, PosTemplateDefinition.currentVersion);
+      expect(repo.installCalls, 1);
     });
 
     test('maps installation failure to failure state', () async {

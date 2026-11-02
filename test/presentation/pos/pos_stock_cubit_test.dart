@@ -94,6 +94,13 @@ final class _StockRepository implements PosStockMovementRepository {
       const Success([]);
 
   @override
+  Future<Result<List<PosStockLot>>> getDisposalLots({
+    required String productId,
+    required String warehouseId,
+  }) async =>
+      const Success([]);
+
+  @override
   Future<Result<List<PosStockMovement>>> listMovementsForSource({
     required String sourceType,
     required String sourceId,

@@ -16,4 +16,11 @@ abstract interface class PosAccountingPostingRepository {
     required PosStockMovement movement,
     required PosAccountingPosting posting,
   });
+
+  /// Atomically records a disposal or its linked reversal with voucher and
+  /// ledger entries. This is the only persistence path for those movements.
+  Future<Result<void>> saveStockDisposalAtomically({
+    required PosStockMovement movement,
+    required PosAccountingPosting posting,
+  });
 }

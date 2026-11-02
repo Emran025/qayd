@@ -12,6 +12,9 @@ abstract interface class PosActivationRepository {
 
   Future<Result<bool>> isEnabled();
 
+  /// Returns the template version in the current POS settings without mutation.
+  Future<Result<int?>> getInstalledTemplateVersion();
+
   Future<Result<String?>> getEnabledWarehouseId();
 
   Future<Result<void>> disable();

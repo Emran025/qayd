@@ -19,6 +19,13 @@ abstract interface class PosStockMovementRepository {
     required PosDate businessDate,
   });
 
+  /// Returns reconciled, non-empty lots including expired lots for controlled
+  /// disposal selection. The atomic writer must revalidate the selected lot.
+  Future<Result<List<PosStockLot>>> getDisposalLots({
+    required String productId,
+    required String warehouseId,
+  });
+
   /// Reads the immutable allocation movements associated with a source
   /// document. This is used to route sales returns back to their original lots.
   Future<Result<List<PosStockMovement>>> listMovementsForSource({

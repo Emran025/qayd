@@ -53,6 +53,9 @@ final class _FakePosActivationRepository implements PosActivationRepository {
   Future<Result<bool>> isEnabled() async => const Success(false);
 
   @override
+  Future<Result<int?>> getInstalledTemplateVersion() async => const Success(null);
+
+  @override
   Future<Result<String?>> getEnabledWarehouseId() async => const Success(null);
 }
 

@@ -45,6 +45,8 @@ final class _PosFeatureSettingsViewState
       listener: (context, state) {
         if (state.status == PosFeatureStatus.active) {
           _showMessage(AppStrings.posFeatureActivationSuccess);
+        } else if (state.status == PosFeatureStatus.upgraded) {
+          _showMessage(AppStrings.posFeatureUpgradeSuccess);
         } else if (state.status == PosFeatureStatus.disabled) {
           _showMessage(AppStrings.posFeatureDisableSuccess);
         } else if (state.status == PosFeatureStatus.failure &&
@@ -65,8 +67,9 @@ final class _PosFeatureSettingsViewState
               if (state.status == PosFeatureStatus.failure &&
                   state.failure != null)
                 _buildFailureCard(context, state.failure!.messageAr),
-              if (!state.isEnabled && !state.isBusy) ...[
-                _buildWarningCard(context),
+              if ((!state.isEnabled || state.requiresUpgrade) &&
+                  !state.isBusy) ...[
+                _buildWarningCard(context, state),
                 const SizedBox(height: SpacingTokens.lg),
               ],
               _buildAction(context, state),
@@ -130,12 +133,14 @@ final class _PosFeatureSettingsViewState
                 padding: EdgeInsets.only(top: 8),
                 child: LinearProgressIndicator(),
               )
-            : null,
+            : state.requiresUpgrade
+                ? Text(AppStrings.posFeatureUpgradeRequired)
+                : null,
       ),
     );
   }
 
-  Widget _buildWarningCard(BuildContext context) {
+  Widget _buildWarningCard(BuildContext context, PosFeatureState state) {
     final theme = Theme.of(context);
     return Card(
       color: theme.colorScheme.secondaryContainer,
@@ -148,7 +153,9 @@ final class _PosFeatureSettingsViewState
             const SizedBox(width: SpacingTokens.sm),
             Expanded(
               child: Text(
-                AppStrings.posFeatureActivationWarning,
+                state.requiresUpgrade
+                    ? AppStrings.posFeatureUpgradeWarning
+                    : AppStrings.posFeatureActivationWarning,
                 style: TextStyle(color: theme.colorScheme.onSecondaryContainer),
               ),
             ),
@@ -177,6 +184,13 @@ final class _PosFeatureSettingsViewState
       return const Center(child: CircularProgressIndicator());
     }
     if (state.isEnabled) {
+      if (state.requiresUpgrade) {
+        return FilledButton.icon(
+          onPressed: () => _confirmActivation(context),
+          icon: const Icon(Icons.upgrade_rounded),
+          label: Text(AppStrings.posFeatureUpgrade),
+        );
+      }
       return OutlinedButton.icon(
         onPressed: () => context.read<PosFeatureCubit>().disable(),
         icon: const Icon(Icons.visibility_off_outlined),
@@ -192,11 +206,18 @@ final class _PosFeatureSettingsViewState
 
   Future<void> _confirmActivation(BuildContext context) async {
     final cubit = context.read<PosFeatureCubit>();
+    final upgrading = cubit.state.requiresUpgrade;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(AppStrings.posFeatureActivate),
-        content: Text(AppStrings.posFeatureActivationWarning),
+        title: Text(
+          upgrading ? AppStrings.posFeatureUpgrade : AppStrings.posFeatureActivate,
+        ),
+        content: Text(
+          upgrading
+              ? AppStrings.posFeatureUpgradeWarning
+              : AppStrings.posFeatureActivationWarning,
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -204,7 +225,11 @@ final class _PosFeatureSettingsViewState
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(AppStrings.posFeatureConfirm),
+            child: Text(
+              upgrading
+                  ? AppStrings.posFeatureConfirmUpgrade
+                  : AppStrings.posFeatureConfirm,
+            ),
           ),
         ],
       ),

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/data/database/migrations/migration_040_pos_foundation.dart';
 import 'package:qayd/data/database/migrations/migration_046_pos_stock_lots_fefo.dart';
+import 'package:qayd/data/database/migrations/migration_047_pos_stock_disposal.dart';
 import 'package:qayd/data/database/transaction_runner.dart';
 import 'package:qayd/data/repositories/sqlite_pos_accounting_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_stock_movement_repository.dart';
@@ -14,8 +15,10 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/domain/value_objects/pos_date.dart';
+import 'package:qayd/domain/value_objects/pos_stock_disposal_reason.dart';
 import 'package:qayd/application/pos/build_pos_opening_balance_posting_use_case.dart';
 import 'package:qayd/application/pos/build_pos_stock_adjustment_posting_use_case.dart';
+import 'package:qayd/application/pos/build_pos_stock_disposal_posting_use_case.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 final class _CurrencyRepository implements CurrencyRepository {
@@ -125,6 +128,7 @@ Future<void> _createSchema(Database db) async {
   ''');
   await Migration040PosFoundation().up(db);
   await Migration046PosStockLotsFefo().up(db);
+  await Migration047PosStockDisposal().up(db);
 }
 
 Future<void> _seed(Database db, CurrencyCode currency) async {
@@ -271,6 +275,77 @@ Future<PosAccountingPosting> _buildAdjustmentPosting(
       reason: 'Stock count variance',
       date: date,
       createdAt: date,
+    ),
+  );
+  return result.valueOrNull!;
+}
+
+PosStockMovement _disposalMovement(
+  CurrencyCode currency, {
+  String key = 'disposal-key-1',
+  String sourceId = 'disposal-source-1',
+  String voucherId = 'disposal-voucher-1',
+  int quantity = 2,
+  PosStockDisposalReason reason = PosStockDisposalReason.damage,
+  String? lotId,
+  String? reasonDetail,
+}) {
+  final date = DateTime.utc(2026, 1, 1, 11);
+  final type = switch (reason) {
+    PosStockDisposalReason.damage => PosStockMovementType.damage,
+    PosStockDisposalReason.expiry => PosStockMovementType.expiry,
+    PosStockDisposalReason.authorizedLoss => PosStockMovementType.adjustment,
+    PosStockDisposalReason.other => PosStockMovementType.adjustment,
+  };
+  return PosStockMovement.create(
+    id: 'movement-$key',
+    productId: 'product-1',
+    warehouseId: 'warehouse-1',
+    type: type,
+    direction: PosStockMovementDirection.outbound,
+    quantity: PosQuantity.whole(quantity),
+    unitCost: Money.fromMinorUnits(100, currency),
+    sourceType: 'stock_disposal',
+    sourceId: sourceId,
+    lotId: lotId,
+    disposalReason: reason,
+    reasonDetail: reasonDetail,
+    voucherId: voucherId,
+    occurredAt: date,
+    idempotencyKey: key,
+    createdAt: date,
+  );
+}
+
+Future<PosAccountingPosting> _buildDisposalPosting(
+  CurrencyCode currency, {
+  String sourceId = 'disposal-source-1',
+  String voucherId = 'disposal-voucher-1',
+  int amount = 200,
+  PosStockMovementDirection direction = PosStockMovementDirection.outbound,
+  PosStockDisposalReason? reason = PosStockDisposalReason.damage,
+  String? reasonDetail,
+  String? reversalOfSourceId,
+  DateTime? date,
+}) async {
+  final postingDate = date ?? DateTime.utc(2026, 1, 1, 11);
+  final result = await const BuildPosStockDisposalPostingUseCase()(
+    BuildPosStockDisposalPostingInput(
+      sourceId: sourceId,
+      voucherId: voucherId,
+      transactionId: 'transaction-$voucherId',
+      debitEntryId: 'debit-$voucherId',
+      creditEntryId: 'credit-$voucherId',
+      inventoryAccountId: 'inventory-account',
+      lossAccountId: 'variance-account',
+      direction: direction,
+      amountMinorUnits: amount,
+      currency: currency,
+      date: postingDate,
+      createdAt: postingDate,
+      reason: reason,
+      reasonDetail: reasonDetail,
+      reversalOfSourceId: reversalOfSourceId,
     ),
   );
   return result.valueOrNull!;
@@ -550,6 +625,246 @@ void main() {
       expect((await db.query('pos_stock_movements')), hasLength(2));
       expect((await db.query('vouchers')), hasLength(2));
       expect(await db.query('ledger_entries', orderBy: 'id ASC'), before);
+    });
+
+    test('commits and replays disposal movement and balanced loss posting',
+        () async {
+      await repository.saveOpeningBalance(
+        movement: _movement(currency),
+        posting: await _buildPosting(currency),
+      );
+      final movement = _disposalMovement(currency);
+      final posting = await _buildDisposalPosting(currency);
+
+      final first = await repository.saveStockDisposalAtomically(
+        movement: movement,
+        posting: posting,
+      );
+      final replay = await repository.saveStockDisposalAtomically(
+        movement: movement,
+        posting: posting,
+      );
+
+      expect(first.isSuccess, isTrue, reason: first.failureOrNull?.messageAr);
+      expect(replay.isSuccess, isTrue, reason: replay.failureOrNull?.messageAr);
+      expect(await db.query('pos_stock_movements'), hasLength(2));
+      final savedMovement = (await db.query(
+        'pos_stock_movements',
+        where: 'source_id = ?',
+        whereArgs: ['disposal-source-1'],
+      )).single;
+      expect(savedMovement['movement_type'], 'damage');
+      expect(savedMovement['quantity_scaled'], -2);
+      expect(savedMovement['disposal_reason_code'], 'damage');
+      expect(savedMovement['voucher_id'], 'disposal-voucher-1');
+      expect(await db.query('vouchers'), hasLength(2));
+      final entries = await db.query(
+        'ledger_entries',
+        where: 'voucher_id = ?',
+        whereArgs: ['disposal-voucher-1'],
+      );
+      expect(entries, hasLength(2));
+      expect(
+        entries.singleWhere((row) => row['side'] == 'debit')['account_id'],
+        'variance-account',
+      );
+      expect(
+        entries.singleWhere((row) => row['side'] == 'credit')['account_id'],
+        'inventory-account',
+      );
+    });
+
+    test('allows full disposal and leaves no negative stock or value', () async {
+      await repository.saveOpeningBalance(
+        movement: _movement(currency),
+        posting: await _buildPosting(currency),
+      );
+      final movement = _disposalMovement(
+        currency,
+        key: 'full-disposal-key',
+        sourceId: 'full-disposal-source',
+        voucherId: 'full-disposal-voucher',
+        quantity: 5,
+      );
+
+      final result = await repository.saveStockDisposalAtomically(
+        movement: movement,
+        posting: await _buildDisposalPosting(
+          currency,
+          sourceId: 'full-disposal-source',
+          voucherId: 'full-disposal-voucher',
+          amount: 500,
+        ),
+      );
+      final balance = await stockRepository.getBalance(
+        productId: 'product-1',
+        warehouseId: 'warehouse-1',
+      );
+
+      expect(result.isSuccess, isTrue, reason: result.failureOrNull?.messageAr);
+      expect(balance.valueOrNull?.quantity.scaledUnits, 0);
+      expect(balance.valueOrNull?.valuation.minorUnits, 0);
+    });
+
+    test('rejects changed payload on the same disposal idempotency key',
+        () async {
+      await repository.saveOpeningBalance(
+        movement: _movement(currency),
+        posting: await _buildPosting(currency),
+      );
+      final original = _disposalMovement(currency);
+      await repository.saveStockDisposalAtomically(
+        movement: original,
+        posting: await _buildDisposalPosting(currency),
+      );
+
+      final changed = _disposalMovement(currency, quantity: 1);
+      final result = await repository.saveStockDisposalAtomically(
+        movement: changed,
+        posting: await _buildDisposalPosting(currency, amount: 100),
+      );
+
+      expect(result.isFailure, isTrue);
+      expect(await db.query('pos_stock_movements'), hasLength(2));
+      expect(await db.query('vouchers'), hasLength(2));
+      expect(await db.query('ledger_entries'), hasLength(4));
+    });
+
+    test('reverses disposal with a linked inbound movement and new voucher',
+        () async {
+      await repository.saveOpeningBalance(
+        movement: _movement(currency),
+        posting: await _buildPosting(currency),
+      );
+      final original = _disposalMovement(currency);
+      await repository.saveStockDisposalAtomically(
+        movement: original,
+        posting: await _buildDisposalPosting(currency),
+      );
+      final reversalDate = DateTime.utc(2026, 1, 2, 11);
+      final reversal = PosStockMovement.create(
+        id: 'disposal-reversal-movement-1',
+        productId: 'product-1',
+        warehouseId: 'warehouse-1',
+        type: PosStockMovementType.adjustment,
+        direction: PosStockMovementDirection.inbound,
+        quantity: PosQuantity.whole(2),
+        unitCost: Money.fromMinorUnits(100, currency),
+        sourceType: 'stock_disposal_reversal',
+        sourceId: 'disposal-reversal-source-1',
+        reasonDetail: 'Correcting the original write-off',
+        voucherId: 'disposal-reversal-voucher-1',
+        reversesSourceId: 'disposal-source-1',
+        occurredAt: reversalDate,
+        idempotencyKey: 'disposal-reversal-key-1',
+        createdAt: reversalDate,
+      );
+      final reversalPosting = await _buildDisposalPosting(
+        currency,
+        sourceId: 'disposal-reversal-source-1',
+        voucherId: 'disposal-reversal-voucher-1',
+        direction: PosStockMovementDirection.inbound,
+        reason: null,
+        reversalOfSourceId: 'disposal-source-1',
+        date: reversalDate,
+      );
+
+      final first = await repository.saveStockDisposalAtomically(
+        movement: reversal,
+        posting: reversalPosting,
+      );
+      final replay = await repository.saveStockDisposalAtomically(
+        movement: reversal,
+        posting: reversalPosting,
+      );
+
+      expect(first.isSuccess, isTrue, reason: first.failureOrNull?.messageAr);
+      expect(replay.isSuccess, isTrue, reason: replay.failureOrNull?.messageAr);
+      final originalRow = (await db.query(
+        'pos_stock_movements',
+        where: 'source_id = ?',
+        whereArgs: ['disposal-source-1'],
+      )).single;
+      expect(originalRow['quantity_scaled'], -2);
+      expect(originalRow['reverses_source_id'], isNull);
+      final reversalRow = (await db.query(
+        'pos_stock_movements',
+        where: 'source_id = ?',
+        whereArgs: ['disposal-reversal-source-1'],
+      )).single;
+      expect(reversalRow['quantity_scaled'], 2);
+      expect(reversalRow['reverses_source_id'], 'disposal-source-1');
+      expect(await db.query('pos_stock_movements'), hasLength(3));
+      expect(await db.query('vouchers'), hasLength(3));
+      expect(await db.query('ledger_entries'), hasLength(6));
+      final balance = await stockRepository.getBalance(
+        productId: 'product-1',
+        warehouseId: 'warehouse-1',
+      );
+      expect(balance.valueOrNull?.quantity.scaledUnits, 5);
+    });
+
+    test('rolls back disposal movement when voucher ledger insertion fails',
+        () async {
+      await repository.saveOpeningBalance(
+        movement: _movement(currency),
+        posting: await _buildPosting(currency),
+      );
+      await db.execute('''
+        CREATE TRIGGER reject_disposal_ledger
+        BEFORE INSERT ON ledger_entries
+        WHEN NEW.voucher_id = 'disposal-voucher-1'
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated disposal posting failure');
+        END
+      ''');
+
+      final result = await repository.saveStockDisposalAtomically(
+        movement: _disposalMovement(currency),
+        posting: await _buildDisposalPosting(currency),
+      );
+
+      expect(result.isFailure, isTrue);
+      expect(await db.query('pos_stock_movements'), hasLength(1));
+      expect(await db.query('vouchers'), hasLength(1));
+      expect(await db.query('ledger_entries'), hasLength(2));
+      final balance = await stockRepository.getBalance(
+        productId: 'product-1',
+        warehouseId: 'warehouse-1',
+      );
+      expect(balance.valueOrNull?.quantity.scaledUnits, 5);
+    });
+
+    test('rolls back movement and voucher when lot projection is inconsistent',
+        () async {
+      await db.update(
+        'pos_products',
+        {'expiry_tracking': 1},
+        where: 'id = ?',
+        whereArgs: ['product-1'],
+      );
+      final lot = _openingLot(currency);
+      final opening = await repository.saveOpeningBalance(
+        movement: _movement(currency, lotId: lot.id),
+        lots: [lot],
+        posting: await _buildPosting(currency),
+      );
+      expect(opening.isSuccess, isTrue);
+      await db.execute(
+        'DROP TRIGGER trg_pos_stock_movement_project_lot',
+      );
+
+      final result = await repository.saveStockDisposalAtomically(
+        movement: _disposalMovement(currency, lotId: lot.id),
+        posting: await _buildDisposalPosting(currency),
+      );
+
+      expect(result.isFailure, isTrue);
+      expect(await db.query('pos_stock_movements'), hasLength(1));
+      expect(await db.query('vouchers'), hasLength(1));
+      expect(await db.query('ledger_entries'), hasLength(2));
+      final savedLot = (await db.query('pos_stock_lots')).single;
+      expect(savedLot['remaining_quantity_scaled'], 5);
     });
   });
 }

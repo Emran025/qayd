@@ -44,6 +44,7 @@ import 'package:qayd/data/database/migrations/migration_043_pos_line_cost_curren
 import 'package:qayd/data/database/migrations/migration_044_pos_currency_rates.dart';
 import 'package:qayd/data/database/migrations/migration_045_pos_currency_snapshots_and_margins.dart';
 import 'package:qayd/data/database/migrations/migration_046_pos_stock_lots_fefo.dart';
+import 'package:qayd/data/database/migrations/migration_047_pos_stock_disposal.dart';
 import 'package:qayd/data/database/migrations/schema_migration.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
@@ -98,6 +99,7 @@ final class MigrationRegistry {
     Migration044PosCurrencyRates(),
     Migration045PosCurrencySnapshotsAndMargins(),
     Migration046PosStockLotsFefo(),
+    Migration047PosStockDisposal(),
   ];
 
   static List<SchemaMigration> get ordered {

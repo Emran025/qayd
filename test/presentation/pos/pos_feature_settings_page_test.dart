@@ -29,9 +29,13 @@ final class _GovernanceRepo implements GovernanceRepository {
 }
 
 final class _PosRepo implements PosActivationRepository {
-  _PosRepo({this.enabled = false});
+  _PosRepo({
+    this.enabled = false,
+    this.templateVersion = PosTemplateDefinition.currentVersion,
+  });
 
   bool enabled;
+  int templateVersion;
 
   @override
   Future<Result<PosActivationResult>> installTemplate({
@@ -40,6 +44,7 @@ final class _PosRepo implements PosActivationRepository {
     required String deviceId,
   }) async {
     enabled = true;
+    templateVersion = template.version;
     return Success(
       PosActivationResult(
         templateKey: template.templateKey,
@@ -53,6 +58,10 @@ final class _PosRepo implements PosActivationRepository {
 
   @override
   Future<Result<bool>> isEnabled() async => Success(enabled);
+
+  @override
+  Future<Result<int?>> getInstalledTemplateVersion() async =>
+      Success(enabled ? templateVersion : null);
 
   @override
   Future<Result<String?>> getEnabledWarehouseId() async =>

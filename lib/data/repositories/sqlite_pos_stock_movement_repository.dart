@@ -9,6 +9,7 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_stock_disposal_reason.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
@@ -139,6 +140,91 @@ final class SqlitePosStockMovementRepository
         eligible.add(lot);
       }
       return Success(eligible);
+    } on DatabaseException {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posStockReadFailed),
+      );
+    } on Object {
+      return FailureResult(
+        ValidationFailure(messageAr: AppStrings.posStockLotProjectionMismatch),
+      );
+    }
+  }
+
+  @override
+  Future<Result<List<PosStockLot>>> getDisposalLots({
+    required String productId,
+    required String warehouseId,
+  }) async {
+    try {
+      final context = await _loadProductContext(_db, productId);
+      if (context == null) return _productNotFoundLots();
+      final lotlessRows = await _db.rawQuery(
+        '''
+        SELECT COALESCE(SUM(quantity_scaled), 0) AS quantity_scaled
+        FROM pos_stock_movements
+        WHERE product_id = ? AND warehouse_id = ? AND lot_id IS NULL
+        ''',
+        [productId, warehouseId],
+      );
+      if (context.expiryTracking &&
+          _asInt(lotlessRows.first['quantity_scaled']) > 0) {
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.posStockLotlessBalance),
+        );
+      }
+
+      final rows = await _db.query(
+        'pos_stock_lots',
+        where: 'product_id = ? AND warehouse_id = ?',
+        whereArgs: [productId, warehouseId],
+        orderBy: 'expiry_date ASC, created_at ASC, id ASC',
+      );
+      final openLots = <PosStockLot>[];
+      for (final row in rows) {
+        final lot = await _mapLotRow(row);
+        if (lot == null ||
+            lot.receivedQuantity.scale != context.scale ||
+            lot.unitCost.currency != context.currency) {
+          return FailureResult(
+            ValidationFailure(messageAr: AppStrings.posStockLotProjectionMismatch),
+          );
+        }
+        final invalidMovement = await _db.query(
+          'pos_stock_movements',
+          columns: ['id'],
+          where: '''
+            lot_id = ? AND (
+              product_id <> ? OR warehouse_id <> ? OR
+              quantity_scale <> ? OR currency_code <> ?
+            )
+          ''',
+          whereArgs: [
+            lot.id,
+            productId,
+            warehouseId,
+            context.scale,
+            context.currency.code,
+          ],
+          limit: 1,
+        );
+        final quantityRows = await _db.rawQuery(
+          '''
+          SELECT COALESCE(SUM(quantity_scaled), 0) AS quantity_scaled
+          FROM pos_stock_movements WHERE lot_id = ?
+          ''',
+          [lot.id],
+        );
+        if (invalidMovement.isNotEmpty ||
+            _asInt(quantityRows.first['quantity_scaled']) !=
+                lot.remainingQuantity.scaledUnits) {
+          return FailureResult(
+            ValidationFailure(messageAr: AppStrings.posStockLotProjectionMismatch),
+          );
+        }
+        if (!lot.remainingQuantity.isZero) openLots.add(lot);
+      }
+      return Success(openLots);
     } on DatabaseException {
       return FailureResult(
         DatabaseFailure(messageAr: AppStrings.posStockReadFailed),
@@ -335,6 +421,11 @@ final class SqlitePosStockMovementRepository
 
   @override
   Future<Result<void>> append(PosStockMovement movement) async {
+    if (_requiresAtomicDisposalPosting(movement)) {
+      return FailureResult(
+        ValidationFailure(messageAr: AppStrings.posStockDisposalAtomicRequired),
+      );
+    }
     try {
       await _db.transaction((txn) async {
         final duplicate = await txn.query(
@@ -400,8 +491,15 @@ final class SqlitePosStockMovementRepository
   /// hook for the atomic POS posting coordinator.
   Future<Result<void>> appendInTransaction(
     DatabaseExecutor executor,
-    PosStockMovement movement,
+    PosStockMovement movement, {
+    bool allowStockDisposal = false,
+  }
   ) async {
+    if (!allowStockDisposal && _requiresAtomicDisposalPosting(movement)) {
+      return FailureResult(
+        ValidationFailure(messageAr: AppStrings.posStockDisposalAtomicRequired),
+      );
+    }
     try {
       final duplicate = await executor.query(
         'pos_stock_movements',
@@ -463,6 +561,173 @@ final class SqlitePosStockMovementRepository
     } catch (_) {
       return FailureResult(
         DatabaseFailure(messageAr: AppStrings.posStockAppendFailed),
+      );
+    }
+  }
+
+  /// Revalidates disposal policy and its weighted-average valuation against the
+  /// transaction snapshot. No writes happen until this method succeeds.
+  Future<Result<PosStockBalance>> validateStockDisposalInTransaction(
+    DatabaseExecutor executor,
+    PosStockMovement movement,
+  ) async {
+    try {
+      final reason = movement.disposalReason;
+      if (reason == null ||
+          movement.direction != PosStockMovementDirection.outbound ||
+          movement.sourceType != 'stock_disposal' ||
+          movement.sourceId == null ||
+          movement.voucherId == null ||
+          movement.quantity.isZero) {
+        return _invalidDisposalBalance();
+      }
+      final expectedType = switch (reason) {
+        PosStockDisposalReason.damage => PosStockMovementType.damage,
+        PosStockDisposalReason.expiry => PosStockMovementType.expiry,
+        PosStockDisposalReason.authorizedLoss => PosStockMovementType.adjustment,
+        PosStockDisposalReason.other => PosStockMovementType.adjustment,
+      };
+      if (movement.type != expectedType ||
+          (reason == PosStockDisposalReason.other &&
+              (movement.reasonDetail == null ||
+                  movement.reasonDetail!.trim().isEmpty))) {
+        return _invalidDisposalBalance();
+      }
+      final warehouseRows = await executor.query(
+        'pos_warehouses',
+        columns: ['id'],
+        where: 'id = ? AND is_active = 1',
+        whereArgs: [movement.warehouseId],
+        limit: 1,
+      );
+      if (warehouseRows.isEmpty) {
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.posStockWarehouseIdRequired),
+        );
+      }
+      final context = await _loadProductContext(executor, movement.productId);
+      if (context == null) return _productNotFoundBalance();
+      final lotFailure = await _validateMovementLot(executor, movement, context);
+      if (lotFailure != null) {
+        return FailureResult(ValidationFailure(messageAr: lotFailure));
+      }
+      if (reason == PosStockDisposalReason.expiry &&
+          (!context.expiryTracking || movement.lotId == null)) {
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.posStockDisposalExpiryLotRequired),
+        );
+      }
+      if (movement.lotId != null) {
+        final lotRows = await executor.query(
+          'pos_stock_lots',
+          columns: ['expiry_date'],
+          where: 'id = ? AND product_id = ? AND warehouse_id = ?',
+          whereArgs: [
+            movement.lotId,
+            movement.productId,
+            movement.warehouseId,
+          ],
+          limit: 1,
+        );
+        if (lotRows.isEmpty) {
+          return FailureResult(
+            ValidationFailure(messageAr: AppStrings.posStockLotProjectionMismatch),
+          );
+        }
+        final expiryRaw = lotRows.first['expiry_date'] as String?;
+        final expiry = expiryRaw == null ? null : PosDate.parse(expiryRaw);
+        final businessDate = PosDate.fromDateTime(movement.occurredAt.toLocal());
+        if (reason == PosStockDisposalReason.expiry &&
+            (expiry == null || !expiry.isBefore(businessDate))) {
+          return FailureResult(
+            ValidationFailure(messageAr: AppStrings.posStockDisposalNotExpired),
+          );
+        }
+        if (reason == PosStockDisposalReason.damage &&
+            expiry != null &&
+            expiry.isBefore(businessDate)) {
+          return FailureResult(
+            ValidationFailure(messageAr: AppStrings.posStockDisposalBatchExpired),
+          );
+        }
+      }
+      final balance = await _readBalance(
+        executor,
+        productId: movement.productId,
+        warehouseId: movement.warehouseId,
+        currency: context.currency,
+        scale: context.scale,
+      );
+      if (movement.unitCost != balance.averageUnitCost) {
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.posStockDisposalCostChanged),
+        );
+      }
+      try {
+        balance.apply(movement);
+      } on InvalidPosStockException catch (error) {
+        return FailureResult(ValidationFailure(messageAr: error.messageAr));
+      }
+      return Success(balance);
+    } on DatabaseException {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posStockReadFailed),
+      );
+    } on InvalidPosStockException catch (error) {
+      return FailureResult(ValidationFailure(messageAr: error.messageAr));
+    } on Object {
+      return _invalidDisposalBalance();
+    }
+  }
+
+  static bool _requiresAtomicDisposalPosting(PosStockMovement movement) {
+    return movement.type == PosStockMovementType.damage ||
+        movement.type == PosStockMovementType.expiry ||
+        movement.sourceType == 'stock_disposal' ||
+        movement.sourceType == 'stock_disposal_reversal' ||
+        movement.disposalReason != null ||
+        movement.reversesSourceId != null;
+  }
+
+  /// Verifies the database's lot projection after all other atomic writes.
+  Future<Result<void>> verifyLotProjectionInTransaction(
+    DatabaseExecutor executor,
+    String lotId,
+  ) async {
+    try {
+      final lotRows = await executor.query(
+        'pos_stock_lots',
+        columns: ['remaining_quantity_scaled'],
+        where: 'id = ?',
+        whereArgs: [lotId],
+        limit: 1,
+      );
+      if (lotRows.isEmpty) {
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.posStockLotProjectionMismatch),
+        );
+      }
+      final movementRows = await executor.rawQuery(
+        '''
+        SELECT COALESCE(SUM(quantity_scaled), 0) AS quantity_scaled
+        FROM pos_stock_movements WHERE lot_id = ?
+        ''',
+        [lotId],
+      );
+      if (_asInt(lotRows.first['remaining_quantity_scaled']) !=
+          _asInt(movementRows.first['quantity_scaled'])) {
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.posStockLotProjectionMismatch),
+        );
+      }
+      return const Success(null);
+    } on DatabaseException {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posStockReadFailed),
+      );
+    } catch (_) {
+      return FailureResult(
+        ValidationFailure(messageAr: AppStrings.posStockLotProjectionMismatch),
       );
     }
   }
@@ -661,6 +926,12 @@ final class SqlitePosStockMovementRepository
           sourceId: row['source_id'] as String?,
           sourceLineId: row['source_line_id'] as String?,
           lotId: row['lot_id'] as String?,
+          disposalReason: parsePosStockDisposalReason(
+            row['disposal_reason_code'] as String?,
+          ),
+          reasonDetail: row['reason_detail'] as String?,
+          voucherId: row['voucher_id'] as String?,
+          reversesSourceId: row['reverses_source_id'] as String?,
           occurredAt: DateTime.parse(row['occurred_at']! as String),
           idempotencyKey: row['idempotency_key']! as String,
           createdAt: DateTime.parse(row['created_at']! as String),
@@ -710,6 +981,10 @@ final class SqlitePosStockMovementRepository
         'source_id': movement.sourceId,
         'source_line_id': movement.sourceLineId,
         'lot_id': movement.lotId,
+        'disposal_reason_code': movement.disposalReason?.code,
+        'reason_detail': movement.reasonDetail,
+        'voucher_id': movement.voucherId,
+        'reverses_source_id': movement.reversesSourceId,
         'occurred_at': movement.occurredAt.toUtc().toIso8601String(),
         'idempotency_key': movement.idempotencyKey,
         'created_at': movement.createdAt.toUtc().toIso8601String(),
@@ -763,6 +1038,17 @@ final class SqlitePosStockMovementRepository
 
   FailureResult<PosStockBalance> _productNotFound() => FailureResult(
         ValidationFailure(messageAr: AppStrings.posProductNotFound),
+      );
+
+  FailureResult<PosStockBalance> _productNotFoundBalance() =>
+      _productNotFound();
+
+  FailureResult<List<PosStockLot>> _productNotFoundLots() => FailureResult(
+        ValidationFailure(messageAr: AppStrings.posProductNotFound),
+      );
+
+  FailureResult<PosStockBalance> _invalidDisposalBalance() => FailureResult(
+        ValidationFailure(messageAr: AppStrings.posStockDisposalInvalid),
       );
 
   FailureResult<void> _productNotFoundVoid() => FailureResult(

@@ -5096,6 +5096,19 @@ class AppStringsEn extends AppStringsBase {
   String get posFeatureActivationSuccess =>
       'Point of Sale enabled successfully.';
   @override
+  String get posFeatureUpgradeRequired =>
+      'Update the POS setup to add the inventory-loss account.';
+  @override
+  String get posFeatureUpgrade => 'Update POS setup';
+  @override
+  String get posFeatureUpgradeWarning =>
+      'This updates the account template and adds a dedicated inventory-loss account to the chart of accounts. No account is created merely by opening this page.';
+  @override
+  String get posFeatureUpgradeSuccess =>
+      'POS setup and accounts updated successfully.';
+  @override
+  String get posFeatureConfirmUpgrade => 'Confirm update';
+  @override
   String get posFeatureDisableSuccess => 'Point of Sale visibility disabled.';
   @override
   String get posFeatureCancel => 'Cancel';
@@ -5452,6 +5465,32 @@ class AppStringsEn extends AppStringsBase {
   String get posStockProductInactive =>
       'Cannot record a movement for an inactive product.';
   @override
+  String get posStockDisposalAtomicRequired =>
+      'Damaged or expired stock must use the atomic disposal-and-posting flow.';
+  @override
+  String get posStockDisposalInvalid => 'The stock disposal data is invalid.';
+  @override
+  String get posStockDisposalExpiryLotRequired =>
+      'Expired-stock disposal requires a tracked batch.';
+  @override
+  String get posStockDisposalNotExpired =>
+      'The batch is not expired on the selected movement date.';
+  @override
+  String get posStockDisposalBatchExpired =>
+      'This batch is expired; record it with the expiry reason.';
+  @override
+  String get posStockDisposalCostChanged =>
+      'The weighted-average cost changed. Retry to refresh the valuation.';
+  @override
+  String get posStockDisposalLossAccountRequired =>
+      'The active POS template has no inventory-loss account. Update POS setup first.';
+  @override
+  String get posStockDisposalWarehouseMismatch =>
+      'The selected warehouse does not match the active POS warehouse.';
+  @override
+  String get posStockDisposalReverseNoteRequired =>
+      'Choose an original disposal and enter a reason for the reversal.';
+  @override
   String get posStockMovementsTitle => 'Inventory movements';
   @override
   String get posStockMovementsDescription =>
@@ -5476,6 +5515,74 @@ class AppStringsEn extends AppStringsBase {
         'expiry' => 'Expired stock',
         _ => 'Inventory movement',
       };
+  @override
+  String posStockDisposalReasonLabel(String code) => switch (code) {
+        'damage' => 'Damaged',
+        'expiry' => 'Expired',
+        'authorized_loss' => 'Authorized loss',
+        'other' => 'Other',
+        _ => 'Stock disposal',
+      };
+  @override
+  String get posStockDisposalTitle => 'Dispose damaged or expired stock';
+  @override
+  String get posStockDisposalDescription =>
+      'Record a new immutable movement and atomically update the lot and inventory-loss posting.';
+  @override
+  String get posStockDisposalReason => 'Disposal reason';
+  @override
+  String get posStockDisposalReasonDamage => 'Damaged';
+  @override
+  String get posStockDisposalReasonExpiry => 'Expired';
+  @override
+  String get posStockDisposalReasonAuthorizedLoss => 'Authorized loss';
+  @override
+  String get posStockDisposalReasonOther => 'Other';
+  @override
+  String get posStockDisposalDetail => 'Reason details';
+  @override
+  String get posStockDisposalOtherDetailRequired =>
+      'Enter details when you select Other.';
+  @override
+  String get posStockDisposalWarehouse => 'Active warehouse';
+  @override
+  String get posStockDisposalQuantity => 'Quantity to dispose';
+  @override
+  String get posStockDisposalAvailableLabel => 'Available quantity';
+  @override
+  String get posStockDisposalEstimatedValue => 'Estimated inventory loss';
+  @override
+  String get posStockDisposalDate => 'Movement date';
+  @override
+  String get posStockDisposalLot => 'Inventory batch';
+  @override
+  String get posStockDisposalSelectLot => 'Select a batch';
+  @override
+  String get posStockDisposalNoLots => 'No remaining batches for this product.';
+  @override
+  String get posStockDisposalSubmit => 'Record disposal and posting atomically';
+  @override
+  String get posStockDisposalSaved =>
+      'The disposal and inventory-loss posting were recorded.';
+  @override
+  String get posStockDisposalFailed => 'Could not record the stock disposal.';
+  @override
+  String get posStockDisposalVoucherLink => 'Open accounting voucher';
+  @override
+  String posStockDisposalVoucherDescription(String reason, String? detail) =>
+      'POS stock disposal: $reason${detail == null ? '' : ' - $detail'}';
+  @override
+  String posStockDisposalReversalVoucherDescription(String sourceId) =>
+      'Reversal of POS stock disposal source: $sourceId';
+  @override
+  String get posStockDisposalReverseAction => 'Reverse disposal';
+  @override
+  String get posStockDisposalReverseNote => 'Reason for reversal';
+  @override
+  String get posStockDisposalReverseSuccess =>
+      'The disposal was reversed with a new movement and voucher.';
+  @override
+  String get posStockDisposalReverseFailed => 'Could not reverse the disposal.';
   @override
   String get posStockMovementInbound => 'Increase';
   @override

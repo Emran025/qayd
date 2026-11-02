@@ -3,7 +3,9 @@ import 'package:qayd/application/pos/activate_pos_feature_use_case.dart';
 import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_activation_result.dart';
+import 'package:qayd/domain/entities/pos_template_definition.dart';
 import 'package:qayd/domain/repositories/pos_activation_repository.dart';
+import 'package:qayd/presentation/l10n/app_strings.dart';
 
 /// Explicit presentation states for the POS feature setting.
 enum PosFeatureStatus {
@@ -12,6 +14,7 @@ enum PosFeatureStatus {
   ready,
   activating,
   active,
+  upgraded,
   disabling,
   disabled,
   failure,
@@ -21,12 +24,14 @@ final class PosFeatureState {
   const PosFeatureState({
     this.status = PosFeatureStatus.initial,
     this.isEnabled = false,
+    this.requiresUpgrade = false,
     this.activation,
     this.failure,
   });
 
   final PosFeatureStatus status;
   final bool isEnabled;
+  final bool requiresUpgrade;
   final PosActivationResult? activation;
   final Failure? failure;
 
@@ -38,6 +43,7 @@ final class PosFeatureState {
   PosFeatureState copyWith({
     PosFeatureStatus? status,
     bool? isEnabled,
+    bool? requiresUpgrade,
     PosActivationResult? activation,
     Failure? failure,
     bool clearFailure = false,
@@ -45,6 +51,7 @@ final class PosFeatureState {
     return PosFeatureState(
       status: status ?? this.status,
       isEnabled: isEnabled ?? this.isEnabled,
+      requiresUpgrade: requiresUpgrade ?? this.requiresUpgrade,
       activation: activation ?? this.activation,
       failure: clearFailure ? null : failure ?? this.failure,
     );
@@ -56,18 +63,20 @@ final class PosFeatureState {
         other is PosFeatureState &&
             other.status == status &&
             other.isEnabled == isEnabled &&
+            other.requiresUpgrade == requiresUpgrade &&
             other.activation == activation &&
             other.failure == failure;
   }
 
   @override
-  int get hashCode => Object.hash(status, isEnabled, activation, failure);
+  int get hashCode =>
+      Object.hash(status, isEnabled, requiresUpgrade, activation, failure);
 }
 
-/// Presentation coordinator for the opt-in POS switch.
+/// Presentation coordinator for the opt-in POS switch and template upgrades.
 ///
-/// It delegates all business decisions to Application/Data ports and only
-/// maps typed Results to stable UI states.
+/// Upgrading is an explicit activation action; this cubit never provisions an
+/// account while merely reading feature state.
 final class PosFeatureCubit extends Cubit<PosFeatureState> {
   PosFeatureCubit({
     required ActivatePosFeatureUseCase activateUseCase,
@@ -86,27 +95,71 @@ final class PosFeatureCubit extends Cubit<PosFeatureState> {
     if (isClosed || state.isBusy) return;
     emit(state.copyWith(status: PosFeatureStatus.loading, clearFailure: true));
 
-    final result = await _repository.isEnabled();
+    final enabledResult = await _repository.isEnabled();
     if (isClosed) return;
-    result.fold(
-      (failure) => emit(
+    if (enabledResult.isFailure) {
+      emit(
         state.copyWith(
           status: PosFeatureStatus.failure,
-          failure: failure,
+          failure: enabledResult.failureOrNull,
         ),
-      ),
-      (enabled) => emit(
+      );
+      return;
+    }
+
+    final enabled = enabledResult.valueOrNull == true;
+    if (!enabled) {
+      emit(
         state.copyWith(
-          status: enabled ? PosFeatureStatus.active : PosFeatureStatus.ready,
-          isEnabled: enabled,
+          status: PosFeatureStatus.ready,
+          isEnabled: false,
+          requiresUpgrade: false,
           clearFailure: true,
         ),
+      );
+      return;
+    }
+
+    final versionResult = await _repository.getInstalledTemplateVersion();
+    if (isClosed) return;
+    if (versionResult.isFailure) {
+      emit(
+        state.copyWith(
+          status: PosFeatureStatus.failure,
+          isEnabled: true,
+          failure: versionResult.failureOrNull,
+        ),
+      );
+      return;
+    }
+    final version = versionResult.valueOrNull;
+    if (version == null || version > PosTemplateDefinition.currentVersion) {
+      emit(
+        state.copyWith(
+          status: PosFeatureStatus.failure,
+          isEnabled: true,
+          failure: ValidationFailure(messageAr: AppStrings.posTemplateConflict),
+        ),
+      );
+      return;
+    }
+
+    emit(
+      state.copyWith(
+        status: PosFeatureStatus.active,
+        isEnabled: true,
+        requiresUpgrade: version < PosTemplateDefinition.currentVersion,
+        clearFailure: true,
       ),
     );
   }
 
   Future<void> activate() async {
-    if (isClosed || state.isBusy || state.isEnabled) return;
+    if (isClosed ||
+        state.isBusy ||
+        (state.isEnabled && !state.requiresUpgrade)) {
+      return;
+    }
     emit(
       state.copyWith(
         status: PosFeatureStatus.activating,
@@ -127,8 +180,11 @@ final class PosFeatureCubit extends Cubit<PosFeatureState> {
       ),
       (activation) => emit(
         state.copyWith(
-          status: PosFeatureStatus.active,
+          status: state.isEnabled
+              ? PosFeatureStatus.upgraded
+              : PosFeatureStatus.active,
           isEnabled: true,
+          requiresUpgrade: false,
           activation: activation,
           clearFailure: true,
         ),
@@ -158,6 +214,7 @@ final class PosFeatureCubit extends Cubit<PosFeatureState> {
         state.copyWith(
           status: PosFeatureStatus.disabled,
           isEnabled: false,
+          requiresUpgrade: false,
           clearFailure: true,
         ),
       ),

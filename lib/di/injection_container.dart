@@ -32,8 +32,11 @@ import 'package:qayd/application/pos/resolve_pos_product_for_checkout_use_case.d
 import 'package:qayd/application/pos/get_pos_stock_balance_use_case.dart';
 import 'package:qayd/application/pos/record_pos_stock_movement_use_case.dart';
 import 'package:qayd/application/pos/list_pos_stock_movements_use_case.dart';
+import 'package:qayd/application/pos/list_pos_stock_disposal_lots_use_case.dart';
 import 'package:qayd/application/pos/build_pos_stock_adjustment_posting_use_case.dart';
 import 'package:qayd/application/pos/post_pos_stock_adjustment_atomically_use_case.dart';
+import 'package:qayd/application/pos/build_pos_stock_disposal_posting_use_case.dart';
+import 'package:qayd/application/pos/post_pos_stock_disposal_atomically_use_case.dart';
 import 'package:qayd/application/pos/post_pos_opening_balance_atomically_use_case.dart';
 import 'package:qayd/application/pos/post_pos_sale_atomically_use_case.dart';
 import 'package:qayd/application/pos/post_pos_purchase_atomically_use_case.dart';
@@ -434,6 +437,10 @@ abstract final class InjectionContainer {
   static late CompletePosPurchaseUseCase completePosPurchaseUseCase;
   static late GetPosStockBalanceUseCase getPosStockBalanceUseCase;
   static late ListPosStockMovementsUseCase listPosStockMovementsUseCase;
+  static late ListPosStockDisposalLotsUseCase
+      listPosStockDisposalLotsUseCase;
+  static late PostPosStockDisposalAtomicallyUseCase
+      postPosStockDisposalAtomicallyUseCase;
   static late BuildPosStockAdjustmentPostingUseCase
       buildPosStockAdjustmentPostingUseCase;
   static late PostPosStockAdjustmentAtomicallyUseCase
@@ -1249,6 +1256,9 @@ abstract final class InjectionContainer {
     listPosStockMovementsUseCase = ListPosStockMovementsUseCase(
       posStockMovementRepository,
     );
+    listPosStockDisposalLotsUseCase = ListPosStockDisposalLotsUseCase(
+      posStockMovementRepository,
+    );
     buildPosStockAdjustmentPostingUseCase =
         const BuildPosStockAdjustmentPostingUseCase();
     postPosStockAdjustmentAtomicallyUseCase =
@@ -1262,6 +1272,17 @@ abstract final class InjectionContainer {
       buildPosting: buildPosStockAdjustmentPostingUseCase,
       postingRepository: posAccountingPostingRepository,
       idGenerator: _idGenerator,
+    );
+    postPosStockDisposalAtomicallyUseCase =
+        PostPosStockDisposalAtomicallyUseCase(
+      writeGuard: governanceWriteGuard,
+      installationRepository: posTemplateInstallationRepository,
+      productRepository: posProductRepository,
+      stockRepository: posStockMovementRepository,
+      accountRepository: accountRepository,
+      fiscalPeriodRepository: fiscalPeriodRepository,
+      buildPosting: const BuildPosStockDisposalPostingUseCase(),
+      postingRepository: posAccountingPostingRepository,
     );
     recordPosStockMovementUseCase = RecordPosStockMovementUseCase(
       posStockMovementRepository,
