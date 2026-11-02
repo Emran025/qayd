@@ -12,6 +12,7 @@ import 'package:qayd/application/pos/save_pos_product_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
 import 'package:qayd/domain/repositories/governance_repository.dart';
@@ -22,6 +23,7 @@ import 'package:qayd/domain/value_objects/governance_status.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_barcode.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/submit_activation_request.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/pages/pos/pos_opening_balance_page.dart';
@@ -36,13 +38,15 @@ final class _IdGenerator implements IdGenerator {
 
 final class _GovernanceRepository implements GovernanceRepository {
   @override
-  Future<Result<GovernanceStatus>> getStatus(
-          {bool forceRefresh = false}) async =>
+  Future<Result<GovernanceStatus>> getStatus({
+    bool forceRefresh = false,
+  }) async =>
       const Success(GovernanceStatus.activated);
 
   @override
   Future<Result<void>> submitActivation(
-          SubmitActivationRequest request) async =>
+    SubmitActivationRequest request,
+  ) async =>
       const Success(null);
 }
 
@@ -60,8 +64,10 @@ final class _CurrencyRepository implements CurrencyRepository {
       Success([currency]);
 
   @override
-  Future<Result<void>> save(CurrencyCode currency,
-          {bool isPredefined = false}) async =>
+  Future<Result<void>> save(
+    CurrencyCode currency, {
+    bool isPredefined = false,
+  }) async =>
       const Success(null);
 
   @override
@@ -94,9 +100,9 @@ final class _ProductRepository implements PosProductRepository {
     bool activeOnly = true,
     String? search,
   }) async =>
-      Success(products
-          .where((product) => !activeOnly || product.isActive)
-          .toList());
+      Success(
+        products.where((product) => !activeOnly || product.isActive).toList(),
+      );
 
   @override
   Future<Result<void>> save(PosProduct product) async => const Success(null);
@@ -122,6 +128,22 @@ final class _StockRepository implements PosStockMovementRepository {
       const Success(null);
 
   @override
+  Future<Result<List<PosStockLot>>> getSellableLots({
+    required String productId,
+    required String warehouseId,
+    required PosDate businessDate,
+  }) async =>
+      const Success([]);
+
+  @override
+  Future<Result<List<PosStockMovement>>> listMovementsForSource({
+    required String sourceType,
+    required String sourceId,
+    PosStockMovementType? type,
+  }) async =>
+      const Success([]);
+
+  @override
   Future<Result<List<PosStockMovement>>> listMovements({
     required String warehouseId,
     String? productId,
@@ -130,7 +152,8 @@ final class _StockRepository implements PosStockMovementRepository {
     DateTime? untilExclusive,
     int limit = 100,
     int offset = 0,
-  }) async => const Success([]);
+  }) async =>
+      const Success([]);
 
   @override
   Future<Result<void>> append(PosStockMovement movement) async {
@@ -139,11 +162,8 @@ final class _StockRepository implements PosStockMovementRepository {
   }
 }
 
-CurrencyCode _currency() => CurrencyCode(
-      code: 'SAR',
-      nameAr: 'ريال سعودي',
-      symbol: 'ر.س',
-    );
+CurrencyCode _currency() =>
+    CurrencyCode(code: 'SAR', nameAr: 'ريال سعودي', symbol: 'ر.س');
 
 PosProduct _product(CurrencyCode currency) => PosProduct.create(
       id: 'product-1',
@@ -157,7 +177,9 @@ PosProduct _product(CurrencyCode currency) => PosProduct.create(
     );
 
 PosCatalogCubit _catalogCubit(
-    List<PosProduct> products, CurrencyCode currency) {
+  List<PosProduct> products,
+  CurrencyCode currency,
+) {
   final productRepository = _ProductRepository(products);
   final currencyRepository = _CurrencyRepository(currency);
   final guard = GovernanceWriteGuard(
@@ -179,7 +201,9 @@ PosCatalogCubit _catalogCubit(
 PosStockCubit _stockCubit(PosProduct product, CurrencyCode currency) {
   final stockRepository = _StockRepository(
     emptyPosStockBalance(
-        currency: currency, quantityScale: product.quantityScale),
+      currency: currency,
+      quantityScale: product.quantityScale,
+    ),
   );
   final guard = GovernanceWriteGuard(
     CheckGovernanceStatusUseCase(_GovernanceRepository()),
@@ -212,8 +236,9 @@ Widget _host({
 }
 
 void main() {
-  testWidgets('shows an explicit empty state when catalog has no products',
-      (tester) async {
+  testWidgets('shows an explicit empty state when catalog has no products', (
+    tester,
+  ) async {
     final currency = _currency();
     final catalogCubit = _catalogCubit([], currency);
     final product = _product(currency);
@@ -233,8 +258,9 @@ void main() {
     expect(find.text(AppStrings.posOpeningBalanceNoProducts), findsOneWidget);
   });
 
-  testWidgets('validates and records an opening balance for selected product',
-      (tester) async {
+  testWidgets('validates and records an opening balance for selected product', (
+    tester,
+  ) async {
     final currency = _currency();
     final product = _product(currency);
     final catalogCubit = _catalogCubit([product], currency);
@@ -263,7 +289,9 @@ void main() {
     await tester.tap(find.text(AppStrings.posOpeningBalanceSave));
     await tester.pump();
     expect(
-        find.text(AppStrings.posOpeningBalancePositiveInteger), findsOneWidget);
+      find.text(AppStrings.posOpeningBalancePositiveInteger),
+      findsOneWidget,
+    );
 
     await tester.enterText(find.byType(TextFormField).at(0), '5');
     await tester.enterText(find.byType(TextFormField).at(1), '100');

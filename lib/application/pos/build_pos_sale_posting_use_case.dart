@@ -22,6 +22,7 @@ import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/entry_id.dart';
 import 'package:qayd/domain/value_objects/money.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/domain/value_objects/transaction_id.dart';
 import 'package:qayd/domain/value_objects/voucher_id.dart';
@@ -41,6 +42,7 @@ final class BuildPosSalePostingInput {
     this.customerAccountId,
     this.cashSale = true,
     this.settlement,
+    this.businessDate,
   });
 
   final String invoiceId;
@@ -52,6 +54,7 @@ final class BuildPosSalePostingInput {
   final DateTime invoiceDate;
   final DateTime createdAt;
   final AccountId? customerAccountId;
+  final PosDate? businessDate;
 
   /// When present, this is the explicit final settlement chosen by checkout.
   /// [advanceMinorUnits] is exact minor currency units and may be zero for credit.
@@ -135,9 +138,17 @@ final class BuildPosSalePostingUseCase {
       final invoiceLines = <PosInvoiceLine>[];
       final movements = <PosStockMovement>[];
       final cogsByCurrency = <CurrencyCode, int>{};
-      for (final request in input.lines) {
-        final productResult =
-            await _productRepository.getById(request.productId);
+      final today = PosDate.todayLocal();
+      final invoiceBusinessDate =
+          PosDate.fromDateTime(input.invoiceDate.toLocal());
+      final requestedBusinessDate = input.businessDate ?? invoiceBusinessDate;
+      final businessDate =
+          today.isBefore(requestedBusinessDate) ? requestedBusinessDate : today;
+      for (var lineIndex = 0; lineIndex < input.lines.length; lineIndex++) {
+        final request = input.lines[lineIndex];
+        final productResult = await _productRepository.getById(
+          request.productId,
+        );
         if (productResult.isFailure) {
           return FailureResult(productResult.failureOrNull!);
         }
@@ -159,7 +170,8 @@ final class BuildPosSalePostingUseCase {
             balance.quantity.scaledUnits < request.quantity.scaledUnits) {
           return _invalid('pos_sale_insufficient_stock');
         }
-        final lineId = _idGenerator.next();
+        final lineId =
+            '${input.invoiceId}:line:${(lineIndex + 1).toString().padLeft(6, '0')}';
         final unitCost = balance.averageUnitCost;
         PosCurrencyConversion conversion;
         final suppliedRate = request.rateSnapshot;
@@ -210,28 +222,71 @@ final class BuildPosSalePostingUseCase {
             targetAmount: conversion.targetAmount,
             rateSnapshot: conversion.rateSnapshot,
           ),
+          expiryTrackingSnapshot: product.expiryTracking,
         );
         invoiceLines.add(line);
         final cogs = PosMoneyMath.multiply(request.quantity, unitCost);
         cogsByCurrency[cogs.currency] =
             (cogsByCurrency[cogs.currency] ?? 0) + cogs.minorUnits;
-        movements.add(
-          PosStockMovement.create(
-            id: _idGenerator.next(),
+        final allocations = <({PosQuantity quantity, String? lotId})>[];
+        if (product.expiryTracking) {
+          final lotsResult = await _stockRepository.getSellableLots(
             productId: product.id,
             warehouseId: input.warehouseId,
-            type: PosStockMovementType.sale,
-            direction: PosStockMovementDirection.outbound,
-            quantity: request.quantity,
-            unitCost: unitCost,
-            sourceType: 'pos_invoice',
-            sourceId: input.invoiceId,
-            sourceLineId: lineId,
-            occurredAt: input.invoiceDate,
-            idempotencyKey: '${input.idempotencyKey}:stock:$lineId',
-            createdAt: input.createdAt,
-          ),
-        );
+            businessDate: businessDate,
+          );
+          if (lotsResult.isFailure) {
+            return FailureResult(lotsResult.failureOrNull!);
+          }
+          var remaining = request.quantity.scaledUnits;
+          for (final lot in lotsResult.valueOrNull!) {
+            if (remaining == 0) break;
+            final take = remaining < lot.remainingQuantity.scaledUnits
+                ? remaining
+                : lot.remainingQuantity.scaledUnits;
+            if (take <= 0) continue;
+            allocations.add((
+              quantity: PosQuantity.fromScaled(
+                take,
+                scale: request.quantity.scale,
+              ),
+              lotId: lot.id,
+            ));
+            remaining -= take;
+          }
+          if (remaining != 0) {
+            return FailureResult(
+              ValidationFailure(messageAr: AppStrings.posStockLotsInsufficient),
+            );
+          }
+        } else {
+          allocations.add((quantity: request.quantity, lotId: null));
+        }
+        for (var allocationIndex = 0;
+            allocationIndex < allocations.length;
+            allocationIndex++) {
+          final allocation = allocations[allocationIndex];
+          final allocationKey = allocationIndex.toString().padLeft(6, '0');
+          movements.add(
+            PosStockMovement.create(
+              id: '${input.invoiceId}:stock:$lineId:$allocationKey',
+              productId: product.id,
+              warehouseId: input.warehouseId,
+              type: PosStockMovementType.sale,
+              direction: PosStockMovementDirection.outbound,
+              quantity: allocation.quantity,
+              unitCost: unitCost,
+              sourceType: 'pos_invoice',
+              sourceId: input.invoiceId,
+              sourceLineId: lineId,
+              lotId: allocation.lotId,
+              occurredAt: input.invoiceDate,
+              idempotencyKey:
+                  '${input.idempotencyKey}:stock:$lineId:$allocationKey',
+              createdAt: input.createdAt,
+            ),
+          );
+        }
       }
 
       var invoice = PosInvoice.draft(
@@ -311,8 +366,9 @@ final class BuildPosSalePostingUseCase {
           if (paymentAccountId == null) {
             return _invalid('pos_sale_payment_account_required');
           }
-          final paymentAccount =
-              await _accountRepository.getById(paymentAccountId);
+          final paymentAccount = await _accountRepository.getById(
+            paymentAccountId,
+          );
           if (paymentAccount.isFailure ||
               paymentAccount.valueOrNull == null ||
               !paymentAccount.valueOrNull!.isActive ||
@@ -391,10 +447,7 @@ final class BuildPosSalePostingUseCase {
         PosSalePosting(
           invoice: invoice,
           movements: movements,
-          postings: [
-            ...commercialPostings,
-            ...cogsPostings,
-          ],
+          postings: [...commercialPostings, ...cogsPostings],
           payments: payments,
         ),
       );

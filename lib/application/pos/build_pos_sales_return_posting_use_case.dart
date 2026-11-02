@@ -10,6 +10,7 @@ import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/entities/pos_template_definition.dart';
 import 'package:qayd/domain/entities/voucher.dart';
 import 'package:qayd/domain/repositories/pos_invoice_read_repository.dart';
+import 'package:qayd/domain/repositories/pos_stock_movement_repository.dart';
 import 'package:qayd/domain/repositories/pos_template_installation_repository.dart';
 import 'package:qayd/domain/services/entry_generator.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
@@ -62,13 +63,16 @@ final class BuildPosSalesReturnPostingUseCase {
   BuildPosSalesReturnPostingUseCase({
     required PosInvoiceReadRepository invoiceRepository,
     required PosTemplateInstallationRepository installationRepository,
+    PosStockMovementRepository? stockRepository,
     EntryGenerator entryGenerator = const EntryGenerator(),
   })  : _invoices = invoiceRepository,
         _installation = installationRepository,
+        _stock = stockRepository,
         _entries = entryGenerator;
 
   final PosInvoiceReadRepository _invoices;
   final PosTemplateInstallationRepository _installation;
+  final PosStockMovementRepository? _stock;
   final EntryGenerator _entries;
 
   Future<Result<PosSalesReturnPosting>> call(
@@ -133,7 +137,8 @@ final class BuildPosSalesReturnPostingUseCase {
         return FailureResult(installationResult.failureOrNull!);
       }
       final installation = installationResult.valueOrNull;
-      if (installation == null || installation.warehouseId != source.warehouseId) {
+      if (installation == null ||
+          installation.warehouseId != source.warehouseId) {
         return _invalid('pos_sales_return_not_enabled');
       }
       final salesReturnsAccount = _account(
@@ -155,6 +160,112 @@ final class BuildPosSalesReturnPostingUseCase {
       }
 
       final sourceById = {for (final line in source.lines) line.id: line};
+      final trackedSourceLines = source.lines
+          .where((line) => line.expiryTrackingSnapshot == true)
+          .toList(growable: false);
+      final sourceAllocations = <String, List<PosStockMovement>>{};
+      final returnedByLineAndLot = <String, Map<String, int>>{};
+      if (trackedSourceLines.isNotEmpty) {
+        final stock = _stock;
+        if (stock == null) return _invalid('pos_sales_return_lot_data_missing');
+        final allocationsResult = await stock.listMovementsForSource(
+          sourceType: 'pos_invoice',
+          sourceId: source.id,
+          type: PosStockMovementType.sale,
+        );
+        if (allocationsResult.isFailure) {
+          return FailureResult(allocationsResult.failureOrNull!);
+        }
+        final allocationTotals = <String, int>{};
+        for (final movement in allocationsResult.valueOrNull!) {
+          final sourceLine = sourceById[movement.sourceLineId];
+          if (sourceLine == null ||
+              movement.sourceType != 'pos_invoice' ||
+              movement.sourceId != source.id ||
+              movement.type != PosStockMovementType.sale ||
+              movement.direction != PosStockMovementDirection.outbound ||
+              movement.productId != sourceLine.productId ||
+              movement.warehouseId != source.warehouseId ||
+              movement.unitCost != sourceLine.unitCost ||
+              (sourceLine.expiryTrackingSnapshot == true
+                  ? movement.lotId == null
+                  : movement.lotId != null)) {
+            return _invalid('pos_sales_return_history_invalid');
+          }
+          if (sourceLine.expiryTrackingSnapshot == true) {
+            sourceAllocations
+                .putIfAbsent(sourceLine.id, () => [])
+                .add(movement);
+            allocationTotals.update(
+              sourceLine.id,
+              (quantity) => quantity + movement.quantity.scaledUnits,
+              ifAbsent: () => movement.quantity.scaledUnits,
+            );
+          }
+        }
+        for (final line in trackedSourceLines) {
+          if (allocationTotals[line.id] != line.quantity.scaledUnits) {
+            return _invalid('pos_sales_return_history_invalid');
+          }
+        }
+
+        for (final details in priorReturns) {
+          final returnMovementsResult = await stock.listMovementsForSource(
+            sourceType: 'pos_invoice',
+            sourceId: details.invoice.id,
+            type: PosStockMovementType.salesReturn,
+          );
+          if (returnMovementsResult.isFailure) {
+            return FailureResult(returnMovementsResult.failureOrNull!);
+          }
+          final returnLines = {
+            for (final line in details.invoice.lines) line.id: line,
+          };
+          final movementTotalsByReturnLine = <String, int>{};
+          for (final movement in returnMovementsResult.valueOrNull!) {
+            final returnLine = returnLines[movement.sourceLineId];
+            final sourceLine =
+                returnLine == null ? null : sourceById[returnLine.sourceLineId];
+            if (returnLine == null ||
+                sourceLine == null ||
+                movement.sourceType != 'pos_invoice' ||
+                movement.sourceId != details.invoice.id ||
+                movement.type != PosStockMovementType.salesReturn ||
+                movement.direction != PosStockMovementDirection.inbound ||
+                movement.productId != sourceLine.productId ||
+                movement.warehouseId != source.warehouseId ||
+                movement.unitCost != sourceLine.unitCost ||
+                (sourceLine.expiryTrackingSnapshot == true
+                    ? movement.lotId == null
+                    : movement.lotId != null)) {
+              return _invalid('pos_sales_return_history_invalid');
+            }
+            movementTotalsByReturnLine.update(
+              returnLine.id,
+              (quantity) => quantity + movement.quantity.scaledUnits,
+              ifAbsent: () => movement.quantity.scaledUnits,
+            );
+            final lotId = movement.lotId;
+            if (lotId != null) {
+              final byLot = returnedByLineAndLot.putIfAbsent(
+                sourceLine.id,
+                () => <String, int>{},
+              );
+              byLot.update(
+                lotId,
+                (quantity) => quantity + movement.quantity.scaledUnits,
+                ifAbsent: () => movement.quantity.scaledUnits,
+              );
+            }
+          }
+          for (final returnLine in details.invoice.lines) {
+            if (movementTotalsByReturnLine[returnLine.id] !=
+                returnLine.quantity.scaledUnits) {
+              return _invalid('pos_sales_return_history_invalid');
+            }
+          }
+        }
+      }
       final requested = <String, PosQuantity>{};
       if (input.voidSource) {
         for (final line in source.lines) {
@@ -198,12 +309,16 @@ final class BuildPosSalesReturnPostingUseCase {
               (priorLineDiscount[sourceLineId] ?? 0) + line.discount.minorUnits;
           priorLineTax[sourceLineId] =
               (priorLineTax[sourceLineId] ?? 0) + line.tax.minorUnits;
-          priorGross += PosMoneyMath.multiply(line.quantity, line.unitPrice).minorUnits;
+          priorGross += PosMoneyMath.multiply(
+            line.quantity,
+            line.unitPrice,
+          ).minorUnits;
           priorLineDiscountTotal += line.discount.minorUnits;
           priorLineTaxTotal += line.tax.minorUnits;
         }
       }
-      final priorGlobalDiscount = priorDocumentDiscount - priorLineDiscountTotal;
+      final priorGlobalDiscount =
+          priorDocumentDiscount - priorLineDiscountTotal;
       final priorGlobalTax = priorDocumentTax - priorLineTaxTotal;
       final sourceLineDiscount = source.lines.fold<int>(
         0,
@@ -213,7 +328,8 @@ final class BuildPosSalesReturnPostingUseCase {
         0,
         (sum, line) => sum + line.tax.minorUnits,
       );
-      final sourceGlobalDiscount = source.discount.minorUnits - sourceLineDiscount;
+      final sourceGlobalDiscount =
+          source.discount.minorUnits - sourceLineDiscount;
       final sourceGlobalTax = source.tax.minorUnits - sourceLineTax;
       if (sourceGlobalDiscount < 0 ||
           sourceGlobalTax < 0 ||
@@ -222,8 +338,11 @@ final class BuildPosSalesReturnPostingUseCase {
           priorGlobalDiscount > sourceGlobalDiscount ||
           priorGlobalTax > sourceGlobalTax ||
           priorGross > source.subtotal.minorUnits ||
-          priorQuantity.entries.any((entry) =>
-              entry.value > (sourceById[entry.key]?.quantity.scaledUnits ?? 0))) {
+          priorQuantity.entries.any(
+            (entry) =>
+                entry.value >
+                (sourceById[entry.key]?.quantity.scaledUnits ?? 0),
+          )) {
         return _invalid('pos_sales_return_history_invalid');
       }
 
@@ -270,25 +389,58 @@ final class BuildPosSalesReturnPostingUseCase {
           tax: Money.fromMinorUnits(tax, source.currency),
           sourceLineId: sourceLine.id,
           createdAt: input.createdAt,
+          expiryTrackingSnapshot: sourceLine.expiryTrackingSnapshot,
         );
         returnLines.add(line);
-        movements.add(
-          PosStockMovement.create(
-            id: '${input.returnInvoiceId}:movement:$lineIndex',
-            productId: sourceLine.productId,
-            warehouseId: source.warehouseId,
-            type: PosStockMovementType.salesReturn,
-            direction: PosStockMovementDirection.inbound,
-            quantity: entry.value,
-            unitCost: sourceLine.unitCost,
-            sourceType: 'pos_invoice',
-            sourceId: input.returnInvoiceId,
-            sourceLineId: lineId,
-            occurredAt: input.invoiceDate,
-            createdAt: input.createdAt,
-            idempotencyKey: '${input.idempotencyKey}:movement:$lineIndex',
-          ),
-        );
+        final returnAllocations = <({PosQuantity quantity, String? lotId})>[];
+        if (sourceLine.expiryTrackingSnapshot == true) {
+          var remaining = entry.value.scaledUnits;
+          for (final soldAllocation in sourceAllocations[sourceLine.id] ?? []) {
+            if (remaining == 0) break;
+            final lotId = soldAllocation.lotId!;
+            final alreadyReturned =
+                returnedByLineAndLot[sourceLine.id]?[lotId] ?? 0;
+            final available =
+                soldAllocation.quantity.scaledUnits - alreadyReturned;
+            if (available <= 0) continue;
+            final take = remaining < available ? remaining : available;
+            returnAllocations.add((
+              quantity: PosQuantity.fromScaled(take, scale: entry.value.scale),
+              lotId: lotId,
+            ));
+            remaining = (remaining - take).toInt();
+          }
+          if (remaining != 0) {
+            return _invalid('pos_sales_return_history_invalid');
+          }
+        } else {
+          returnAllocations.add((quantity: entry.value, lotId: null));
+        }
+        for (var allocationIndex = 0;
+            allocationIndex < returnAllocations.length;
+            allocationIndex++) {
+          final allocation = returnAllocations[allocationIndex];
+          final ordinal = allocationIndex.toString().padLeft(6, '0');
+          movements.add(
+            PosStockMovement.create(
+              id: '${input.returnInvoiceId}:movement:$lineIndex:$ordinal',
+              productId: sourceLine.productId,
+              warehouseId: source.warehouseId,
+              type: PosStockMovementType.salesReturn,
+              direction: PosStockMovementDirection.inbound,
+              quantity: allocation.quantity,
+              unitCost: sourceLine.unitCost,
+              sourceType: 'pos_invoice',
+              sourceId: input.returnInvoiceId,
+              sourceLineId: lineId,
+              lotId: allocation.lotId,
+              occurredAt: input.invoiceDate,
+              createdAt: input.createdAt,
+              idempotencyKey:
+                  '${input.idempotencyKey}:movement:$lineIndex:$ordinal',
+            ),
+          );
+        }
         lineIndex++;
       }
       if (returnLines.isEmpty) {
@@ -298,7 +450,8 @@ final class BuildPosSalesReturnPostingUseCase {
       final returnGross = returnLines.fold<int>(
         0,
         (sum, line) =>
-            sum + PosMoneyMath.multiply(line.quantity, line.unitPrice).minorUnits,
+            sum +
+            PosMoneyMath.multiply(line.quantity, line.unitPrice).minorUnits,
       );
       final cumulativeGross = priorGross + returnGross;
       if (cumulativeGross > source.subtotal.minorUnits) {
@@ -422,7 +575,8 @@ final class BuildPosSalesReturnPostingUseCase {
       final original = originals[index];
       final amount = index == originals.length - 1
           ? total.minorUnits - allocated
-          : (original.amount.minorUnits * total.minorUnits + denominator ~/ 2) ~/
+          : (original.amount.minorUnits * total.minorUnits +
+                  denominator ~/ 2) ~/
               denominator;
       if (amount <= 0) continue;
       allocated += amount;

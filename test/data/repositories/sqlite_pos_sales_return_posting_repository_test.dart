@@ -12,6 +12,7 @@ import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_sales_return_posting.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/entities/voucher.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
@@ -21,6 +22,7 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/entry_id.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/transaction_id.dart';
 import 'package:qayd/domain/value_objects/voucher_id.dart';
 import 'package:qayd/domain/value_objects/voucher_type.dart';
@@ -40,8 +42,10 @@ final class _CurrencyRepository implements CurrencyRepository {
       Success([currency]);
 
   @override
-  Future<Result<void>> save(CurrencyCode currency,
-          {bool isPredefined = false}) async =>
+  Future<Result<void>> save(
+    CurrencyCode currency, {
+    bool isPredefined = false,
+  }) async =>
       const Success(null);
 
   @override
@@ -102,7 +106,7 @@ Future<void> _createSchema(Database db) async {
   ''');
   await Migration040PosFoundation().up(db);
   await Migration041PosInvoiceMetadata().up(db);
-  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 45);
+  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 46);
 }
 
 Future<void> _seed(Database db) async {
@@ -190,6 +194,8 @@ PosSalesReturnPosting _returnPosting({
   int globalDiscount = 0,
   int globalTax = 0,
   bool voidSource = false,
+  bool tracked = false,
+  String? lotId,
 }) {
   final invoice = PosInvoice.draft(
     id: invoiceId,
@@ -216,11 +222,14 @@ PosSalesReturnPosting _returnPosting({
         tax: Money.zero(_currency),
         sourceLineId: 'sale-line-1',
         createdAt: _returnDate,
+        expiryTrackingSnapshot: tracked,
       ),
     ],
   ).post(_returnDate).applyPayment(
         Money.fromMinorUnits(
-            quantity * 500 - globalDiscount + globalTax, _currency),
+          quantity * 500 - globalDiscount + globalTax,
+          _currency,
+        ),
         _returnDate,
       );
   final refund = PosInvoicePayment.create(
@@ -244,6 +253,7 @@ PosSalesReturnPosting _returnPosting({
     sourceType: 'pos_invoice',
     sourceId: invoiceId,
     sourceLineId: '$invoiceId:line:0',
+    lotId: lotId,
     occurredAt: _returnDate,
     idempotencyKey: '$idempotencyKey:movement:0',
     createdAt: _returnDate,
@@ -316,6 +326,7 @@ void main() {
 
   group('SqlitePosSalesReturnPostingRepository', () {
     late Database db;
+    late SqlitePosStockMovementRepository stockRepository;
     late SqlitePosSalesReturnPostingRepository repository;
 
     setUp(() async {
@@ -332,13 +343,13 @@ void main() {
         PosInvoiceMapper.paymentToRow(_sourcePayment(), _sourceDate),
       );
       final runner = DatabaseTransactionRunner(db);
-      final stock = SqlitePosStockMovementRepository(
+      stockRepository = SqlitePosStockMovementRepository(
         db,
         _CurrencyRepository(_currency),
       );
       repository = SqlitePosSalesReturnPostingRepository(
         runner,
-        stock,
+        stockRepository,
         SqliteVoucherRepository(db, runner),
       );
     });
@@ -348,11 +359,13 @@ void main() {
     test(
         'commits return, stock, refund payment, relation, voucher and ledger atomically',
         () async {
-      final result = await repository.saveAtomically(_returnPosting(
-        invoiceId: 'return-1',
-        idempotencyKey: 'return-key-1',
-        quantity: 1,
-      ));
+      final result = await repository.saveAtomically(
+        _returnPosting(
+          invoiceId: 'return-1',
+          idempotencyKey: 'return-key-1',
+          quantity: 1,
+        ),
+      );
 
       expect(result.isSuccess, isTrue);
       expect(await db.query('pos_invoices'), hasLength(2));
@@ -362,217 +375,371 @@ void main() {
       expect(await db.query('pos_stock_movements'), hasLength(1));
       expect(await db.query('vouchers'), hasLength(2));
       expect(await db.query('ledger_entries'), hasLength(4));
-      final source = await db
-          .query('pos_invoices', where: 'id = ?', whereArgs: ['sale-1']);
+      final source = await db.query(
+        'pos_invoices',
+        where: 'id = ?',
+        whereArgs: ['sale-1'],
+      );
       expect(source.single['status'], 'partiallyReturned');
     });
 
-    test('accepts an exact retry without duplicating any persisted component',
+    test(
+        'returns tracked stock to its sale lot and replays without duplication',
         () async {
+      await db.update(
+        'pos_products',
+        {'expiry_tracking': 1},
+        where: 'id = ?',
+        whereArgs: ['product-1'],
+      );
+      await db.update(
+        'pos_invoice_lines',
+        {'expiry_tracking_snapshot': 1},
+        where: 'id = ?',
+        whereArgs: ['sale-line-1'],
+      );
+      final lot = PosStockLot.create(
+        id: 'sale-lot-1',
+        productId: 'product-1',
+        warehouseId: 'warehouse-1',
+        supplierLotNumber: 'SUP-1',
+        expiryDate: PosDate.fromParts(2026, 12, 31),
+        receivedQuantity: PosQuantity.whole(2),
+        unitCost: Money.fromMinorUnits(100, _currency),
+        createdAt: DateTime.utc(2026, 1, 1, 9),
+      );
+      expect(
+        (await stockRepository.createLotInTransaction(db, lot)).isSuccess,
+        isTrue,
+      );
+      expect(
+        (await stockRepository.append(
+          PosStockMovement.create(
+            id: 'sale-lot-receipt',
+            productId: 'product-1',
+            warehouseId: 'warehouse-1',
+            type: PosStockMovementType.purchase,
+            direction: PosStockMovementDirection.inbound,
+            quantity: PosQuantity.whole(2),
+            unitCost: Money.fromMinorUnits(100, _currency),
+            sourceType: 'test',
+            sourceId: 'sale-lot-receipt',
+            lotId: lot.id,
+            occurredAt: DateTime.utc(2026, 1, 1, 9),
+            idempotencyKey: 'sale-lot-receipt-key',
+            createdAt: DateTime.utc(2026, 1, 1, 9),
+          ),
+        ))
+            .isSuccess,
+        isTrue,
+      );
+      expect(
+        (await stockRepository.append(
+          PosStockMovement.create(
+            id: 'sale-lot-outbound',
+            productId: 'product-1',
+            warehouseId: 'warehouse-1',
+            type: PosStockMovementType.sale,
+            direction: PosStockMovementDirection.outbound,
+            quantity: PosQuantity.whole(2),
+            unitCost: Money.fromMinorUnits(100, _currency),
+            sourceType: 'pos_invoice',
+            sourceId: 'sale-1',
+            sourceLineId: 'sale-line-1',
+            lotId: lot.id,
+            occurredAt: _sourceDate,
+            idempotencyKey: 'sale-lot-outbound-key',
+            createdAt: _sourceDate,
+          ),
+        ))
+            .isSuccess,
+        isTrue,
+      );
       final posting = _returnPosting(
         invoiceId: 'return-1',
         idempotencyKey: 'return-key-1',
         quantity: 1,
+        tracked: true,
+        lotId: lot.id,
       );
-      expect((await repository.saveAtomically(posting)).isSuccess, isTrue);
-      final before = [
-        await db.query('pos_invoices', orderBy: 'id ASC'),
-        await db.query('pos_invoice_lines', orderBy: 'id ASC'),
-        await db.query('pos_payments', orderBy: 'id ASC'),
-        await db.query('pos_returns', orderBy: 'id ASC'),
-        await db.query('pos_stock_movements', orderBy: 'id ASC'),
-        await db.query('vouchers', orderBy: 'id ASC'),
-        await db.query('ledger_entries', orderBy: 'id ASC'),
-      ];
 
-      final retry = await repository.saveAtomically(posting);
+      final first = await repository.saveAtomically(posting);
+      final replay = await repository.saveAtomically(posting);
 
-      expect(retry.isSuccess, isTrue);
-      expect(await db.query('pos_invoices', orderBy: 'id ASC'), before[0]);
-      expect(await db.query('pos_invoice_lines', orderBy: 'id ASC'), before[1]);
-      expect(await db.query('pos_payments', orderBy: 'id ASC'), before[2]);
-      expect(await db.query('pos_returns', orderBy: 'id ASC'), before[3]);
+      expect(first.isSuccess, isTrue, reason: first.failureOrNull?.messageAr);
+      expect(replay.isSuccess, isTrue, reason: replay.failureOrNull?.messageAr);
       expect(
-          await db.query('pos_stock_movements', orderBy: 'id ASC'), before[4]);
-      expect(await db.query('vouchers', orderBy: 'id ASC'), before[5]);
-      expect(await db.query('ledger_entries', orderBy: 'id ASC'), before[6]);
+          (await db.query('pos_stock_lots'))
+              .single['remaining_quantity_scaled'],
+          1);
+      expect(
+        await db.query('pos_stock_movements'),
+        hasLength(3),
+      );
+      final returnMovement = (await db.query(
+        'pos_stock_movements',
+        where: 'movement_type = ?',
+        whereArgs: ['sales_return'],
+      ))
+          .single;
+      expect(returnMovement['lot_id'], lot.id);
+      final returnLine = (await db.query(
+        'pos_invoice_lines',
+        where: 'invoice_id = ?',
+        whereArgs: ['return-1'],
+      ))
+          .single;
+      expect(returnLine['expiry_tracking_snapshot'], 1);
     });
 
-    test('rejects altered payload under an existing idempotency key', () async {
-      expect(
-        (await repository.saveAtomically(_returnPosting(
+    test(
+      'accepts an exact retry without duplicating any persisted component',
+      () async {
+        final posting = _returnPosting(
           invoiceId: 'return-1',
           idempotencyKey: 'return-key-1',
           quantity: 1,
-        )))
+        );
+        expect((await repository.saveAtomically(posting)).isSuccess, isTrue);
+        final before = [
+          await db.query('pos_invoices', orderBy: 'id ASC'),
+          await db.query('pos_invoice_lines', orderBy: 'id ASC'),
+          await db.query('pos_payments', orderBy: 'id ASC'),
+          await db.query('pos_returns', orderBy: 'id ASC'),
+          await db.query('pos_stock_movements', orderBy: 'id ASC'),
+          await db.query('vouchers', orderBy: 'id ASC'),
+          await db.query('ledger_entries', orderBy: 'id ASC'),
+        ];
+
+        final retry = await repository.saveAtomically(posting);
+
+        expect(retry.isSuccess, isTrue);
+        expect(await db.query('pos_invoices', orderBy: 'id ASC'), before[0]);
+        expect(
+          await db.query('pos_invoice_lines', orderBy: 'id ASC'),
+          before[1],
+        );
+        expect(await db.query('pos_payments', orderBy: 'id ASC'), before[2]);
+        expect(await db.query('pos_returns', orderBy: 'id ASC'), before[3]);
+        expect(
+          await db.query('pos_stock_movements', orderBy: 'id ASC'),
+          before[4],
+        );
+        expect(await db.query('vouchers', orderBy: 'id ASC'), before[5]);
+        expect(await db.query('ledger_entries', orderBy: 'id ASC'), before[6]);
+      },
+    );
+
+    test('rejects altered payload under an existing idempotency key', () async {
+      expect(
+        (await repository.saveAtomically(
+          _returnPosting(
+            invoiceId: 'return-1',
+            idempotencyKey: 'return-key-1',
+            quantity: 1,
+          ),
+        ))
             .isSuccess,
         isTrue,
       );
 
-      final changed = await repository.saveAtomically(_returnPosting(
-        invoiceId: 'return-1',
-        idempotencyKey: 'return-key-1',
-        quantity: 2,
-      ));
+      final changed = await repository.saveAtomically(
+        _returnPosting(
+          invoiceId: 'return-1',
+          idempotencyKey: 'return-key-1',
+          quantity: 2,
+        ),
+      );
 
       expect(changed.isFailure, isTrue);
       expect(await db.query('pos_returns'), hasLength(1));
       expect(await db.query('ledger_entries'), hasLength(4));
     });
 
-    test('fails closed when an invoice exists without its atomic children',
-        () async {
-      final posting = _returnPosting(
-        invoiceId: 'return-1',
-        idempotencyKey: 'return-key-1',
-        quantity: 1,
-      );
-      await db.insert('pos_invoices', PosInvoiceMapper.toRow(posting.invoice));
+    test(
+      'fails closed when an invoice exists without its atomic children',
+      () async {
+        final posting = _returnPosting(
+          invoiceId: 'return-1',
+          idempotencyKey: 'return-key-1',
+          quantity: 1,
+        );
+        await db.insert(
+          'pos_invoices',
+          PosInvoiceMapper.toRow(posting.invoice),
+        );
 
-      final retry = await repository.saveAtomically(posting);
+        final retry = await repository.saveAtomically(posting);
 
-      expect(retry.isFailure, isTrue);
-      expect(await db.query('pos_invoice_lines'), hasLength(1));
-      expect(await db.query('pos_returns'), isEmpty);
-      expect(await db.query('pos_stock_movements'), isEmpty);
-      expect(await db.query('vouchers'), isEmpty);
-    });
+        expect(retry.isFailure, isTrue);
+        expect(await db.query('pos_invoice_lines'), hasLength(1));
+        expect(await db.query('pos_returns'), isEmpty);
+        expect(await db.query('pos_stock_movements'), isEmpty);
+        expect(await db.query('vouchers'), isEmpty);
+      },
+    );
 
-    test('rechecks cumulative returned quantities in the write transaction',
-        () async {
-      final first = await repository.saveAtomically(_returnPosting(
-        invoiceId: 'return-1',
-        idempotencyKey: 'return-key-1',
-        quantity: 1,
-      ));
-      expect(first.isSuccess, isTrue);
+    test(
+      'rechecks cumulative returned quantities in the write transaction',
+      () async {
+        final first = await repository.saveAtomically(
+          _returnPosting(
+            invoiceId: 'return-1',
+            idempotencyKey: 'return-key-1',
+            quantity: 1,
+          ),
+        );
+        expect(first.isSuccess, isTrue);
 
-      final overReturn = await repository.saveAtomically(_returnPosting(
-        invoiceId: 'return-2',
-        idempotencyKey: 'return-key-2',
-        quantity: 2,
-      ));
+        final overReturn = await repository.saveAtomically(
+          _returnPosting(
+            invoiceId: 'return-2',
+            idempotencyKey: 'return-key-2',
+            quantity: 2,
+          ),
+        );
 
-      expect(overReturn.isFailure, isTrue);
-      expect(await db.query('pos_returns'), hasLength(1));
-      expect(await db.query('pos_stock_movements'), hasLength(1));
-      expect(await db.query('vouchers'), hasLength(2));
-    });
+        expect(overReturn.isFailure, isTrue);
+        expect(await db.query('pos_returns'), hasLength(1));
+        expect(await db.query('pos_stock_movements'), hasLength(1));
+        expect(await db.query('vouchers'), hasLength(2));
+      },
+    );
 
     test('persists a full void as voided, not merely fully returned', () async {
-      final result = await repository.saveAtomically(_returnPosting(
-        invoiceId: 'return-void',
-        idempotencyKey: 'return-void-key',
-        quantity: 2,
-        voidSource: true,
-      ));
+      final result = await repository.saveAtomically(
+        _returnPosting(
+          invoiceId: 'return-void',
+          idempotencyKey: 'return-void-key',
+          quantity: 2,
+          voidSource: true,
+        ),
+      );
 
       expect(result.isSuccess, isTrue);
-      final source = await db
-          .query('pos_invoices', where: 'id = ?', whereArgs: ['sale-1']);
+      final source = await db.query(
+        'pos_invoices',
+        where: 'id = ?',
+        whereArgs: ['sale-1'],
+      );
       expect(source.single['status'], 'voided');
     });
 
-    test('rejects exact full-void replay when source status is not voided',
-        () async {
-      final posting = _returnPosting(
-        invoiceId: 'return-void',
-        idempotencyKey: 'return-void-key',
-        quantity: 2,
-        voidSource: true,
-      );
-      expect((await repository.saveAtomically(posting)).isSuccess, isTrue);
-      await db.update(
-        'pos_invoices',
-        {'status': 'fullyReturned'},
-        where: 'id = ?',
-        whereArgs: ['sale-1'],
-      );
+    test(
+      'rejects exact full-void replay when source status is not voided',
+      () async {
+        final posting = _returnPosting(
+          invoiceId: 'return-void',
+          idempotencyKey: 'return-void-key',
+          quantity: 2,
+          voidSource: true,
+        );
+        expect((await repository.saveAtomically(posting)).isSuccess, isTrue);
+        await db.update(
+          'pos_invoices',
+          {'status': 'fullyReturned'},
+          where: 'id = ?',
+          whereArgs: ['sale-1'],
+        );
 
-      final replay = await repository.saveAtomically(posting);
+        final replay = await repository.saveAtomically(posting);
 
-      expect(replay.isFailure, isTrue);
-    });
+        expect(replay.isFailure, isTrue);
+      },
+    );
 
-    test('rejects return replay when source status exceeds returned quantities',
-        () async {
-      final posting = _returnPosting(
-        invoiceId: 'return-partial',
-        idempotencyKey: 'return-partial-key',
-        quantity: 1,
-      );
-      expect((await repository.saveAtomically(posting)).isSuccess, isTrue);
-      await db.update(
-        'pos_invoices',
-        {'status': 'fullyReturned'},
-        where: 'id = ?',
-        whereArgs: ['sale-1'],
-      );
+    test(
+      'rejects return replay when source status exceeds returned quantities',
+      () async {
+        final posting = _returnPosting(
+          invoiceId: 'return-partial',
+          idempotencyKey: 'return-partial-key',
+          quantity: 1,
+        );
+        expect((await repository.saveAtomically(posting)).isSuccess, isTrue);
+        await db.update(
+          'pos_invoices',
+          {'status': 'fullyReturned'},
+          where: 'id = ?',
+          whereArgs: ['sale-1'],
+        );
 
-      final replay = await repository.saveAtomically(posting);
+        final replay = await repository.saveAtomically(posting);
 
-      expect(replay.isFailure, isTrue);
-    });
+        expect(replay.isFailure, isTrue);
+      },
+    );
 
-    test('allocates invoice-level discount and tax across sequential returns',
-        () async {
-      await db.delete('pos_payments',
-          where: 'invoice_id = ?', whereArgs: ['sale-1']);
-      await db.delete('pos_invoice_lines',
-          where: 'invoice_id = ?', whereArgs: ['sale-1']);
-      await db.delete('pos_invoices', where: 'id = ?', whereArgs: ['sale-1']);
-      final source = _sourceInvoice(globalDiscount: 101, globalTax: 51);
-      await db.insert('pos_invoices', PosInvoiceMapper.toRow(source));
-      await db.insert(
-          'pos_invoice_lines', PosInvoiceMapper.lineToRow(source.lines.single));
-      await db.insert(
-        'pos_payments',
-        PosInvoiceMapper.paymentToRow(_sourcePayment(amount: 950), _sourceDate),
-      );
+    test(
+      'allocates invoice-level discount and tax across sequential returns',
+      () async {
+        await db.delete(
+          'pos_payments',
+          where: 'invoice_id = ?',
+          whereArgs: ['sale-1'],
+        );
+        await db.delete(
+          'pos_invoice_lines',
+          where: 'invoice_id = ?',
+          whereArgs: ['sale-1'],
+        );
+        await db.delete('pos_invoices', where: 'id = ?', whereArgs: ['sale-1']);
+        final source = _sourceInvoice(globalDiscount: 101, globalTax: 51);
+        await db.insert('pos_invoices', PosInvoiceMapper.toRow(source));
+        await db.insert(
+          'pos_invoice_lines',
+          PosInvoiceMapper.lineToRow(source.lines.single),
+        );
+        await db.insert(
+          'pos_payments',
+          PosInvoiceMapper.paymentToRow(
+            _sourcePayment(amount: 950),
+            _sourceDate,
+          ),
+        );
 
-      final first = await repository.saveAtomically(_returnPosting(
-        invoiceId: 'return-1',
-        idempotencyKey: 'return-key-1',
-        quantity: 1,
-        globalDiscount: 51,
-        globalTax: 26,
-      ));
-      final second = await repository.saveAtomically(_returnPosting(
-        invoiceId: 'return-2',
-        idempotencyKey: 'return-key-2',
-        quantity: 1,
-        globalDiscount: 50,
-        globalTax: 25,
-      ));
+        final first = await repository.saveAtomically(
+          _returnPosting(
+            invoiceId: 'return-1',
+            idempotencyKey: 'return-key-1',
+            quantity: 1,
+            globalDiscount: 51,
+            globalTax: 26,
+          ),
+        );
+        final second = await repository.saveAtomically(
+          _returnPosting(
+            invoiceId: 'return-2',
+            idempotencyKey: 'return-key-2',
+            quantity: 1,
+            globalDiscount: 50,
+            globalTax: 25,
+          ),
+        );
 
-      expect(first.isSuccess, isTrue);
-      expect(second.isSuccess, isTrue);
-      final returns = await db.query(
-        'pos_invoices',
-        where: 'document_type = ?',
-        whereArgs: ['sales_return'],
-      );
-      expect(
-        returns.fold<int>(
-          0,
-          (sum, row) => sum + (row['discount_minor'] as int),
-        ),
-        101,
-      );
-      expect(
-        returns.fold<int>(
-          0,
-          (sum, row) => sum + (row['tax_minor'] as int),
-        ),
-        51,
-      );
-      expect(
-        returns.fold<int>(
-          0,
-          (sum, row) => sum + (row['total_minor'] as int),
-        ),
-        950,
-      );
-    });
+        expect(first.isSuccess, isTrue);
+        expect(second.isSuccess, isTrue);
+        final returns = await db.query(
+          'pos_invoices',
+          where: 'document_type = ?',
+          whereArgs: ['sales_return'],
+        );
+        expect(
+          returns.fold<int>(
+            0,
+            (sum, row) => sum + (row['discount_minor'] as int),
+          ),
+          101,
+        );
+        expect(
+          returns.fold<int>(0, (sum, row) => sum + (row['tax_minor'] as int)),
+          51,
+        );
+        expect(
+          returns.fold<int>(0, (sum, row) => sum + (row['total_minor'] as int)),
+          950,
+        );
+      },
+    );
   });
 }

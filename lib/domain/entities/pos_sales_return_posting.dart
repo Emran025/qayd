@@ -36,7 +36,6 @@ final class PosSalesReturnPosting {
         invoice.paid.minorUnits != invoice.total.minorUnits ||
         invoice.due.minorUnits != 0 ||
         invoice.lines.isEmpty ||
-        movements.length != invoice.lines.length ||
         (refundPayments.isEmpty && invoice.total.minorUnits > 0)) {
       throw InvalidPosInvoiceException.invalidTotals();
     }
@@ -55,13 +54,13 @@ final class PosSalesReturnPosting {
     }
 
     final movementLineIds = <String>{};
+    final movementQuantityByLine = <String, int>{};
     final movementIds = <String>{};
     final movementKeys = <String>{};
     for (final movement in movements) {
       final lineId = movement.sourceLineId;
       final line = lineId == null ? null : linesById[lineId];
       if (line == null ||
-          !movementLineIds.add(lineId!) ||
           !movementIds.add(movement.id) ||
           !movementKeys.add(movement.idempotencyKey) ||
           movement.sourceId != invoice.id ||
@@ -70,14 +69,26 @@ final class PosSalesReturnPosting {
           movement.direction != PosStockMovementDirection.inbound ||
           movement.warehouseId != invoice.warehouseId ||
           movement.productId != line.productId ||
-          movement.quantity.scaledUnits != line.quantity.scaledUnits ||
           movement.quantity.scale != line.quantity.scale ||
+          (line.expiryTrackingSnapshot == true
+              ? movement.lotId == null
+              : movement.lotId != null) ||
           movement.unitCost.minorUnits != line.unitCost.minorUnits ||
           movement.unitCost.currency != line.unitCost.currency) {
         throw InvalidPosInvoiceException.invalidLine();
       }
+      movementLineIds.add(lineId!);
+      movementQuantityByLine.update(
+        line.id,
+        (quantity) => quantity + movement.quantity.scaledUnits,
+        ifAbsent: () => movement.quantity.scaledUnits,
+      );
     }
-    if (movementLineIds.length != linesById.length) {
+    if (movementLineIds.length != linesById.length ||
+        linesById.values.any(
+          (line) =>
+              movementQuantityByLine[line.id] != line.quantity.scaledUnits,
+        )) {
       throw InvalidPosInvoiceException.invalidLine();
     }
 
@@ -130,16 +141,19 @@ final class PosSalesReturnPosting {
           !voucher.state.isConfirmed ||
           !voucherIds.add(voucher.id.value) ||
           posting.entries.length != 2 ||
-          posting.entries.any((entry) =>
-              entry.voucherId != voucher.id ||
-              entry.currency != voucher.currency ||
-              entry.amount.currency != voucher.currency ||
-              !ledgerEntryIds.add(entry.id.value))) {
+          posting.entries.any(
+            (entry) =>
+                entry.voucherId != voucher.id ||
+                entry.currency != voucher.currency ||
+                entry.amount.currency != voucher.currency ||
+                !ledgerEntryIds.add(entry.id.value),
+          )) {
         throw InvalidPosInvoiceException.invalidTotals();
       }
       final debits = posting.entries.where((entry) => entry.isDebit).toList();
       final credits = posting.entries.where((entry) => entry.isCredit).toList();
-      if (debits.length != 1 || credits.length != 1 ||
+      if (debits.length != 1 ||
+          credits.length != 1 ||
           debits.single.amount.minorUnits != voucher.amount.minorUnits ||
           credits.single.amount.minorUnits != voucher.amount.minorUnits) {
         throw InvalidPosInvoiceException.invalidTotals();

@@ -29,8 +29,10 @@ final class _CurrencyRepository implements CurrencyRepository {
   }
 
   @override
-  Future<Result<void>> save(CurrencyCode currency,
-          {bool isPredefined = false}) async =>
+  Future<Result<void>> save(
+    CurrencyCode currency, {
+    bool isPredefined = false,
+  }) async =>
       const Success(null);
 
   @override
@@ -78,7 +80,7 @@ void main() {
       await Migration040PosFoundation().up(db);
       await Migration041PosInvoiceMetadata().up(db);
       await Migration042PosProductCategories().up(db);
-      await MigrationRegistry.applyFromTo(db, fromVersion: 42, toVersion: 45);
+      await MigrationRegistry.applyFromTo(db, fromVersion: 42, toVersion: 46);
       repository = SqlitePosProductRepository(
         db,
         _CurrencyRepository(currency),
@@ -149,33 +151,41 @@ void main() {
       expect((await repository.list(search: '62900001')).valueOrNull, isEmpty);
     });
 
-    test('lists by active status and search, then deactivates immutably',
-        () async {
-      await repository.save(
-        product(id: 'product-1', sku: 'SKU-1', name: 'Coffee'),
-      );
-      await repository.save(
-        product(id: 'product-2', sku: 'SKU-2', name: 'Tea'),
-      );
+    test(
+      'lists by active status and search, then deactivates immutably',
+      () async {
+        await repository.save(
+          product(id: 'product-1', sku: 'SKU-1', name: 'Coffee'),
+        );
+        await repository.save(
+          product(id: 'product-2', sku: 'SKU-2', name: 'Tea'),
+        );
 
-      final before = await repository.list(search: 'Tea');
-      final disabled = await repository.deactivate('product-2');
-      final after = await repository.list();
-      final all = await repository.list(activeOnly: false);
+        final before = await repository.list(search: 'Tea');
+        final disabled = await repository.deactivate('product-2');
+        final after = await repository.list();
+        final all = await repository.list(activeOnly: false);
 
-      expect(before.valueOrNull, hasLength(1));
-      expect(before.valueOrNull!.single.name, 'Tea');
-      expect(disabled.isSuccess, isTrue);
-      expect(after.valueOrNull!.map((item) => item.id), contains('product-1'));
-      expect(after.valueOrNull!.map((item) => item.id),
-          isNot(contains('product-2')));
-      expect(all.valueOrNull, hasLength(2));
-      expect(
+        expect(before.valueOrNull, hasLength(1));
+        expect(before.valueOrNull!.single.name, 'Tea');
+        expect(disabled.isSuccess, isTrue);
+        expect(
+          after.valueOrNull!.map((item) => item.id),
+          contains('product-1'),
+        );
+        expect(
+          after.valueOrNull!.map((item) => item.id),
+          isNot(contains('product-2')),
+        );
+        expect(all.valueOrNull, hasLength(2));
+        expect(
           all.valueOrNull!
               .singleWhere((item) => item.id == 'product-2')
               .isActive,
-          isFalse);
-    });
+          isFalse,
+        );
+      },
+    );
 
     test('rejects a barcode already owned by another product', () async {
       await repository.save(
@@ -197,10 +207,13 @@ void main() {
 
       expect(result.isFailure, isTrue);
       expect(
-          (await repository.getByBarcode(PosBarcode('12345'))).valueOrNull!.id,
-          'product-1');
+        (await repository.getByBarcode(PosBarcode('12345'))).valueOrNull!.id,
+        'product-1',
+      );
       expect(
-          (await repository.list(activeOnly: false)).valueOrNull, hasLength(1));
+        (await repository.list(activeOnly: false)).valueOrNull,
+        hasLength(1),
+      );
     });
 
     test('rejects a product whose currency is not registered', () async {

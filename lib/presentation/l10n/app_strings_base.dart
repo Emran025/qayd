@@ -2438,14 +2438,21 @@ abstract class AppStringsBase {
 
   /// Share text for tripartite voucher notice.
   String voucherTripartiteShareText(
-          String sender, String receiver, String amount, String reference) =>
+    String sender,
+    String receiver,
+    String amount,
+    String reference,
+  ) =>
       'مرفق لكم إشعار تحويل مالي من حساب $sender إلى حساب $receiver.\n'
       'المبلغ: $amount\n'
       'المرجع: $reference\n';
 
   /// Share text for standard receipt/disbursement voucher.
   String voucherStandardShareText(
-          String voucherType, String counterpartyName, String amount) =>
+    String voucherType,
+    String counterpartyName,
+    String amount,
+  ) =>
       'مرفق لكم $voucherType للعميل $counterpartyName.\n'
       'المبلغ: $amount\n';
 
@@ -2834,6 +2841,15 @@ abstract class AppStringsBase {
   String get posPurchaseAddProduct => 'إضافة';
   String get posPurchaseAlreadyAdded => 'الصنف موجود في قائمة الاستلام.';
   String get posPurchaseQuantity => 'الكمية';
+  String get posPurchaseBatchSection => 'دفعات الصنف';
+  String get posPurchaseAddBatch => 'إضافة دفعة';
+  String get posPurchaseBatchQuantity => 'كمية الدفعة';
+  String get posPurchaseBatchExpiry => 'تاريخ انتهاء الدفعة';
+  String get posPurchaseSupplierLot => 'رقم دفعة المورد (اختياري)';
+  String get posPurchaseBatchExpiryRequired =>
+      'أدخل تاريخ انتهاء لكل دفعة من هذا الصنف.';
+  String get posPurchaseBatchSumInvalid =>
+      'يجب أن يساوي مجموع كميات الدفعات كمية سطر الشراء تماماً.';
   String get posPurchaseUnitCost => 'تكلفة الوحدة';
   String get posPurchaseSourceUnitPrice => 'سعر الوحدة بعملة فاتورة المورد';
   String get posPurchaseCurrencyLocked =>
@@ -2882,7 +2898,7 @@ abstract class AppStringsBase {
       'تعذر استعادة تفاصيل محاولة الشراء السابقة بأمان. لم يُرسل ترحيل جديد.';
   String get posPurchaseCartEmpty => 'أضف صنفاً واحداً على الأقل.';
   String get posPurchaseExpiryNotice =>
-      'الأصناف التي تتطلب تتبع الصلاحية غير متاحة للاستلام حتى تكتمل إدارة الدفعات.';
+      'يجب تسجيل تاريخ انتهاء لكل دفعة للصنف المتتبع.';
   String get posPurchaseLoadFailed => 'تعذر تحميل أصناف المشتريات.';
   String get posPurchaseSubmitFailed => 'تعذر ترحيل استلام الشراء.';
   String get posCheckoutTitle => 'نقطة البيع';
@@ -2957,6 +2973,14 @@ abstract class AppStringsBase {
   String get posStockScaleMismatch => 'مقياس كمية الحركة لا يطابق المنتج.';
   String get posStockCurrencyMismatch => 'عملة حركة المخزون غير متطابقة.';
   String get posStockInsufficient => 'لا توجد كمية كافية في المخزون.';
+  String get posStockLotRequired =>
+      'يجب ربط حركة هذا الصنف بدفعة معروفة وتاريخ صلاحية.';
+  String get posStockLotlessBalance =>
+      'يوجد رصيد قديم غير مرتبط بدفعة؛ أوقف البيع حتى تتم تسويته.';
+  String get posStockLotProjectionMismatch =>
+      'تعذر مطابقة رصيد الدفعة مع حركات المخزون؛ راجع الدفعات قبل المتابعة.';
+  String get posStockLotsInsufficient =>
+      'لا تكفي الدفعات المعروفة غير المنتهية لتلبية الكمية المطلوبة.';
   String get posStockNegativeResult => 'نتيجة حركة المخزون غير صالحة.';
   String get posStockIdempotencyExists => 'حركة المخزون مسجلة مسبقاً.';
   String get posStockInvalidMovement => 'بيانات حركة المخزون غير صالحة.';
@@ -3012,6 +3036,13 @@ abstract class AppStringsBase {
   String get posOpeningBalanceSelectProduct => 'يرجى اختيار منتج.';
   String get posOpeningBalanceNoProducts => 'أضف منتجاً إلى الكتالوج أولاً.';
   String get posOpeningBalanceQuantity => 'الكمية بوحدات القياس';
+  String get posOpeningBalanceBatch => 'دفعة الرصيد الافتتاحي';
+  String get posOpeningBalanceAddBatch => 'إضافة دفعة افتتاحية';
+  String get posOpeningBalanceBatchQuantity => 'كمية الدفعة';
+  String get posOpeningBalanceBatchExpiry => 'تاريخ انتهاء الدفعة';
+  String get posOpeningBalanceSupplierLot => 'رقم دفعة المورد (اختياري)';
+  String get posOpeningBalanceBatchSumInvalid =>
+      'يجب أن يساوي مجموع كميات الدفعات الكمية الافتتاحية تماماً.';
   String posOpeningBalanceQuantityHint(int scale) =>
       'أدخل الكمية كعدد صحيح بوحدات القياس المصغّرة (مقياس المنتج: $scale).';
   String get posOpeningBalanceUnitCost => 'تكلفة الوحدة بالوحدات الصغرى';

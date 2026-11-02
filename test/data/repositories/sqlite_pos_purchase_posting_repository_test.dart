@@ -15,6 +15,7 @@ import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_line_conversion.dart';
 import 'package:qayd/domain/entities/pos_purchase_posting.dart';
 import 'package:qayd/domain/entities/pos_purchase_request_identity.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/entities/voucher.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
@@ -24,6 +25,7 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/entry_id.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/transaction_id.dart';
 import 'package:qayd/domain/value_objects/voucher_id.dart';
 import 'package:qayd/domain/value_objects/voucher_type.dart';
@@ -48,8 +50,10 @@ final class _CurrencyRepository implements CurrencyRepository {
       Success([currency, ...otherCurrencies]);
 
   @override
-  Future<Result<void>> save(CurrencyCode currency,
-          {bool isPredefined = false}) async =>
+  Future<Result<void>> save(
+    CurrencyCode currency, {
+    bool isPredefined = false,
+  }) async =>
       const Success(null);
 
   @override
@@ -121,7 +125,7 @@ Future<void> _createSchema(Database db) async {
   ''');
   await Migration040PosFoundation().up(db);
   await Migration041PosInvoiceMetadata().up(db);
-  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 45);
+  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 46);
 }
 
 Future<void> _seed(Database db) async {
@@ -163,6 +167,7 @@ PosPurchasePosting _purchase({
   bool duplicateLedgerEntryId = false,
   bool convertedCost = false,
   bool applyProposedSalePrice = false,
+  bool tracked = false,
 }) {
   final date = DateTime.utc(2026, 1, 10, 10);
   const invoiceId = 'purchase-1';
@@ -207,6 +212,7 @@ PosPurchasePosting _purchase({
     proposedSalePrice: rate == null ? null : Money.fromMinorUnits(250, _usd),
     proposedSalePriceApplied: applyProposedSalePrice,
     productUpdatedAtSnapshot: rate == null ? null : DateTime.utc(2026, 1, 1),
+    expiryTrackingSnapshot: tracked,
   );
   final invoice = PosInvoice.draft(
     id: invoiceId,
@@ -220,6 +226,18 @@ PosPurchasePosting _purchase({
     now: date,
     counterpartyAccountId: AccountId('supplier'),
   ).post(date);
+  final lot = tracked
+      ? PosStockLot.create(
+          id: 'purchase-lot-1',
+          productId: 'product-1',
+          warehouseId: 'warehouse-1',
+          supplierLotNumber: 'SUP-1',
+          expiryDate: PosDate.fromParts(2026, 2, 1),
+          receivedQuantity: PosQuantity.whole(2),
+          unitCost: unitCost,
+          createdAt: date,
+        )
+      : null;
   final movement = PosStockMovement.create(
     id: 'purchase-movement-1',
     productId: 'product-1',
@@ -231,6 +249,7 @@ PosPurchasePosting _purchase({
     sourceType: 'pos_invoice',
     sourceId: invoiceId,
     sourceLineId: line.id,
+    lotId: lot?.id,
     occurredAt: date,
     idempotencyKey: 'purchase-stock-key-1',
     createdAt: date,
@@ -259,6 +278,7 @@ PosPurchasePosting _purchase({
   return PosPurchasePosting(
     invoice: invoice,
     movements: [movement],
+    lots: lot == null ? const [] : [lot],
     postings: [
       PosAccountingPosting(
         sourceId: invoiceId,
@@ -294,91 +314,146 @@ void main() {
 
     tearDown(() => db.close());
 
-    test('commits invoice, lines, stock, voucher and ledger atomically',
-        () async {
-      final result = await repository.saveAtomically(_purchase());
+    test(
+      'commits invoice, lines, stock, voucher and ledger atomically',
+      () async {
+        final result = await repository.saveAtomically(_purchase());
 
-      expect(result.isSuccess, isTrue);
-      expect(await db.query('pos_invoices'), hasLength(1));
-      expect(await db.query('pos_invoice_lines'), hasLength(1));
-      expect(await db.query('pos_stock_movements'), hasLength(1));
-      expect(await db.query('vouchers'), hasLength(1));
-      expect(await db.query('ledger_entries'), hasLength(2));
-    });
+        expect(result.isSuccess, isTrue);
+        expect(await db.query('pos_invoices'), hasLength(1));
+        expect(await db.query('pos_invoice_lines'), hasLength(1));
+        expect(await db.query('pos_stock_movements'), hasLength(1));
+        expect(await db.query('vouchers'), hasLength(1));
+        expect(await db.query('ledger_entries'), hasLength(2));
+      },
+    );
 
     test(
-        'atomically saves converted cost and an explicitly approved sale price',
-        () async {
-      await db.update(
-        'pos_products',
-        {'currency_code': _usd.code},
-        where: 'id = ?',
-        whereArgs: ['product-1'],
-      );
+      'atomically persists tracked lots and exact replay adds nothing',
+      () async {
+        await db.update(
+          'pos_products',
+          {'expiry_tracking': 1},
+          where: 'id = ?',
+          whereArgs: ['product-1'],
+        );
+        final purchase = _purchase(tracked: true);
 
-      final result = await repository.saveAtomically(
-        _purchase(convertedCost: true, applyProposedSalePrice: true),
-      );
+        final first = await repository.saveAtomically(purchase);
+        final replay = await repository.saveAtomically(purchase);
 
-      expect(result.isSuccess, isTrue, reason: result.failureOrNull?.messageAr);
-      final product = (await db.query('pos_products')).single;
-      expect(product['purchase_price_minor'], 200);
-      expect(product['sale_price_minor'], 250);
-      expect(product['currency_code'], _usd.code);
-      final line = (await db.query('pos_invoice_lines')).single;
-      expect(line['unit_cost_currency_code'], _usd.code);
-      expect(line['conversion_source_minor'], 100);
-      expect(line['conversion_target_minor'], 200);
-      expect(line['fx_rate_id'], 'sar-usd-rate-1');
-    });
+        expect(first.isSuccess, isTrue, reason: first.failureOrNull?.messageAr);
+        expect(
+          replay.isSuccess,
+          isTrue,
+          reason: replay.failureOrNull?.messageAr,
+        );
+        expect(await db.query('pos_stock_lots'), hasLength(1));
+        expect(await db.query('pos_stock_movements'), hasLength(1));
+        expect(
+          (await db.query('pos_stock_movements')).single['lot_id'],
+          'purchase-lot-1',
+        );
+        expect(
+          (await db.query('pos_stock_lots'))
+              .single['remaining_quantity_scaled'],
+          2,
+        );
+        expect(
+          (await db.query('pos_invoice_lines'))
+              .single['expiry_tracking_snapshot'],
+          1,
+        );
+      },
+    );
 
-    test('keeps the catalog sale price when the proposal is not approved',
-        () async {
-      await db.update(
-        'pos_products',
-        {'currency_code': _usd.code},
-        where: 'id = ?',
-        whereArgs: ['product-1'],
-      );
+    test(
+      'atomically saves converted cost and an explicitly approved sale price',
+      () async {
+        await db.update(
+          'pos_products',
+          {'currency_code': _usd.code},
+          where: 'id = ?',
+          whereArgs: ['product-1'],
+        );
 
-      final result = await repository.saveAtomically(
-        _purchase(convertedCost: true),
-      );
+        final result = await repository.saveAtomically(
+          _purchase(convertedCost: true, applyProposedSalePrice: true),
+        );
 
-      expect(result.isSuccess, isTrue, reason: result.failureOrNull?.messageAr);
-      final product = (await db.query('pos_products')).single;
-      expect(product['purchase_price_minor'], 200);
-      expect(product['sale_price_minor'], 500);
-    });
+        expect(
+          result.isSuccess,
+          isTrue,
+          reason: result.failureOrNull?.messageAr,
+        );
+        final product = (await db.query('pos_products')).single;
+        expect(product['purchase_price_minor'], 200);
+        expect(product['sale_price_minor'], 250);
+        expect(product['currency_code'], _usd.code);
+        final line = (await db.query('pos_invoice_lines')).single;
+        expect(line['unit_cost_currency_code'], _usd.code);
+        expect(line['conversion_source_minor'], 100);
+        expect(line['conversion_target_minor'], 200);
+        expect(line['fx_rate_id'], 'sar-usd-rate-1');
+      },
+    );
 
-    test('retains retry identity through commit until UI acknowledges success',
-        () async {
-      final fingerprint = List.filled(64, 'a').join();
-      final identity = PosPurchaseRequestIdentity(
-        invoiceId: 'purchase-1',
-        idempotencyKey: 'purchase-key-1',
-        createdAt: DateTime.utc(2026, 1, 10, 10),
-      );
-      await db.insert('app_settings', {
-        'key': 'pos_purchase_request:$fingerprint',
-        'value':
-            '{"invoice_id":"purchase-1","idempotency_key":"purchase-key-1","created_at":"2026-01-10T10:00:00.000Z"}',
-      });
+    test(
+      'keeps the catalog sale price when the proposal is not approved',
+      () async {
+        await db.update(
+          'pos_products',
+          {'currency_code': _usd.code},
+          where: 'id = ?',
+          whereArgs: ['product-1'],
+        );
 
-      final result = await repository.saveAtomically(_purchase());
+        final result = await repository.saveAtomically(
+          _purchase(convertedCost: true),
+        );
 
-      expect(result.isSuccess, isTrue);
-      expect(await db.query('app_settings'), hasLength(1));
-      expect(await db.query('pos_invoices'), hasLength(1));
+        expect(
+          result.isSuccess,
+          isTrue,
+          reason: result.failureOrNull?.messageAr,
+        );
+        final product = (await db.query('pos_products')).single;
+        expect(product['purchase_price_minor'], 200);
+        expect(product['sale_price_minor'], 500);
+      },
+    );
 
-      final acknowledged = await SqlitePosPurchaseRequestIdentityRepository(db)
-          .acknowledgeCommitted(
-        fingerprintHash: fingerprint,
-        identity: identity,
-      );
-      expect(acknowledged.isSuccess, isTrue);
-      expect(await db.query('app_settings'), isEmpty);
-    });
+    test(
+      'retains retry identity through commit until UI acknowledges success',
+      () async {
+        final fingerprint = List.filled(64, 'a').join();
+        final identity = PosPurchaseRequestIdentity(
+          invoiceId: 'purchase-1',
+          idempotencyKey: 'purchase-key-1',
+          createdAt: DateTime.utc(2026, 1, 10, 10),
+        );
+        await db.insert('app_settings', {
+          'key': 'pos_purchase_request:$fingerprint',
+          'value':
+              '{"invoice_id":"purchase-1","idempotency_key":"purchase-key-1","created_at":"2026-01-10T10:00:00.000Z"}',
+        });
+
+        final result = await repository.saveAtomically(_purchase());
+
+        expect(result.isSuccess, isTrue);
+        expect(await db.query('app_settings'), hasLength(1));
+        expect(await db.query('pos_invoices'), hasLength(1));
+
+        final acknowledged =
+            await SqlitePosPurchaseRequestIdentityRepository(db)
+                .acknowledgeCommitted(
+          fingerprintHash: fingerprint,
+          identity: identity,
+        );
+        expect(acknowledged.isSuccess, isTrue);
+        expect(await db.query('app_settings'), isEmpty);
+      },
+    );
 
     test('exact replay does not duplicate or mutate ledger rows', () async {
       final purchase = _purchase();
@@ -417,44 +492,57 @@ void main() {
 
       await db.update(
         'pos_products',
-        {'currency_code': _usd.code},
+        {'currency_code': _usd.code, 'expiry_tracking': 1},
         where: 'id = ?',
         whereArgs: ['product-1'],
       );
       final originalProduct = (await db.query('pos_products')).single;
-      final result = await repository.saveAtomically(_purchase(
-        duplicateLedgerEntryId: true,
-        convertedCost: true,
-        applyProposedSalePrice: true,
-      ));
+      final result = await repository.saveAtomically(
+        _purchase(
+          duplicateLedgerEntryId: true,
+          convertedCost: true,
+          applyProposedSalePrice: true,
+          tracked: true,
+        ),
+      );
 
       expect(result.isFailure, isTrue);
       expect(await db.query('pos_invoices'), isEmpty);
       expect(await db.query('pos_invoice_lines'), isEmpty);
       expect(await db.query('pos_stock_movements'), isEmpty);
+      expect(await db.query('pos_stock_lots'), isEmpty);
       expect(await db.query('vouchers'), isEmpty);
       expect(await db.query('ledger_entries'), hasLength(1));
       final productAfterFailure = (await db.query('pos_products')).single;
-      expect(productAfterFailure['purchase_price_minor'],
-          originalProduct['purchase_price_minor']);
-      expect(productAfterFailure['sale_price_minor'],
-          originalProduct['sale_price_minor']);
+      expect(
+        productAfterFailure['purchase_price_minor'],
+        originalProduct['purchase_price_minor'],
+      );
+      expect(
+        productAfterFailure['sale_price_minor'],
+        originalProduct['sale_price_minor'],
+      );
       expect(productAfterFailure['updated_at'], originalProduct['updated_at']);
     });
 
-    test('fails closed when invoice exists without its stock/accounting rows',
-        () async {
-      final purchase = _purchase();
-      await db.insert('pos_invoices', PosInvoiceMapper.toRow(purchase.invoice));
+    test(
+      'fails closed when invoice exists without its stock/accounting rows',
+      () async {
+        final purchase = _purchase();
+        await db.insert(
+          'pos_invoices',
+          PosInvoiceMapper.toRow(purchase.invoice),
+        );
 
-      final result = await repository.saveAtomically(purchase);
+        final result = await repository.saveAtomically(purchase);
 
-      expect(result.isFailure, isTrue);
-      expect(await db.query('pos_invoices'), hasLength(1));
-      expect(await db.query('pos_invoice_lines'), isEmpty);
-      expect(await db.query('pos_stock_movements'), isEmpty);
-      expect(await db.query('vouchers'), isEmpty);
-      expect(await db.query('ledger_entries'), isEmpty);
-    });
+        expect(result.isFailure, isTrue);
+        expect(await db.query('pos_invoices'), hasLength(1));
+        expect(await db.query('pos_invoice_lines'), isEmpty);
+        expect(await db.query('pos_stock_movements'), isEmpty);
+        expect(await db.query('vouchers'), isEmpty);
+        expect(await db.query('ledger_entries'), isEmpty);
+      },
+    );
   });
 }

@@ -7,6 +7,7 @@ import 'package:qayd/domain/entities/pos_invoice_line_conversion.dart';
 import 'package:qayd/domain/entities/pos_currency_rate.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_purchase_posting.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/entities/pos_template_definition.dart';
 import 'package:qayd/domain/entities/voucher.dart';
@@ -20,6 +21,7 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/entry_id.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/transaction_id.dart';
 import 'package:qayd/domain/value_objects/voucher_id.dart';
 import 'package:qayd/domain/value_objects/voucher_type.dart';
@@ -63,6 +65,7 @@ final class BuildPosPurchaseLineInput {
     this.applyProposedSalePrice = false,
     this.rateSnapshot,
     this.productUpdatedAtSnapshot,
+    this.batches = const [],
   });
 
   final String productId;
@@ -73,6 +76,21 @@ final class BuildPosPurchaseLineInput {
   final bool applyProposedSalePrice;
   final PosCurrencyRateQuote? rateSnapshot;
   final DateTime? productUpdatedAtSnapshot;
+  final List<BuildPosPurchaseBatchInput> batches;
+}
+
+final class BuildPosPurchaseBatchInput {
+  const BuildPosPurchaseBatchInput({
+    required this.id,
+    required this.quantity,
+    required this.expiryDate,
+    this.supplierLotNumber,
+  });
+
+  final String id;
+  final PosQuantity quantity;
+  final PosDate expiryDate;
+  final String? supplierLotNumber;
 }
 
 /// Builds the complete immutable purchase payload without writing to SQLite.
@@ -143,6 +161,7 @@ final class BuildPosPurchasePostingUseCase {
 
       final lines = <PosInvoiceLine>[];
       final movements = <PosStockMovement>[];
+      final lots = <PosStockLot>[];
       for (var index = 0; index < input.lines.length; index++) {
         final request = input.lines[index];
         if (!request.quantity.isPositive) {
@@ -163,8 +182,42 @@ final class BuildPosPurchasePostingUseCase {
                 product.updatedAt.toUtc()) {
           return _invalid('pos_purchase_product_changed');
         }
+        if (product.expiryTracking && request.batches.isEmpty) {
+          return FailureResult(
+            ValidationFailure(
+              messageAr: AppStrings.posPurchaseBatchExpiryRequired,
+              code: 'pos_purchase_expiry_lot_required',
+            ),
+          );
+        }
+        if (!product.expiryTracking && request.batches.isNotEmpty) {
+          return _invalid('pos_purchase_batches_not_supported');
+        }
         if (product.expiryTracking) {
-          return _invalid('pos_purchase_expiry_lot_required');
+          final batchIds = <String>{};
+          var allocatedScaled = 0;
+          for (final batch in request.batches) {
+            if (batch.id.trim().isEmpty ||
+                !batchIds.add(batch.id.trim()) ||
+                !batch.quantity.isPositive ||
+                batch.quantity.scale != request.quantity.scale) {
+              return FailureResult(
+                ValidationFailure(
+                  messageAr: AppStrings.posPurchaseBatchSumInvalid,
+                  code: 'pos_purchase_batches_invalid',
+                ),
+              );
+            }
+            allocatedScaled += batch.quantity.scaledUnits;
+          }
+          if (allocatedScaled != request.quantity.scaledUnits) {
+            return FailureResult(
+              ValidationFailure(
+                messageAr: AppStrings.posPurchaseBatchSumInvalid,
+                code: 'pos_purchase_batches_quantity_mismatch',
+              ),
+            );
+          }
         }
 
         final costMinor = request.unitCostMinor ??
@@ -230,25 +283,65 @@ final class BuildPosPurchasePostingUseCase {
           proposedSalePrice: proposedSalePrice,
           proposedSalePriceApplied: request.applyProposedSalePrice,
           productUpdatedAtSnapshot: product.updatedAt,
+          expiryTrackingSnapshot: product.expiryTracking,
         );
         lines.add(line);
-        movements.add(
-          PosStockMovement.create(
-            id: '${input.invoiceId}:movement:${index + 1}',
-            productId: product.id,
-            warehouseId: input.warehouseId,
-            type: PosStockMovementType.purchase,
-            direction: PosStockMovementDirection.inbound,
-            quantity: request.quantity,
-            unitCost: unitCost,
-            sourceType: 'pos_invoice',
-            sourceId: input.invoiceId,
-            sourceLineId: lineId,
-            occurredAt: input.invoiceDate,
-            idempotencyKey: '${input.idempotencyKey}:stock:$lineId',
-            createdAt: input.createdAt,
-          ),
-        );
+        if (product.expiryTracking) {
+          for (var batchIndex = 0;
+              batchIndex < request.batches.length;
+              batchIndex++) {
+            final batch = request.batches[batchIndex];
+            final ordinal = (batchIndex + 1).toString().padLeft(6, '0');
+            final lot = PosStockLot.create(
+              id: batch.id,
+              productId: product.id,
+              warehouseId: input.warehouseId,
+              supplierLotNumber: batch.supplierLotNumber,
+              expiryDate: batch.expiryDate,
+              receivedQuantity: batch.quantity,
+              unitCost: unitCost,
+              createdAt: input.createdAt,
+            );
+            lots.add(lot);
+            movements.add(
+              PosStockMovement.create(
+                id: '${input.invoiceId}:movement:${index + 1}:batch:$ordinal',
+                productId: product.id,
+                warehouseId: input.warehouseId,
+                type: PosStockMovementType.purchase,
+                direction: PosStockMovementDirection.inbound,
+                quantity: batch.quantity,
+                unitCost: unitCost,
+                sourceType: 'pos_invoice',
+                sourceId: input.invoiceId,
+                sourceLineId: lineId,
+                lotId: lot.id,
+                occurredAt: input.invoiceDate,
+                idempotencyKey:
+                    '${input.idempotencyKey}:stock:$lineId:$ordinal',
+                createdAt: input.createdAt,
+              ),
+            );
+          }
+        } else {
+          movements.add(
+            PosStockMovement.create(
+              id: '${input.invoiceId}:movement:${index + 1}',
+              productId: product.id,
+              warehouseId: input.warehouseId,
+              type: PosStockMovementType.purchase,
+              direction: PosStockMovementDirection.inbound,
+              quantity: request.quantity,
+              unitCost: unitCost,
+              sourceType: 'pos_invoice',
+              sourceId: input.invoiceId,
+              sourceLineId: lineId,
+              occurredAt: input.invoiceDate,
+              idempotencyKey: '${input.idempotencyKey}:stock:$lineId',
+              createdAt: input.createdAt,
+            ),
+          );
+        }
       }
 
       var invoice = PosInvoice.draft(
@@ -308,8 +401,9 @@ final class BuildPosPurchasePostingUseCase {
                 input.paymentAccountId != posCashId)) {
           return _invalid('pos_purchase_payment_account_required');
         }
-        final paymentAccountCheck =
-            await _requireActiveAccount(paymentAccountId);
+        final paymentAccountCheck = await _requireActiveAccount(
+          paymentAccountId,
+        );
         if (paymentAccountCheck.isFailure) {
           return FailureResult(paymentAccountCheck.failureOrNull!);
         }
@@ -360,6 +454,7 @@ final class BuildPosPurchasePostingUseCase {
         PosPurchasePosting(
           invoice: invoice,
           movements: movements,
+          lots: lots,
           postings: postings,
           payments: payments,
         ),
@@ -427,9 +522,6 @@ final class BuildPosPurchasePostingUseCase {
   }
 
   FailureResult<PosPurchasePosting> _invalid(String code) => FailureResult(
-        ValidationFailure(
-          messageAr: AppStrings.posInvoiceInvalid,
-          code: code,
-        ),
+        ValidationFailure(messageAr: AppStrings.posInvoiceInvalid, code: code),
       );
 }

@@ -6,6 +6,7 @@ import 'package:qayd/application/pos/record_pos_stock_movement_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/repositories/governance_repository.dart';
 import 'package:qayd/domain/repositories/pos_product_repository.dart';
@@ -15,6 +16,7 @@ import 'package:qayd/domain/value_objects/governance_status.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_barcode.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/submit_activation_request.dart';
 import 'package:qayd/presentation/pos/pos_stock_cubit.dart';
 
@@ -29,13 +31,15 @@ final class _GovernanceRepository implements GovernanceRepository {
   final GovernanceStatus status;
 
   @override
-  Future<Result<GovernanceStatus>> getStatus(
-          {bool forceRefresh = false}) async =>
+  Future<Result<GovernanceStatus>> getStatus({
+    bool forceRefresh = false,
+  }) async =>
       Success(status);
 
   @override
   Future<Result<void>> submitActivation(
-          SubmitActivationRequest request) async =>
+    SubmitActivationRequest request,
+  ) async =>
       const Success(null);
 }
 
@@ -82,6 +86,22 @@ final class _StockRepository implements PosStockMovementRepository {
       const Success(null);
 
   @override
+  Future<Result<List<PosStockLot>>> getSellableLots({
+    required String productId,
+    required String warehouseId,
+    required PosDate businessDate,
+  }) async =>
+      const Success([]);
+
+  @override
+  Future<Result<List<PosStockMovement>>> listMovementsForSource({
+    required String sourceType,
+    required String sourceId,
+    PosStockMovementType? type,
+  }) async =>
+      const Success([]);
+
+  @override
   Future<Result<List<PosStockMovement>>> listMovements({
     required String warehouseId,
     String? productId,
@@ -90,7 +110,8 @@ final class _StockRepository implements PosStockMovementRepository {
     DateTime? untilExclusive,
     int limit = 100,
     int offset = 0,
-  }) async => const Success([]);
+  }) async =>
+      const Success([]);
 
   @override
   Future<Result<void>> append(PosStockMovement movement) async {
@@ -99,11 +120,8 @@ final class _StockRepository implements PosStockMovementRepository {
   }
 }
 
-CurrencyCode _currency() => CurrencyCode(
-      code: 'SAR',
-      nameAr: 'ريال سعودي',
-      symbol: 'ر.س',
-    );
+CurrencyCode _currency() =>
+    CurrencyCode(code: 'SAR', nameAr: 'ريال سعودي', symbol: 'ر.س');
 
 PosProduct _product(CurrencyCode currency) => PosProduct.create(
       id: 'product-1',

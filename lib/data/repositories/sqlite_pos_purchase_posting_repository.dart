@@ -37,6 +37,15 @@ final class SqlitePosPurchasePostingRepository
           );
         }
 
+        for (final lot in posting.lots) {
+          final result = await _stockRepository.createLotInTransaction(
+            txn,
+            lot,
+          );
+          if (result.isFailure) {
+            throw _AtomicPurchaseFailure(result.failureOrNull!);
+          }
+        }
         for (final movement in posting.movements) {
           final result = await _stockRepository.appendInTransaction(
             txn,
@@ -62,32 +71,32 @@ final class SqlitePosPurchasePostingRepository
             'pos_products',
             productValues,
             where: 'id = ? AND updated_at = ?',
-            whereArgs: [
-              line.productId,
-              snapshot.toUtc().toIso8601String(),
-            ],
+            whereArgs: [line.productId, snapshot.toUtc().toIso8601String()],
           );
           if (updated != 1) {
-            throw _AtomicPurchaseFailure(ValidationFailure(
-              messageAr: AppStrings.posProductSaveFailed,
-              code: 'pos_purchase_product_changed',
-            ));
+            throw _AtomicPurchaseFailure(
+              ValidationFailure(
+                messageAr: AppStrings.posProductSaveFailed,
+                code: 'pos_purchase_product_changed',
+              ),
+            );
           }
         }
 
         await txn.insert(
-            'pos_invoices', PosInvoiceMapper.toRow(posting.invoice));
+          'pos_invoices',
+          PosInvoiceMapper.toRow(posting.invoice),
+        );
         for (final line in posting.invoice.lines) {
           await txn.insert(
-              'pos_invoice_lines', PosInvoiceMapper.lineToRow(line));
+            'pos_invoice_lines',
+            PosInvoiceMapper.lineToRow(line),
+          );
         }
         for (final payment in posting.payments) {
           await txn.insert(
             'pos_payments',
-            PosInvoiceMapper.paymentToRow(
-              payment,
-              posting.invoice.createdAt,
-            ),
+            PosInvoiceMapper.paymentToRow(payment, posting.invoice.createdAt),
           );
         }
         for (final accountingPosting in posting.postings) {
@@ -163,16 +172,18 @@ final class SqlitePosPurchasePostingRepository
       orderBy: 'id ASC',
     );
     final expectedPayments = posting.payments
-        .map((payment) => PosInvoiceMapper.paymentToRow(
-              payment,
-              posting.invoice.createdAt,
-            ))
+        .map(
+          (payment) => PosInvoiceMapper.paymentToRow(
+            payment,
+            posting.invoice.createdAt,
+          ),
+        )
         .toList()
       ..sort(_compareIdMaps);
     final paymentsMatch = payments.length == expectedPayments.length &&
         _rowsMatch(payments, expectedPayments, ignored: const {'created_at'});
 
-    var movementState = _PurchaseState.exact;
+    var existingMovementCount = 0;
     for (final movement in posting.movements) {
       final result = await _stockRepository.getByIdempotencyKeyInTransaction(
         executor,
@@ -181,10 +192,60 @@ final class SqlitePosPurchasePostingRepository
       if (result.isFailure) throw _AtomicPurchaseFailure(result.failureOrNull!);
       final existing = result.valueOrNull;
       if (existing == null) {
-        movementState = _PurchaseState.absent;
+        continue;
       } else if (!_sameMovement(existing, movement)) {
         return _PurchaseState.conflict;
+      } else {
+        existingMovementCount++;
       }
+    }
+    final sourceMovementRows = await executor.query(
+      'pos_stock_movements',
+      columns: ['idempotency_key'],
+      where: "source_type = 'pos_invoice' AND source_id = ?",
+      whereArgs: [posting.invoice.id],
+    );
+    if (sourceMovementRows.length > posting.movements.length) {
+      return _PurchaseState.conflict;
+    }
+    final movementState = existingMovementCount == posting.movements.length
+        ? _PurchaseState.exact
+        : existingMovementCount == 0
+            ? _PurchaseState.absent
+            : _PurchaseState.partial;
+
+    var foundLots = 0;
+    var lotState =
+        posting.lots.isEmpty ? _PurchaseState.exact : _PurchaseState.absent;
+    for (final lot in posting.lots) {
+      final rows = await executor.query(
+        'pos_stock_lots',
+        where: 'id = ?',
+        whereArgs: [lot.id],
+        limit: 1,
+      );
+      if (rows.isEmpty) continue;
+      foundLots++;
+      final row = rows.first;
+      if (row['product_id'] != lot.productId ||
+          row['warehouse_id'] != lot.warehouseId ||
+          row['lot_number'] != lot.supplierLotNumber ||
+          row['expiry_date'] != lot.expiryDate?.isoDate ||
+          (row['received_quantity_scaled'] as num).toInt() !=
+              lot.receivedQuantity.scaledUnits ||
+          (row['quantity_scale'] as num).toInt() !=
+              lot.receivedQuantity.scale ||
+          (row['unit_cost_minor'] as num).toInt() != lot.unitCost.minorUnits ||
+          row['currency_code'] != lot.unitCost.currency.code) {
+        return _PurchaseState.conflict;
+      }
+    }
+    if (posting.lots.isNotEmpty) {
+      lotState = foundLots == posting.lots.length
+          ? _PurchaseState.exact
+          : foundLots == 0
+              ? _PurchaseState.absent
+              : _PurchaseState.partial;
     }
 
     final sourceVoucherRows = await executor.query(
@@ -249,12 +310,14 @@ final class SqlitePosPurchasePostingRepository
         linesMatch &&
         paymentsMatch &&
         movementState == _PurchaseState.exact &&
+        lotState == _PurchaseState.exact &&
         postingState == _PurchaseState.exact;
     if (allExact) return _PurchaseState.exact;
     if (!invoiceExists &&
         lines.isEmpty &&
         payments.isEmpty &&
         movementState == _PurchaseState.absent &&
+        (posting.lots.isEmpty || lotState == _PurchaseState.absent) &&
         postingState == _PurchaseState.absent) {
       return _PurchaseState.absent;
     }

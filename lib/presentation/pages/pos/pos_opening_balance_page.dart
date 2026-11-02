@@ -4,6 +4,8 @@ import 'package:qayd/application/pos/get_pos_stock_balance_use_case.dart';
 import 'package:qayd/application/pos/post_pos_opening_balance_atomically_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
+import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
 import 'package:qayd/presentation/components/inputs/qayd_numeric_field.dart';
@@ -14,8 +16,9 @@ import 'package:qayd/presentation/pos/pos_catalog_cubit.dart';
 import 'package:qayd/presentation/pos/pos_stock_cubit.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
 
-typedef PostPosOpeningBalance =
-    Future<Result<void>> Function(PostPosOpeningBalanceInput input);
+typedef PostPosOpeningBalance = Future<Result<void>> Function(
+  PostPosOpeningBalanceInput input,
+);
 
 /// Records an append-only opening stock movement for one product.
 class PosOpeningBalancePage extends StatefulWidget {
@@ -40,7 +43,9 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
   final _formKey = GlobalKey<FormState>();
   final _quantityController = TextEditingController();
   final _costController = TextEditingController();
+  final _supplierLotController = TextEditingController();
   PosProduct? _selectedProduct;
+  PosDate? _expiryDate;
   bool _submitted = false;
   String? _retryFingerprint;
   String? _retryIdempotencyKey;
@@ -55,12 +60,15 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
   void dispose() {
     _quantityController.dispose();
     _costController.dispose();
+    _supplierLotController.dispose();
     super.dispose();
   }
 
   void _selectProduct(PosProduct? product) {
     setState(() {
       _selectedProduct = product;
+      _expiryDate = null;
+      _supplierLotController.clear();
       _retryFingerprint = null;
       _retryIdempotencyKey = null;
     });
@@ -73,14 +81,34 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
     );
   }
 
+  Future<void> _selectExpiryDate() async {
+    final today = DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: _expiryDate == null
+          ? today
+          : DateTime(_expiryDate!.year, _expiryDate!.month, _expiryDate!.day),
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2200),
+    );
+    if (!mounted || selected == null) return;
+    setState(() => _expiryDate = PosDate.fromDateTime(selected));
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final product = _selectedProduct;
     if (product == null) return;
     final quantityScaled = int.parse(_quantityController.text.trim());
     final unitCostMinor = int.parse(_costController.text.trim());
+    if (product.expiryTracking && _expiryDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.posPurchaseBatchExpiryRequired)),
+      );
+      return;
+    }
     final fingerprint =
-        '${product.id}:$quantityScaled:${product.quantityScale}:$unitCostMinor:${product.currency.code}';
+        '${product.id}:$quantityScaled:${product.quantityScale}:$unitCostMinor:${product.currency.code}:${_expiryDate?.isoDate ?? ''}:${_supplierLotController.text.trim()}';
     if (_retryFingerprint != fingerprint || _retryIdempotencyKey == null) {
       _retryFingerprint = fingerprint;
       _retryIdempotencyKey =
@@ -99,14 +127,27 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
           currencyCode: product.currency.code,
           idempotencyKey: idempotencyKey,
           sourceId: '$idempotencyKey:${product.id}',
+          batches: product.expiryTracking
+              ? [
+                  PostPosOpeningBalanceBatchInput(
+                    id: '$idempotencyKey:lot:1',
+                    quantity: PosQuantity.positive(
+                      quantityScaled,
+                      scale: product.quantityScale,
+                    ),
+                    expiryDate: _expiryDate!,
+                    supplierLotNumber: _supplierLotController.text,
+                  ),
+                ]
+              : const [],
         ),
       );
     } catch (_) {
       if (!mounted) return;
       setState(() => _submitted = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.posStockAppendFailed)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.posStockAppendFailed)));
       return;
     }
     if (!mounted) return;
@@ -130,9 +171,9 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
       ),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.posOpeningBalanceSaved)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(AppStrings.posOpeningBalanceSaved)));
   }
 
   @override
@@ -155,7 +196,10 @@ class _PosOpeningBalancePageState extends State<PosOpeningBalancePage> {
               formKey: _formKey,
               quantityController: _quantityController,
               costController: _costController,
+              supplierLotController: _supplierLotController,
               product: _selectedProduct,
+              expiryDate: _expiryDate,
+              onSelectExpiry: _selectExpiryDate,
               onSubmit: _submit,
               submitted: _submitted,
             ),
@@ -223,7 +267,10 @@ class _OpeningBalanceForm extends StatelessWidget {
     required this.formKey,
     required this.quantityController,
     required this.costController,
+    required this.supplierLotController,
     required this.product,
+    required this.expiryDate,
+    required this.onSelectExpiry,
     required this.onSubmit,
     required this.submitted,
   });
@@ -231,7 +278,10 @@ class _OpeningBalanceForm extends StatelessWidget {
   final GlobalKey<FormState> formKey;
   final TextEditingController quantityController;
   final TextEditingController costController;
+  final TextEditingController supplierLotController;
   final PosProduct? product;
+  final PosDate? expiryDate;
+  final VoidCallback onSelectExpiry;
   final VoidCallback onSubmit;
   final bool submitted;
 
@@ -273,6 +323,24 @@ class _OpeningBalanceForm extends StatelessWidget {
             helperText: AppStrings.posOpeningBalanceCostHint(currency),
             validator: _nonNegativeInteger,
           ),
+          if (product?.expiryTracking == true) ...[
+            const SizedBox(height: SpacingTokens.md),
+            TextField(
+              controller: supplierLotController,
+              enabled: !submitted,
+              decoration: InputDecoration(
+                labelText: AppStrings.posPurchaseSupplierLot,
+              ),
+            ),
+            const SizedBox(height: SpacingTokens.xs),
+            OutlinedButton.icon(
+              onPressed: submitted ? null : onSelectExpiry,
+              icon: const Icon(Icons.event_outlined),
+              label: Text(
+                expiryDate?.isoDate ?? AppStrings.posPurchaseBatchExpiry,
+              ),
+            ),
+          ],
           const SizedBox(height: SpacingTokens.md),
           FilledButton.icon(
             onPressed: product == null || submitted ? null : onSubmit,

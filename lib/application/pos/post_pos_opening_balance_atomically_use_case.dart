@@ -6,6 +6,7 @@ import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_template_definition.dart';
 import 'package:qayd/domain/repositories/account_repository.dart';
 import 'package:qayd/domain/repositories/fiscal_period_repository.dart';
@@ -15,6 +16,7 @@ import 'package:qayd/domain/repositories/pos_template_installation_repository.da
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 
 final class PostPosOpeningBalanceInput {
@@ -33,6 +35,7 @@ final class PostPosOpeningBalanceInput {
     this.creditEntryId,
     this.occurredAt,
     this.createdAt,
+    this.batches = const [],
   });
 
   final String productId;
@@ -49,6 +52,21 @@ final class PostPosOpeningBalanceInput {
   final String? creditEntryId;
   final DateTime? occurredAt;
   final DateTime? createdAt;
+  final List<PostPosOpeningBalanceBatchInput> batches;
+}
+
+final class PostPosOpeningBalanceBatchInput {
+  const PostPosOpeningBalanceBatchInput({
+    required this.id,
+    required this.quantity,
+    required this.expiryDate,
+    this.supplierLotNumber,
+  });
+
+  final String id;
+  final PosQuantity quantity;
+  final PosDate expiryDate;
+  final String? supplierLotNumber;
 }
 
 /// Governed application orchestration for opening stock plus its bridge entry.
@@ -92,10 +110,8 @@ final class PostPosOpeningBalanceAtomicallyUseCase {
       final gate = await _writeGuard.assertWritesPermitted();
       if (gate.isFailure) return FailureResult(gate.failureOrNull!);
 
-      final installationResult =
-          await _installationRepository.getEnabledInstallation(
-        template: _template,
-      );
+      final installationResult = await _installationRepository
+          .getEnabledInstallation(template: _template);
       if (installationResult.isFailure) {
         return FailureResult(installationResult.failureOrNull!);
       }
@@ -116,7 +132,8 @@ final class PostPosOpeningBalanceAtomicallyUseCase {
           clearingId.trim().isEmpty) {
         return FailureResult(
           ValidationFailure(
-              messageAr: AppStrings.posAccountingAccountsRequired),
+            messageAr: AppStrings.posAccountingAccountsRequired,
+          ),
         );
       }
       final accountCheck = await _verifyAccounts(inventoryId, clearingId);
@@ -124,8 +141,9 @@ final class PostPosOpeningBalanceAtomicallyUseCase {
         return FailureResult(accountCheck.failureOrNull!);
       }
 
-      final productResult =
-          await _productRepository.getById(input.productId.trim());
+      final productResult = await _productRepository.getById(
+        input.productId.trim(),
+      );
       if (productResult.isFailure) {
         return FailureResult(productResult.failureOrNull!);
       }
@@ -143,6 +161,38 @@ final class PostPosOpeningBalanceAtomicallyUseCase {
       if (input.quantityScale != product.quantityScale) {
         return FailureResult(
           ValidationFailure(messageAr: AppStrings.posStockScaleMismatch),
+        );
+      }
+      if (product.expiryTracking) {
+        final batchIds = <String>{};
+        var allocated = 0;
+        for (final batch in input.batches) {
+          if (batch.id.trim().isEmpty ||
+              !batchIds.add(batch.id.trim()) ||
+              !batch.quantity.isPositive ||
+              batch.quantity.scale != product.quantityScale) {
+            return FailureResult(
+              ValidationFailure(
+                messageAr: AppStrings.posPurchaseBatchSumInvalid,
+                code: 'pos_opening_balance_batches_invalid',
+              ),
+            );
+          }
+          allocated += batch.quantity.scaledUnits;
+        }
+        if (input.batches.isEmpty || allocated != input.quantityScaled) {
+          return FailureResult(
+            ValidationFailure(
+              messageAr: input.batches.isEmpty
+                  ? AppStrings.posPurchaseBatchExpiryRequired
+                  : AppStrings.posPurchaseBatchSumInvalid,
+              code: 'pos_opening_balance_batches_quantity_mismatch',
+            ),
+          );
+        }
+      } else if (input.batches.isNotEmpty) {
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.posInvoiceInvalid),
         );
       }
 
@@ -171,25 +221,65 @@ final class PostPosOpeningBalanceAtomicallyUseCase {
         );
       }
       final createdAt = (input.createdAt ?? date).toUtc();
-      final movement = PosStockMovement.create(
-        id: input.movementId?.trim().isNotEmpty == true
-            ? input.movementId!.trim()
-            : _idGenerator.next(),
-        productId: product.id,
-        warehouseId: installation.warehouseId,
-        type: PosStockMovementType.opening,
-        direction: PosStockMovementDirection.inbound,
-        quantity: PosQuantity.positive(
-          input.quantityScaled,
-          scale: product.quantityScale,
-        ),
-        unitCost: Money.nonNegative(input.unitCostMinor, product.currency),
-        sourceType: 'opening_balance',
-        sourceId: sourceId,
-        occurredAt: date,
-        idempotencyKey: idempotencyKey,
-        createdAt: createdAt,
-      );
+      final unitCost = Money.nonNegative(input.unitCostMinor, product.currency);
+      final movements = <PosStockMovement>[];
+      final lots = <PosStockLot>[];
+      if (product.expiryTracking) {
+        for (var index = 0; index < input.batches.length; index++) {
+          final batch = input.batches[index];
+          final ordinal = (index + 1).toString().padLeft(6, '0');
+          final lot = PosStockLot.create(
+            id: batch.id,
+            productId: product.id,
+            warehouseId: installation.warehouseId,
+            supplierLotNumber: batch.supplierLotNumber,
+            expiryDate: batch.expiryDate,
+            receivedQuantity: batch.quantity,
+            unitCost: unitCost,
+            createdAt: createdAt,
+          );
+          lots.add(lot);
+          movements.add(
+            PosStockMovement.create(
+              id: '$sourceId:movement:$ordinal',
+              productId: product.id,
+              warehouseId: installation.warehouseId,
+              type: PosStockMovementType.opening,
+              direction: PosStockMovementDirection.inbound,
+              quantity: batch.quantity,
+              unitCost: unitCost,
+              sourceType: 'opening_balance',
+              sourceId: sourceId,
+              lotId: lot.id,
+              occurredAt: date,
+              idempotencyKey: '$idempotencyKey:stock:$ordinal',
+              createdAt: createdAt,
+            ),
+          );
+        }
+      } else {
+        movements.add(
+          PosStockMovement.create(
+            id: input.movementId?.trim().isNotEmpty == true
+                ? input.movementId!.trim()
+                : _idGenerator.next(),
+            productId: product.id,
+            warehouseId: installation.warehouseId,
+            type: PosStockMovementType.opening,
+            direction: PosStockMovementDirection.inbound,
+            quantity: PosQuantity.positive(
+              input.quantityScaled,
+              scale: product.quantityScale,
+            ),
+            unitCost: unitCost,
+            sourceType: 'opening_balance',
+            sourceId: sourceId,
+            occurredAt: date,
+            idempotencyKey: idempotencyKey,
+            createdAt: createdAt,
+          ),
+        );
+      }
 
       final postingResult = await _buildPosting(
         BuildPosOpeningBalancePostingInput(
@@ -223,7 +313,9 @@ final class PostPosOpeningBalanceAtomicallyUseCase {
       }
       final posting = postingResult.valueOrNull!;
       return await _postingRepository.saveOpeningBalance(
-        movement: movement,
+        movement: movements.first,
+        additionalMovements: movements.skip(1).toList(growable: false),
+        lots: lots,
         posting: posting,
       );
     } catch (error) {
@@ -242,7 +334,8 @@ final class PostPosOpeningBalanceAtomicallyUseCase {
       if (!account.isActive || account.isArchived) {
         return FailureResult(
           ValidationFailure(
-              messageAr: AppStrings.posAccountingAccountsRequired),
+            messageAr: AppStrings.posAccountingAccountsRequired,
+          ),
         );
       }
     }
@@ -250,7 +343,10 @@ final class PostPosOpeningBalanceAtomicallyUseCase {
   }
 
   static int _totalMinorUnits(
-      int quantityScaled, int unitCostMinor, int scale) {
+    int quantityScaled,
+    int unitCostMinor,
+    int scale,
+  ) {
     var divisor = 1;
     for (var index = 0; index < scale; index++) {
       divisor *= 10;

@@ -67,6 +67,9 @@ abstract final class PosInvoiceMapper {
       'fx_note': rate?.note,
       'proposed_sale_price_minor': line.proposedSalePrice?.minorUnits,
       'proposed_sale_price_applied': line.proposedSalePriceApplied ? 1 : 0,
+      'expiry_tracking_snapshot': line.expiryTrackingSnapshot == null
+          ? null
+          : (line.expiryTrackingSnapshot! ? 1 : 0),
       'product_updated_at_snapshot':
           line.productUpdatedAtSnapshot?.toUtc().toIso8601String(),
     };

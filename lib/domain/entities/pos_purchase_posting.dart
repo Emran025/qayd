@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
+import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/exceptions/invalid_pos_invoice_exception.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
@@ -17,21 +18,21 @@ final class PosPurchasePosting {
   PosPurchasePosting({
     required this.invoice,
     required List<PosStockMovement> movements,
+    List<PosStockLot> lots = const [],
     required List<PosAccountingPosting> postings,
     required List<PosInvoicePayment> payments,
   })  : movements = UnmodifiableListView(movements),
+        lots = UnmodifiableListView(lots),
         postings = UnmodifiableListView(postings),
         payments = UnmodifiableListView(payments) {
-    final isCommittedStatus =
-        invoice.status == PosDocumentStatus.posted ||
-            invoice.status == PosDocumentStatus.partiallyPaid ||
-            invoice.status == PosDocumentStatus.paid;
+    final isCommittedStatus = invoice.status == PosDocumentStatus.posted ||
+        invoice.status == PosDocumentStatus.partiallyPaid ||
+        invoice.status == PosDocumentStatus.paid;
     if (invoice.type != PosInvoiceType.purchase ||
         !isCommittedStatus ||
         invoice.total.minorUnits <= 0 ||
         this.movements.isEmpty ||
-        this.postings.isEmpty ||
-        this.movements.length != invoice.lines.length) {
+        this.postings.isEmpty) {
       throw InvalidPosInvoiceException.invalidTotals();
     }
 
@@ -40,28 +41,64 @@ final class PosPurchasePosting {
     };
     final movementIds = <String>{};
     final movementIdempotencyKeys = <String>{};
-    final matchedLineIds = <String>{};
+    final movementQuantityByLine = <String, int>{};
+    final lotIds = <String>{};
     for (final movement in this.movements) {
       final lineId = movement.sourceLineId;
       final line = lineId == null ? null : linesById[lineId];
       if (line == null ||
-          !matchedLineIds.add(lineId!) ||
           !movementIds.add(movement.id) ||
           !movementIdempotencyKeys.add(movement.idempotencyKey) ||
           movement.sourceType != 'pos_invoice' ||
           movement.sourceId != invoice.id ||
           movement.direction != PosStockMovementDirection.inbound ||
           movement.type != PosStockMovementType.purchase ||
-          movement.lotId != null ||
           movement.productId != line.productId ||
           movement.warehouseId != invoice.warehouseId ||
-          movement.quantity != line.quantity ||
+          movement.quantity.scale != line.quantity.scale ||
+          (line.expiryTrackingSnapshot == true
+              ? movement.lotId == null
+              : movement.lotId != null) ||
           movement.unitCost != line.unitCost ||
           movement.occurredAt.toUtc() != invoice.invoiceDate.toUtc()) {
         throw InvalidPosInvoiceException.invalidLine();
       }
+      movementQuantityByLine.update(
+        line.id,
+        (quantity) => quantity + movement.quantity.scaledUnits,
+        ifAbsent: () => movement.quantity.scaledUnits,
+      );
+      if (movement.lotId == null) {
+        if (line.expiryTrackingSnapshot == true) {
+          throw InvalidPosInvoiceException.invalidLine();
+        }
+      } else {
+        final lot = this.lots.firstWhere(
+              (candidate) => candidate.id == movement.lotId,
+              orElse: () => throw InvalidPosInvoiceException.invalidLine(),
+            );
+        if (!lotIds.add(lot.id) ||
+            lot.expiryDate == null ||
+            lot.productId != line.productId ||
+            lot.warehouseId != invoice.warehouseId ||
+            lot.receivedQuantity != movement.quantity ||
+            lot.unitCost != movement.unitCost) {
+          throw InvalidPosInvoiceException.invalidLine();
+        }
+      }
     }
-    if (matchedLineIds.length != invoice.lines.length) {
+    for (final line in invoice.lines) {
+      if (movementQuantityByLine[line.id] != line.quantity.scaledUnits ||
+          (line.expiryTrackingSnapshot == true &&
+              !this
+                  .movements
+                  .where((movement) => movement.sourceLineId == line.id)
+                  .every((movement) => movement.lotId != null))) {
+        throw InvalidPosInvoiceException.invalidLine();
+      }
+    }
+    if (lotIds.length != this.lots.length ||
+        this.lots.any((lot) => !lotIds.contains(lot.id))) {
       throw InvalidPosInvoiceException.invalidLine();
     }
 
@@ -79,9 +116,11 @@ final class PosPurchasePosting {
           !_sameUtcDay(voucher.date, invoice.invoiceDate) ||
           !voucherIds.add(voucher.id.value) ||
           posting.entries.length != 2 ||
-          posting.entries.any((entry) =>
-              entry.currency != invoice.currency ||
-              entry.voucherId != voucher.id)) {
+          posting.entries.any(
+            (entry) =>
+                entry.currency != invoice.currency ||
+                entry.voucherId != voucher.id,
+          )) {
         throw InvalidPosInvoiceException.invalidTotals();
       }
       inventoryAccountId ??= voucher.affectedAccountId;
@@ -125,7 +164,8 @@ final class PosPurchasePosting {
       );
     }
     for (final entry in paidByAccount.entries) {
-      final voucherAmount = this.postings
+      final voucherAmount = this
+          .postings
           .where((posting) => posting.voucher.counterpartyId == entry.key)
           .fold<int>(
             0,
@@ -151,6 +191,7 @@ final class PosPurchasePosting {
 
   final PosInvoice invoice;
   final UnmodifiableListView<PosStockMovement> movements;
+  final UnmodifiableListView<PosStockLot> lots;
   final UnmodifiableListView<PosAccountingPosting> postings;
   final UnmodifiableListView<PosInvoicePayment> payments;
 
