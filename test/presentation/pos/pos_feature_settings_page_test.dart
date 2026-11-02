@@ -31,11 +31,10 @@ final class _GovernanceRepo implements GovernanceRepository {
 final class _PosRepo implements PosActivationRepository {
   _PosRepo({
     this.enabled = false,
-    this.templateVersion = PosTemplateDefinition.currentVersion,
   });
 
   bool enabled;
-  int templateVersion;
+  int templateVersion = PosTemplateDefinition.currentVersion;
 
   @override
   Future<Result<PosActivationResult>> installTemplate({

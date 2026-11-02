@@ -15,7 +15,6 @@ import 'package:qayd/domain/repositories/pos_template_installation_repository.da
 import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/account_nature.dart';
-import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/domain/value_objects/pos_stock_disposal_reason.dart';
@@ -188,7 +187,7 @@ final class PostPosStockDisposalAtomicallyUseCase {
         );
       }
       if (existingMovement != null) {
-        return _replayExistingDisposal(
+        return await _replayExistingDisposal(
           input: input,
           existing: existingMovement,
           inventoryAccountId: inventoryAccountId,
@@ -437,7 +436,7 @@ final class PostPosStockDisposalAtomicallyUseCase {
       }
       final existingMovement = existingResult.valueOrNull;
       if (existingMovement != null) {
-        return _replayExistingReversal(
+        return await _replayExistingReversal(
           input: input,
           existing: existingMovement,
           originalSourceId: originalSourceId,
