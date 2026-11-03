@@ -3,6 +3,7 @@ import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
+import 'package:qayd/domain/value_objects/pos_stock_disposal_reason.dart';
 
 enum PosStockMovementType {
   opening,
@@ -52,6 +53,10 @@ final class PosStockMovement {
     required this.sourceId,
     required this.sourceLineId,
     required this.lotId,
+    required this.disposalReason,
+    required this.reasonDetail,
+    required this.voucherId,
+    required this.reversesSourceId,
     required this.occurredAt,
     required this.idempotencyKey,
     required this.createdAt,
@@ -69,6 +74,10 @@ final class PosStockMovement {
     String? sourceId,
     String? sourceLineId,
     String? lotId,
+    PosStockDisposalReason? disposalReason,
+    String? reasonDetail,
+    String? voucherId,
+    String? reversesSourceId,
     required DateTime occurredAt,
     required String idempotencyKey,
     DateTime? createdAt,
@@ -107,6 +116,14 @@ final class PosStockMovement {
       sourceId: sourceId?.trim(),
       sourceLineId: sourceLineId?.trim(),
       lotId: lotId?.trim(),
+      disposalReason: disposalReason,
+      reasonDetail: reasonDetail?.trim().isEmpty == true
+          ? null
+          : reasonDetail?.trim(),
+      voucherId: voucherId?.trim().isEmpty == true ? null : voucherId?.trim(),
+      reversesSourceId: reversesSourceId?.trim().isEmpty == true
+          ? null
+          : reversesSourceId?.trim(),
       occurredAt: occurredAt.toUtc(),
       idempotencyKey: normalizedIdempotencyKey,
       createdAt: created,
@@ -124,6 +141,10 @@ final class PosStockMovement {
   final String? sourceId;
   final String? sourceLineId;
   final String? lotId;
+  final PosStockDisposalReason? disposalReason;
+  final String? reasonDetail;
+  final String? voucherId;
+  final String? reversesSourceId;
   final DateTime occurredAt;
   final String idempotencyKey;
   final DateTime createdAt;

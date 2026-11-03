@@ -2,22 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:qayd/application/accounts/list_accounts_use_case.dart';
 import 'package:qayd/application/pos/get_pos_stock_balance_use_case.dart';
 import 'package:qayd/application/pos/list_pos_products_use_case.dart';
+import 'package:qayd/application/pos/list_pos_stock_disposal_lots_use_case.dart';
 import 'package:qayd/application/pos/list_pos_stock_movements_use_case.dart';
+import 'package:qayd/application/pos/post_pos_stock_disposal_atomically_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
+import 'package:qayd/domain/value_objects/pos_stock_disposal_reason.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
 import 'package:qayd/presentation/components/atomic/qayd_empty_state.dart';
 import 'package:qayd/presentation/components/atomic/qayd_floating_action_button.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/navigation/qayd_page_route.dart';
 import 'package:qayd/presentation/pages/pos/pos_stock_adjustment_page.dart';
+import 'package:qayd/presentation/pages/pos/pos_stock_disposal_page.dart';
+import 'package:qayd/presentation/pages/vouchers/voucher_detail_page.dart';
 import 'package:qayd/presentation/theme/spacing_tokens.dart';
 import 'package:qayd/presentation/widgets/qayd_scaffold.dart';
+import 'package:uuid/uuid.dart';
 
 /// Read-only movement history with filters and pagination. Stock changes are
-/// delegated to the separately governed adjustment page.
+/// delegated to separately governed adjustment and disposal workflows.
 final class PosStockMovementsPage extends StatefulWidget {
   const PosStockMovementsPage({
     super.key,
@@ -28,6 +34,8 @@ final class PosStockMovementsPage extends StatefulWidget {
     required this.listAccounts,
     required this.getBalance,
     required this.submitAdjustment,
+    required this.listDisposalLots,
+    required this.postStockDisposal,
     this.inventoryAccountId,
   });
 
@@ -38,6 +46,8 @@ final class PosStockMovementsPage extends StatefulWidget {
   final ListAccountsUseCase listAccounts;
   final GetPosStockBalanceUseCase getBalance;
   final SubmitPosStockAdjustment submitAdjustment;
+  final ListPosStockDisposalLotsUseCase listDisposalLots;
+  final PostPosStockDisposalAtomicallyUseCase postStockDisposal;
   final String? inventoryAccountId;
 
   @override
@@ -138,6 +148,95 @@ final class _PosStockMovementsPageState extends State<PosStockMovementsPage> {
     if (saved == true && mounted) await _load();
   }
 
+  Future<void> _openDisposal() async {
+    final saved = await Navigator.of(context).push<bool>(
+      QaydPageRoute.slideFromStart<bool>(
+        builder: (_) => PosStockDisposalPage(
+          warehouseId: widget.warehouseId,
+          currency: widget.currency,
+          listProducts: widget.listProducts,
+          listLots: widget.listDisposalLots,
+          getBalance: widget.getBalance,
+          submitDisposal: widget.postStockDisposal.call,
+        ),
+      ),
+    );
+    if (saved == true && mounted) await _load();
+  }
+
+  Future<void> _reverseDisposal(PosStockMovement movement) async {
+    final sourceId = movement.sourceId;
+    if (sourceId == null || sourceId.isEmpty) return;
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(AppStrings.posStockDisposalReverseAction),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 500,
+          maxLines: 3,
+          decoration: InputDecoration(
+            labelText: AppStrings.posStockDisposalReverseNote,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(AppStrings.actionCancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext)
+                .pop(controller.text.trim()),
+            child: Text(AppStrings.posStockDisposalReverseAction),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!mounted || reason == null) return;
+    if (reason.trim().isEmpty) {
+      _showMessage(AppStrings.posStockDisposalReverseNoteRequired);
+      return;
+    }
+    final requestId = const Uuid().v4();
+    try {
+      final result = await widget.postStockDisposal.reverse(
+        ReversePosStockDisposalInput(
+          originalSourceId: sourceId,
+          sourceId: 'pos-stock-disposal-reversal:$requestId',
+          idempotencyKey: 'pos-stock-disposal-reversal:$requestId',
+          reasonDetail: reason.trim(),
+          movementId: 'pos-stock-disposal-reversal-movement:$requestId',
+          voucherId: 'pos-stock-disposal-reversal-voucher:$requestId',
+          transactionId: 'pos-stock-disposal-reversal-transaction:$requestId',
+          debitEntryId: 'pos-stock-disposal-reversal-debit:$requestId',
+          creditEntryId: 'pos-stock-disposal-reversal-credit:$requestId',
+          occurredAt: DateTime.now(),
+        ),
+      );
+      if (!mounted) return;
+      if (result.isFailure) {
+        _showMessage(
+          result.failureOrNull?.messageAr ??
+              AppStrings.posStockDisposalReverseFailed,
+        );
+        return;
+      }
+      _showMessage(AppStrings.posStockDisposalReverseSuccess);
+      await _load();
+    } catch (_) {
+      if (mounted) _showMessage(AppStrings.posStockDisposalReverseFailed);
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   String _productName(String productId) {
     final product = _products.where((item) => item.id == productId).firstOrNull;
     return product == null ? productId : '${product.name} · ${product.sku}';
@@ -177,6 +276,12 @@ final class _PosStockMovementsPageState extends State<PosStockMovementsPage> {
                     ),
                     children: [
                       Text(AppStrings.posStockMovementsDescription),
+                      const SizedBox(height: SpacingTokens.md),
+                      OutlinedButton.icon(
+                        onPressed: _openDisposal,
+                        icon: const Icon(Icons.delete_sweep_outlined),
+                        label: Text(AppStrings.posStockDisposalTitle),
+                      ),
                       const SizedBox(height: SpacingTokens.md),
                       DropdownButtonFormField<String?>(
                         initialValue: _productId,
@@ -250,6 +355,13 @@ final class _PosStockMovementsPageState extends State<PosStockMovementsPage> {
                           (movement) => _MovementTile(
                             movement: movement,
                             productName: _productName(movement.productId),
+                            hasReversal: _movements.any(
+                              (candidate) =>
+                                  candidate.reversesSourceId != null &&
+                                  candidate.reversesSourceId ==
+                                      movement.sourceId,
+                            ),
+                            onReverse: () => _reverseDisposal(movement),
                           ),
                         ),
                       if (_hasMore)
@@ -277,10 +389,17 @@ final class _PosStockMovementsPageState extends State<PosStockMovementsPage> {
 }
 
 final class _MovementTile extends StatelessWidget {
-  const _MovementTile({required this.movement, required this.productName});
+  const _MovementTile({
+    required this.movement,
+    required this.productName,
+    required this.hasReversal,
+    required this.onReverse,
+  });
 
   final PosStockMovement movement;
   final String productName;
+  final bool hasReversal;
+  final VoidCallback onReverse;
 
   @override
   Widget build(BuildContext context) {
@@ -305,8 +424,39 @@ final class _MovementTile extends StatelessWidget {
           ),
         ),
         title: Text(productName),
-        subtitle: Text(
-          '${AppStrings.posStockMovementTypeLabel(movement.type.name)} · $date · $time',
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${AppStrings.posStockMovementTypeLabel(movement.type.name)} · $date · $time',
+            ),
+            if (movement.disposalReason != null)
+              Text(
+                '${AppStrings.posStockDisposalReasonLabel(movement.disposalReason!.code)}${movement.reasonDetail == null ? '' : ' · ${movement.reasonDetail}'}',
+              ),
+            if (movement.reversesSourceId != null)
+              Text('${AppStrings.posStockDisposalReverseAction}: ${movement.reversesSourceId}'),
+            Wrap(
+              spacing: SpacingTokens.xs,
+              children: [
+                if (movement.voucherId != null)
+                  TextButton.icon(
+                    onPressed: () =>
+                        VoucherDetailPage.show(context, movement.voucherId!),
+                    icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                    label: Text(AppStrings.posStockDisposalVoucherLink),
+                  ),
+                if (movement.sourceType == 'stock_disposal' &&
+                    movement.disposalReason != null &&
+                    !hasReversal)
+                  TextButton.icon(
+                    onPressed: onReverse,
+                    icon: const Icon(Icons.undo_rounded, size: 18),
+                    label: Text(AppStrings.posStockDisposalReverseAction),
+                  ),
+              ],
+            ),
+          ],
         ),
         trailing: Text(
           amount,

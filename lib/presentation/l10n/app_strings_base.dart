@@ -2799,6 +2799,14 @@ abstract class AppStringsBase {
   String get posFeatureActivationWarning =>
       'سيُثبت هذا قالب الحسابات ومخزناً واحداً داخل قاعدة بياناتك. لا يتم حذف البيانات عند تعطيل الظهور.';
   String get posFeatureActivationSuccess => 'تم تفعيل نقطة البيع بنجاح.';
+  String get posFeatureUpgradeRequired =>
+      'يلزم تحديث إعداد نقطة البيع لإضافة حساب خسائر المخزون.';
+  String get posFeatureUpgrade => 'تحديث إعداد نقطة البيع';
+  String get posFeatureUpgradeWarning =>
+      'سيُحدّث هذا إصدار قالب الحسابات ويضيف حساباً مستقلاً لخسائر المخزون إلى شجرة الحسابات. لن تُنشأ الحسابات بمجرد فتح هذه الصفحة.';
+  String get posFeatureUpgradeSuccess =>
+      'تم تحديث إعدادات وحسابات نقطة البيع بنجاح.';
+  String get posFeatureConfirmUpgrade => 'تأكيد التحديث';
   String get posFeatureDisableSuccess => 'تم تعطيل ظهور نقطة البيع.';
   String get posFeatureCancel => 'إلغاء';
   String get posFeatureConfirm => 'متابعة التفعيل';
@@ -2987,6 +2995,23 @@ abstract class AppStringsBase {
   String get posStockReadFailed => 'تعذر قراءة رصيد المخزون.';
   String get posStockAppendFailed => 'تعذر تسجيل حركة المخزون.';
   String get posStockProductInactive => 'لا يمكن تسجيل حركة لمنتج غير نشط.';
+  String get posStockDisposalAtomicRequired =>
+      'يجب تسجيل إخراج التالف أو المنتهي عبر مسار الإتلاف الذري مع قيده.';
+  String get posStockDisposalInvalid => 'بيانات إخراج المخزون غير صالحة.';
+  String get posStockDisposalExpiryLotRequired =>
+      'يتطلب إخراج منتهي الصلاحية اختيار دفعة متتبعة.';
+  String get posStockDisposalNotExpired =>
+      'لم تنته صلاحية الدفعة في تاريخ الحركة المحدد.';
+  String get posStockDisposalBatchExpired =>
+      'هذه الدفعة منتهية الصلاحية؛ سجّلها بسبب انتهاء الصلاحية.';
+  String get posStockDisposalCostChanged =>
+      'تغير متوسط تكلفة المخزون؛ أعد المحاولة لمعاينة القيمة الحالية.';
+  String get posStockDisposalLossAccountRequired =>
+      'لا يوجد حساب خسائر مخزون نشط في قالب نقطة البيع؛ حدّث إعدادات نقطة البيع أولاً.';
+  String get posStockDisposalWarehouseMismatch =>
+      'المخزن المحدد لا يطابق مخزن نقطة البيع النشط.';
+  String get posStockDisposalReverseNoteRequired =>
+      'حدد إخراجاً أصلياً واكتب سبباً واضحاً للعكس.';
   String get posStockMovementsTitle => 'حركات المخزون';
   String get posStockMovementsDescription =>
       'سجل للزيادات والنقص الناتجة عن الشراء والبيع والإدخال والتسويات.';
@@ -3005,6 +3030,45 @@ abstract class AppStringsBase {
         'expiry' => 'منتهي الصلاحية',
         _ => 'حركة مخزون',
       };
+  String posStockDisposalReasonLabel(String code) => switch (code) {
+        'damage' => 'تالف',
+        'expiry' => 'منتهي الصلاحية',
+        'authorized_loss' => 'فقد معتمد',
+        'other' => 'سبب آخر',
+        _ => 'إخراج مخزون',
+      };
+  String get posStockDisposalTitle => 'إخراج تالف أو منتهي الصلاحية';
+  String get posStockDisposalDescription =>
+      'يسجل الإخراج كحركة غير قابلة للتعديل، مع تحديث الدفعة وقيد خسارة المخزون ذرياً.';
+  String get posStockDisposalReason => 'سبب الإخراج';
+  String get posStockDisposalReasonDamage => 'تالف';
+  String get posStockDisposalReasonExpiry => 'منتهي الصلاحية';
+  String get posStockDisposalReasonAuthorizedLoss => 'فقد معتمد';
+  String get posStockDisposalReasonOther => 'سبب آخر';
+  String get posStockDisposalDetail => 'تفاصيل السبب';
+  String get posStockDisposalOtherDetailRequired =>
+      'اكتب تفاصيل السبب عند اختيار «سبب آخر».';
+  String get posStockDisposalWarehouse => 'المخزن النشط';
+  String get posStockDisposalQuantity => 'الكمية المراد إخراجها';
+  String get posStockDisposalAvailableLabel => 'الكمية المتاحة';
+  String get posStockDisposalEstimatedValue => 'القيمة التقديرية للخسارة';
+  String get posStockDisposalDate => 'تاريخ الحركة';
+  String get posStockDisposalLot => 'دفعة المخزون';
+  String get posStockDisposalSelectLot => 'اختر الدفعة';
+  String get posStockDisposalNoLots => 'لا توجد دفعات متبقية لهذا الصنف.';
+  String get posStockDisposalSubmit => 'تسجيل الإخراج والقيد ذرياً';
+  String get posStockDisposalSaved => 'تم تسجيل الإخراج وقيد الخسارة معاً.';
+  String get posStockDisposalFailed => 'تعذر تسجيل إخراج المخزون.';
+  String get posStockDisposalVoucherLink => 'عرض سند القيد';
+  String posStockDisposalVoucherDescription(String reason, String? detail) =>
+      'إخراج مخزون نقطة البيع: $reason${detail == null ? '' : ' - $detail'}';
+  String posStockDisposalReversalVoucherDescription(String sourceId) =>
+      'عكس إخراج المخزون المرتبط بالمصدر: $sourceId';
+  String get posStockDisposalReverseAction => 'عكس الإخراج';
+  String get posStockDisposalReverseNote => 'سبب العكس';
+  String get posStockDisposalReverseSuccess =>
+      'تم عكس الإخراج بحركة وقيد جديدين.';
+  String get posStockDisposalReverseFailed => 'تعذر عكس إخراج المخزون.';
   String get posStockMovementInbound => 'زيادة';
   String get posStockMovementOutbound => 'نقص';
   String get posStockAdjustmentTitle => 'تسوية جرد المخزون';

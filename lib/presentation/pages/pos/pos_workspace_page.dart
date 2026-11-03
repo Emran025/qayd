@@ -158,6 +158,10 @@ class _PosWorkspaceViewState extends State<_PosWorkspaceView> {
           getBalance: InjectionContainer.getPosStockBalanceUseCase,
           submitAdjustment:
               InjectionContainer.postPosStockAdjustmentAtomicallyUseCase.call,
+          listDisposalLots:
+              InjectionContainer.listPosStockDisposalLotsUseCase,
+          postStockDisposal:
+              InjectionContainer.postPosStockDisposalAtomicallyUseCase,
           inventoryAccountId: inventoryAccountId,
         ),
       ),

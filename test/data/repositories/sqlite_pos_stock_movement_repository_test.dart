@@ -17,6 +17,7 @@ import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/domain/value_objects/pos_date.dart';
+import 'package:qayd/domain/value_objects/pos_stock_disposal_reason.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 final class _CurrencyRepository implements CurrencyRepository {
@@ -84,7 +85,7 @@ void main() {
       await Migration040PosFoundation().up(db);
       await Migration041PosInvoiceMetadata().up(db);
       await Migration042PosProductCategories().up(db);
-      await MigrationRegistry.applyFromTo(db, fromVersion: 42, toVersion: 46);
+      await MigrationRegistry.applyFromTo(db, fromVersion: 42, toVersion: 47);
       await db.insert('pos_warehouses', <String, Object?>{
         'id': 'warehouse-1',
         'code': 'POS-MAIN',
@@ -184,6 +185,11 @@ void main() {
 
         await Migration046PosStockLotsFefo().up(legacyDb);
         await Migration046PosStockLotsFefo().up(legacyDb);
+        await MigrationRegistry.applyFromTo(
+          legacyDb,
+          fromVersion: 46,
+          toVersion: 47,
+        );
 
         expect(await legacyDb.query('pos_stock_lots'), isEmpty);
         final legacyMovement =
@@ -307,6 +313,176 @@ void main() {
         'lot-today-a',
         'lot-today-b',
       ]);
+    });
+
+    test('includes expired lots for disposal and validates date, lot and amount',
+        () async {
+      await db.update(
+        'pos_products',
+        {'expiry_tracking': 1},
+        where: 'id = ?',
+        whereArgs: ['product-1'],
+      );
+      final now = DateTime.now();
+      final today = PosDate.todayLocal();
+      final yesterday = PosDate.fromDateTime(
+        DateTime(today.year, today.month, today.day)
+            .subtract(const Duration(days: 1)),
+      );
+
+      Future<void> receiveLot(String id, PosDate expiry) async {
+        final lot = PosStockLot.create(
+          id: id,
+          productId: 'product-1',
+          warehouseId: 'warehouse-1',
+          supplierLotNumber: id,
+          expiryDate: expiry,
+          receivedQuantity: PosQuantity.whole(1),
+          unitCost: Money.fromMinorUnits(100, currency),
+          createdAt: now,
+        );
+        expect(
+          (await repository.createLotInTransaction(db, lot)).isSuccess,
+          isTrue,
+        );
+        final received = await repository.append(
+          PosStockMovement.create(
+            id: '$id-receipt',
+            productId: 'product-1',
+            warehouseId: 'warehouse-1',
+            type: PosStockMovementType.purchase,
+            direction: PosStockMovementDirection.inbound,
+            quantity: PosQuantity.whole(1),
+            unitCost: Money.fromMinorUnits(100, currency),
+            sourceType: 'test',
+            sourceId: '$id-receipt',
+            lotId: id,
+            occurredAt: now,
+            idempotencyKey: '$id-receipt-key',
+            createdAt: now,
+          ),
+        );
+        expect(received.isSuccess, isTrue);
+      }
+
+      await receiveLot('lot-expired', yesterday);
+      await receiveLot('lot-current', today);
+      await db.insert('pos_warehouses', <String, Object?>{
+        'id': 'warehouse-2',
+        'code': 'POS-SECOND',
+        'name': 'Second POS Warehouse',
+        'is_default': 0,
+        'is_active': 1,
+        'created_at': now.toUtc().toIso8601String(),
+        'updated_at': now.toUtc().toIso8601String(),
+      });
+      final lots = await repository.getDisposalLots(
+        productId: 'product-1',
+        warehouseId: 'warehouse-1',
+      );
+      expect(lots.isSuccess, isTrue);
+      expect(lots.valueOrNull!.map((lot) => lot.id),
+          containsAll(['lot-expired', 'lot-current']));
+
+      PosStockMovement disposal({
+        required String id,
+        required PosStockDisposalReason reason,
+        required String lotId,
+        String warehouseId = 'warehouse-1',
+        int quantity = 1,
+      }) {
+        final type = reason == PosStockDisposalReason.damage
+            ? PosStockMovementType.damage
+            : PosStockMovementType.expiry;
+        return PosStockMovement.create(
+          id: id,
+          productId: 'product-1',
+          warehouseId: warehouseId,
+          type: type,
+          direction: PosStockMovementDirection.outbound,
+          quantity: PosQuantity.whole(quantity),
+          unitCost: Money.fromMinorUnits(100, currency),
+          sourceType: 'stock_disposal',
+          sourceId: 'source-$id',
+          lotId: lotId,
+          disposalReason: reason,
+          voucherId: 'voucher-$id',
+          occurredAt: now,
+          idempotencyKey: 'key-$id',
+          createdAt: now,
+        );
+      }
+
+      final validExpiry = await repository.validateStockDisposalInTransaction(
+        db,
+        disposal(
+          id: 'valid-expiry',
+          reason: PosStockDisposalReason.expiry,
+          lotId: 'lot-expired',
+        ),
+      );
+      final expiredAsDamage =
+          await repository.validateStockDisposalInTransaction(
+        db,
+        disposal(
+          id: 'expired-damage',
+          reason: PosStockDisposalReason.damage,
+          lotId: 'lot-expired',
+        ),
+      );
+      final healthyAsExpiry =
+          await repository.validateStockDisposalInTransaction(
+        db,
+        disposal(
+          id: 'healthy-expiry',
+          reason: PosStockDisposalReason.expiry,
+          lotId: 'lot-current',
+        ),
+      );
+      final overLotQuantity =
+          await repository.validateStockDisposalInTransaction(
+        db,
+        disposal(
+          id: 'over-lot',
+          reason: PosStockDisposalReason.damage,
+          lotId: 'lot-current',
+          quantity: 2,
+        ),
+      );
+      final validDamage = await repository.validateStockDisposalInTransaction(
+        db,
+        disposal(
+          id: 'valid-damage',
+          reason: PosStockDisposalReason.damage,
+          lotId: 'lot-current',
+        ),
+      );
+      final missingLot = await repository.validateStockDisposalInTransaction(
+        db,
+        disposal(
+          id: 'missing-lot',
+          reason: PosStockDisposalReason.damage,
+          lotId: 'lot-does-not-exist',
+        ),
+      );
+      final wrongWarehouseLot =
+          await repository.validateStockDisposalInTransaction(
+        db,
+        disposal(
+          id: 'wrong-warehouse-lot',
+          reason: PosStockDisposalReason.damage,
+          lotId: 'lot-current',
+          warehouseId: 'warehouse-2',
+        ),
+      );
+
+      expect(validExpiry.isSuccess, isTrue);
+      expect(expiredAsDamage.isFailure, isTrue);
+      expect(healthyAsExpiry.isFailure, isTrue);
+      expect(overLotQuantity.isFailure, isTrue);
+      expect(validDamage.isSuccess, isTrue);
+      expect(missingLot.isFailure, isTrue);
+      expect(wrongWarehouseLot.isFailure, isTrue);
     });
 
     test(

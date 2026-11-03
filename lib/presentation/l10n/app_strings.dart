@@ -2614,6 +2614,11 @@ class AppStrings {
       i.posFeatureActivationWarning;
   static String get posFeatureActivationSuccess =>
       i.posFeatureActivationSuccess;
+  static String get posFeatureUpgradeRequired => i.posFeatureUpgradeRequired;
+  static String get posFeatureUpgrade => i.posFeatureUpgrade;
+  static String get posFeatureUpgradeWarning => i.posFeatureUpgradeWarning;
+  static String get posFeatureUpgradeSuccess => i.posFeatureUpgradeSuccess;
+  static String get posFeatureConfirmUpgrade => i.posFeatureConfirmUpgrade;
   static String get posFeatureDisableSuccess => i.posFeatureDisableSuccess;
   static String get posFeatureCancel => i.posFeatureCancel;
   static String get posFeatureConfirm => i.posFeatureConfirm;
@@ -2791,6 +2796,22 @@ class AppStrings {
   static String get posStockReadFailed => i.posStockReadFailed;
   static String get posStockAppendFailed => i.posStockAppendFailed;
   static String get posStockProductInactive => i.posStockProductInactive;
+  static String get posStockDisposalAtomicRequired =>
+      i.posStockDisposalAtomicRequired;
+  static String get posStockDisposalInvalid => i.posStockDisposalInvalid;
+  static String get posStockDisposalExpiryLotRequired =>
+      i.posStockDisposalExpiryLotRequired;
+  static String get posStockDisposalNotExpired => i.posStockDisposalNotExpired;
+  static String get posStockDisposalBatchExpired =>
+      i.posStockDisposalBatchExpired;
+  static String get posStockDisposalCostChanged =>
+      i.posStockDisposalCostChanged;
+  static String get posStockDisposalLossAccountRequired =>
+      i.posStockDisposalLossAccountRequired;
+  static String get posStockDisposalWarehouseMismatch =>
+      i.posStockDisposalWarehouseMismatch;
+  static String get posStockDisposalReverseNoteRequired =>
+      i.posStockDisposalReverseNoteRequired;
   static String get posStockMovementsTitle => i.posStockMovementsTitle;
   static String get posStockMovementsDescription =>
       i.posStockMovementsDescription;
@@ -2801,6 +2822,50 @@ class AppStrings {
   static String get posStockMovementAllTypes => i.posStockMovementAllTypes;
   static String posStockMovementTypeLabel(String type) =>
       i.posStockMovementTypeLabel(type);
+  static String posStockDisposalReasonLabel(String code) =>
+      i.posStockDisposalReasonLabel(code);
+  static String get posStockDisposalTitle => i.posStockDisposalTitle;
+  static String get posStockDisposalDescription =>
+      i.posStockDisposalDescription;
+  static String get posStockDisposalReason => i.posStockDisposalReason;
+  static String get posStockDisposalReasonDamage =>
+      i.posStockDisposalReasonDamage;
+  static String get posStockDisposalReasonExpiry =>
+      i.posStockDisposalReasonExpiry;
+  static String get posStockDisposalReasonAuthorizedLoss =>
+      i.posStockDisposalReasonAuthorizedLoss;
+  static String get posStockDisposalReasonOther =>
+      i.posStockDisposalReasonOther;
+  static String get posStockDisposalDetail => i.posStockDisposalDetail;
+  static String get posStockDisposalOtherDetailRequired =>
+      i.posStockDisposalOtherDetailRequired;
+  static String get posStockDisposalWarehouse => i.posStockDisposalWarehouse;
+  static String get posStockDisposalQuantity => i.posStockDisposalQuantity;
+  static String get posStockDisposalAvailableLabel =>
+      i.posStockDisposalAvailableLabel;
+  static String get posStockDisposalEstimatedValue =>
+      i.posStockDisposalEstimatedValue;
+  static String get posStockDisposalDate => i.posStockDisposalDate;
+  static String get posStockDisposalLot => i.posStockDisposalLot;
+  static String get posStockDisposalSelectLot => i.posStockDisposalSelectLot;
+  static String get posStockDisposalNoLots => i.posStockDisposalNoLots;
+  static String get posStockDisposalSubmit => i.posStockDisposalSubmit;
+  static String get posStockDisposalSaved => i.posStockDisposalSaved;
+  static String get posStockDisposalFailed => i.posStockDisposalFailed;
+  static String get posStockDisposalVoucherLink =>
+      i.posStockDisposalVoucherLink;
+  static String posStockDisposalVoucherDescription(String reason, String? detail) =>
+      i.posStockDisposalVoucherDescription(reason, detail);
+  static String posStockDisposalReversalVoucherDescription(String sourceId) =>
+      i.posStockDisposalReversalVoucherDescription(sourceId);
+  static String get posStockDisposalReverseAction =>
+      i.posStockDisposalReverseAction;
+  static String get posStockDisposalReverseNote =>
+      i.posStockDisposalReverseNote;
+  static String get posStockDisposalReverseSuccess =>
+      i.posStockDisposalReverseSuccess;
+  static String get posStockDisposalReverseFailed =>
+      i.posStockDisposalReverseFailed;
   static String get posStockMovementInbound => i.posStockMovementInbound;
   static String get posStockMovementOutbound => i.posStockMovementOutbound;
   static String get posStockAdjustmentTitle => i.posStockAdjustmentTitle;

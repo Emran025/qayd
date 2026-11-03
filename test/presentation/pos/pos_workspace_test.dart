@@ -54,6 +54,9 @@ final class _WorkspaceActivationRepository implements PosActivationRepository {
   Future<Result<bool>> isEnabled() async => Success(enabled);
 
   @override
+  Future<Result<int?>> getInstalledTemplateVersion() async => const Success(3);
+
+  @override
   Future<Result<String?>> getEnabledWarehouseId() async =>
       Success(enabled ? warehouseId : null);
 

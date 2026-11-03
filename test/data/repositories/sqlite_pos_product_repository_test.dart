@@ -80,7 +80,7 @@ void main() {
       await Migration040PosFoundation().up(db);
       await Migration041PosInvoiceMetadata().up(db);
       await Migration042PosProductCategories().up(db);
-      await MigrationRegistry.applyFromTo(db, fromVersion: 42, toVersion: 46);
+      await MigrationRegistry.applyFromTo(db, fromVersion: 42, toVersion: 47);
       repository = SqlitePosProductRepository(
         db,
         _CurrencyRepository(currency),

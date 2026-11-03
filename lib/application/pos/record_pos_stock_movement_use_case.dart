@@ -58,6 +58,12 @@ final class RecordPosStockMovementUseCase {
   final IdGenerator _idGenerator;
 
   Future<Result<void>> call(RecordPosStockMovementInput input) async {
+    if (input.type == PosStockMovementType.damage ||
+        input.type == PosStockMovementType.expiry) {
+      return FailureResult(
+        ValidationFailure(messageAr: AppStrings.posStockDisposalAtomicRequired),
+      );
+    }
     final gate = await _writeGuard.assertWritesPermitted();
     if (gate.isFailure) return FailureResult(gate.failureOrNull!);
 

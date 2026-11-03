@@ -173,6 +173,30 @@ final class SqlitePosActivationRepository
   }
 
   @override
+  Future<Result<int?>> getInstalledTemplateVersion() async {
+    try {
+      final rows = await _db.query(
+        'pos_settings',
+        columns: ['template_version'],
+        where: 'id = 1',
+        limit: 1,
+      );
+      if (rows.isEmpty || rows.first['template_version'] == null) {
+        return const Success(null);
+      }
+      return Success((rows.first['template_version'] as num).toInt());
+    } on DatabaseException {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posFeatureStateReadFailed),
+      );
+    } catch (_) {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posFeatureStateReadFailed),
+      );
+    }
+  }
+
+  @override
   Future<Result<String?>> getEnabledWarehouseId() async {
     try {
       final rows = await _db.query(

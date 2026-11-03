@@ -109,7 +109,7 @@ Future<void> _createSchema(Database db) async {
   ''');
   await Migration040PosFoundation().up(db);
   await Migration041PosInvoiceMetadata().up(db);
-  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 46);
+  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 47);
 }
 
 Future<void> _seed(Database db) async {

@@ -9,6 +9,9 @@ import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
 import 'package:qayd/domain/repositories/pos_accounting_posting_repository.dart';
+import 'package:qayd/domain/services/pos_money_math.dart';
+import 'package:qayd/domain/value_objects/entry_side.dart';
+import 'package:qayd/domain/value_objects/voucher_type.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
@@ -273,6 +276,118 @@ final class SqlitePosAccountingPostingRepository
     }
   }
 
+  @override
+  Future<Result<void>> saveStockDisposalAtomically({
+    required PosStockMovement movement,
+    required PosAccountingPosting posting,
+  }) async {
+    final isReversal = movement.reversesSourceId != null;
+    final expectedSourceType =
+        isReversal ? 'stock_disposal_reversal' : 'stock_disposal';
+    if (movement.sourceType != expectedSourceType ||
+        movement.voucherId != posting.voucher.id.value ||
+        !_sameUtcCalendarDate(posting.voucher.date, movement.occurredAt) ||
+        movement.sourceId?.trim() != posting.sourceId.trim() ||
+        posting.voucher.referenceNumber?.trim() != posting.sourceId.trim() ||
+        !_hasExpectedDisposalPosting(movement, posting)) {
+      return FailureResult(
+        ValidationFailure(messageAr: AppStrings.posAccountingSourceMismatch),
+      );
+    }
+    try {
+      await _transactionRunner.run<void>((txn) async {
+        final stockResult = await _stockRepository
+            .getByIdempotencyKeyInTransaction(txn, movement.idempotencyKey);
+        if (stockResult.isFailure) {
+          throw _AtomicPostingFailure(stockResult.failureOrNull!);
+        }
+        final existingMovement = stockResult.valueOrNull;
+        final postingState = await _inspectPosting(txn, posting);
+        if (existingMovement != null &&
+            postingState == _PostingState.exact &&
+            _sameMovement(existingMovement, movement)) {
+          return;
+        }
+        if (existingMovement != null || postingState != _PostingState.absent) {
+          throw _AtomicPostingFailure(
+            ValidationFailure(messageAr: _failureMessage(postingState)),
+          );
+        }
+
+        final duplicateSource = await txn.query(
+          'vouchers',
+          columns: ['id'],
+          where: 'reference_number = ?',
+          whereArgs: [posting.sourceId],
+          limit: 1,
+        );
+        if (duplicateSource.isNotEmpty) {
+          throw _AtomicPostingFailure(
+            ValidationFailure(
+              messageAr: AppStrings.posAccountingDuplicateSource,
+            ),
+          );
+        }
+
+        if (isReversal) {
+          await _validateDisposalReversal(txn, movement, posting);
+        } else {
+          final validation = await _stockRepository
+              .validateStockDisposalInTransaction(txn, movement);
+          if (validation.isFailure) {
+            throw _AtomicPostingFailure(validation.failureOrNull!);
+          }
+          final amount = PosMoneyMath.multiply(
+            movement.quantity,
+            validation.valueOrNull!.averageUnitCost,
+          );
+          if (amount.minorUnits <= 0 || amount != posting.voucher.amount) {
+            throw _AtomicPostingFailure(
+              ValidationFailure(messageAr: AppStrings.posStockDisposalCostChanged),
+            );
+          }
+        }
+
+        final appendResult = await _stockRepository.appendInTransaction(
+          txn,
+          movement,
+          allowStockDisposal: true,
+        );
+        if (appendResult.isFailure) {
+          throw _AtomicPostingFailure(appendResult.failureOrNull!);
+        }
+        final voucherResult =
+            await _voucherRepository.saveWithLedgerEntriesInTransaction(
+          txn,
+          voucher: posting.voucher,
+          ledgerEntries: posting.entries,
+        );
+        if (voucherResult.isFailure) {
+          throw _AtomicPostingFailure(voucherResult.failureOrNull!);
+        }
+        final lotId = movement.lotId;
+        if (lotId != null) {
+          final projection = await _stockRepository
+              .verifyLotProjectionInTransaction(txn, lotId);
+          if (projection.isFailure) {
+            throw _AtomicPostingFailure(projection.failureOrNull!);
+          }
+        }
+      });
+      return const Success(null);
+    } on _AtomicPostingFailure catch (error) {
+      return FailureResult(error.failure);
+    } on DatabaseException {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posAccountingTransactionFailed),
+      );
+    } catch (_) {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posAccountingTransactionFailed),
+      );
+    }
+  }
+
   Future<_PostingState> _inspectPosting(
     DatabaseExecutor executor,
     PosAccountingPosting posting,
@@ -350,9 +465,129 @@ final class SqlitePosAccountingPostingRepository
         existing.sourceId == expected.sourceId &&
         existing.sourceLineId == expected.sourceLineId &&
         existing.lotId == expected.lotId &&
+        existing.disposalReason == expected.disposalReason &&
+        existing.reasonDetail == expected.reasonDetail &&
+        existing.voucherId == expected.voucherId &&
+        existing.reversesSourceId == expected.reversesSourceId &&
         existing.occurredAt.toUtc() == expected.occurredAt.toUtc() &&
         existing.idempotencyKey == expected.idempotencyKey;
   }
+
+  static bool _hasExpectedDisposalPosting(
+    PosStockMovement movement,
+    PosAccountingPosting posting,
+  ) {
+    if (posting.entries.length != 2) return false;
+    final debitEntries = posting.entries
+        .where((entry) => entry.side == EntrySide.debit)
+        .toList(growable: false);
+    final creditEntries = posting.entries
+        .where((entry) => entry.side == EntrySide.credit)
+        .toList(growable: false);
+    if (debitEntries.length != 1 || creditEntries.length != 1) return false;
+    final debit = debitEntries.single;
+    final credit = creditEntries.single;
+    final voucher = posting.voucher;
+    if (debit.amount != voucher.amount ||
+        credit.amount != voucher.amount ||
+        debit.currency != voucher.currency ||
+        credit.currency != voucher.currency) {
+      return false;
+    }
+    if (movement.reversesSourceId != null) {
+      return movement.disposalReason == null &&
+          movement.direction == PosStockMovementDirection.inbound &&
+          movement.type == PosStockMovementType.adjustment &&
+          movement.sourceType == 'stock_disposal_reversal' &&
+          voucher.type == VoucherType.receipt &&
+          debit.accountId == voucher.affectedAccountId &&
+          credit.accountId == voucher.counterpartyId;
+    }
+    return movement.disposalReason != null &&
+        movement.direction == PosStockMovementDirection.outbound &&
+        movement.sourceType == 'stock_disposal' &&
+        voucher.type == VoucherType.payment &&
+        debit.accountId == voucher.counterpartyId &&
+        credit.accountId == voucher.affectedAccountId;
+  }
+
+  Future<void> _validateDisposalReversal(
+    DatabaseExecutor txn,
+    PosStockMovement movement,
+    PosAccountingPosting posting,
+  ) async {
+    final sourceId = movement.reversesSourceId?.trim();
+    if (sourceId == null || sourceId.isEmpty) {
+      throw _disposalReversalFailure();
+    }
+    final originals = await txn.query(
+      'pos_stock_movements',
+      where: "source_type = 'stock_disposal' AND source_id = ?",
+      whereArgs: [sourceId],
+      limit: 2,
+    );
+    if (originals.length != 1) throw _disposalReversalFailure();
+    final original = originals.single;
+    final originalQuantity = (original['quantity_scaled'] as num).toInt();
+    if (originalQuantity >= 0 ||
+        original['disposal_reason_code'] == null ||
+        movement.sourceId == sourceId ||
+        movement.sourceType != 'stock_disposal_reversal' ||
+        movement.direction != PosStockMovementDirection.inbound ||
+        movement.type != PosStockMovementType.adjustment ||
+        movement.productId != original['product_id'] ||
+        movement.warehouseId != original['warehouse_id'] ||
+        movement.lotId != original['lot_id'] ||
+        movement.quantity.scaledUnits != -originalQuantity ||
+        movement.quantity.scale != (original['quantity_scale'] as num).toInt() ||
+        movement.unitCost.minorUnits !=
+            (original['unit_cost_minor'] as num).toInt() ||
+        movement.unitCost.currency.code != original['currency_code']) {
+      throw _disposalReversalFailure();
+    }
+    final existingReversals = await txn.query(
+      'pos_stock_movements',
+      columns: ['id'],
+      where: 'reverses_source_id = ?',
+      whereArgs: [sourceId],
+      limit: 1,
+    );
+    if (existingReversals.isNotEmpty) throw _disposalReversalFailure();
+
+    final originalVoucherId = original['voucher_id'] as String?;
+    if (originalVoucherId == null || originalVoucherId.isEmpty) {
+      throw _disposalReversalFailure();
+    }
+    final voucherRows = await txn.query(
+      'vouchers',
+      columns: [
+        'amount_minor',
+        'counterparty_id',
+        'affected_account_id',
+        'type',
+      ],
+      where: 'id = ?',
+      whereArgs: [originalVoucherId],
+      limit: 1,
+    );
+    if (voucherRows.isEmpty) throw _disposalReversalFailure();
+    final originalVoucher = voucherRows.single;
+    final amount = PosMoneyMath.multiply(movement.quantity, movement.unitCost);
+    if (amount.minorUnits !=
+            (originalVoucher['amount_minor'] as num).toInt() ||
+        posting.voucher.amount != amount ||
+        posting.voucher.counterpartyId.value !=
+            originalVoucher['counterparty_id'] ||
+        posting.voucher.affectedAccountId.value !=
+            originalVoucher['affected_account_id'] ||
+        originalVoucher['type'] != 'payment') {
+      throw _disposalReversalFailure();
+    }
+  }
+
+  _AtomicPostingFailure _disposalReversalFailure() => _AtomicPostingFailure(
+        ValidationFailure(messageAr: AppStrings.posStockDisposalInvalid),
+      );
 
   static bool _sameUtcCalendarDate(DateTime left, DateTime right) {
     final a = left.toUtc();
