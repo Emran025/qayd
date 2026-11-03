@@ -2744,6 +2744,16 @@ class AppStrings {
   static String get posInvoiceDetailTitle => i.posInvoiceDetailTitle;
   static String get posInvoiceNotFound => i.posInvoiceNotFound;
   static String get posInvoiceDueLabel => i.posInvoiceDueLabel;
+  static String get posCollectAction => i.posCollectAction;
+  static String get posCollectAmount => i.posCollectAmount;
+  static String get posCollectDate => i.posCollectDate;
+  static String get posCollectReceivingAccount => i.posCollectReceivingAccount;
+  static String get posCollectPaymentMethod => i.posCollectPaymentMethod;
+  static String get posCollectChooseAccount => i.posCollectChooseAccount;
+  static String get posCollectHistoryTitle => i.posCollectHistoryTitle;
+  static String get posCollectNoPayments => i.posCollectNoPayments;
+  static String get posCollectSubmit => i.posCollectSubmit;
+  static String get posCollectSuccess => i.posCollectSuccess;
   static String get posInvoiceExportPdf => i.posInvoiceExportPdf;
   static String get posInvoicePdfFailed => i.posInvoicePdfFailed;
   static String get posSalesReturnAction => i.posSalesReturnAction;
