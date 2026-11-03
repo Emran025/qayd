@@ -2771,6 +2771,27 @@ class AppStrings {
   static String get posCollectSuccess => i.posCollectSuccess;
   static String get posInvoiceExportPdf => i.posInvoiceExportPdf;
   static String get posInvoicePdfFailed => i.posInvoicePdfFailed;
+  static String get posCreditInvoiceChatTitle => i.posCreditInvoiceChatTitle;
+  static String get posCreditInvoiceAwaiting => i.posCreditInvoiceAwaiting;
+  static String get posCreditInvoiceAccepted => i.posCreditInvoiceAccepted;
+  static String get posCreditInvoiceRejected => i.posCreditInvoiceRejected;
+  static String get posCreditInvoiceDeliveryFailed =>
+      i.posCreditInvoiceDeliveryFailed;
+  static String get posCreditInvoiceResponsePendingSync =>
+      i.posCreditInvoiceResponsePendingSync;
+  static String get posCreditInvoiceResponseSent =>
+      i.posCreditInvoiceResponseSent;
+  static String get posCreditInvoiceOpenDetails =>
+      i.posCreditInvoiceOpenDetails;
+  static String get posCreditInvoiceRetrySend => i.posCreditInvoiceRetrySend;
+  static String get posCreditInvoiceRetryAck => i.posCreditInvoiceRetryAck;
+  static String get posCreditInvoiceNeedsResponse =>
+      i.posCreditInvoiceNeedsResponse;
+  static String get posCreditInvoiceAcknowledgmentOnly =>
+      i.posCreditInvoiceAcknowledgmentOnly;
+  static String get posCreditInvoiceTaxLabel => i.posCreditInvoiceTaxLabel;
+  static String get posCreditInvoicePaidLabel => i.posCreditInvoicePaidLabel;
+  static String get syncIdentityUnavailable => i.syncIdentityUnavailable;
   static String get posSalesReturnAction => i.posSalesReturnAction;
   static String get posSalesReturnTitle => i.posSalesReturnTitle;
   static String get posSalesReturnDescription => i.posSalesReturnDescription;

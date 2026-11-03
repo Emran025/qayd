@@ -503,7 +503,7 @@ class LegacyMigrationUseCase {
       CryptoKeyPair? keyPair;
       String myPhone = '';
       if (_signingService != null && _getKeyPair != null) {
-        keyPair = await _getKeyPair?.call();
+        keyPair = await _getKeyPair.call();
         final licenseData = await _licenseVault?.readLicenseData();
         myPhone = licenseData?['phone'] as String? ?? '';
       }
@@ -719,7 +719,7 @@ class LegacyMigrationUseCase {
         receiptUuid: voucher.id.value,
       );
 
-      final signature = _signingService!.signReceipt(signable, keyPair);
+      final signature = _signingService.signReceipt(signable, keyPair);
       voucher = voucher.attachSignature(
         signatureHex: signature.signatureHex,
         publicKeyHex: signature.signerPublicKeyHex,

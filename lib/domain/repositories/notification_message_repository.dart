@@ -16,6 +16,14 @@ abstract class NotificationMessageRepository {
     int limit,
   });
 
+  /// Returns durable chat records for selected channels, including processed
+  /// rows, so reading an invoice notification never removes it from history.
+  Future<Result<List<NotificationMessage>>> listForCounterpartyChannels({
+    required String counterpartyAccountId,
+    required List<String> channels,
+    int limit,
+  });
+
   Future<Result<List<NotificationMessage>>> listAllUnprocessed({int limit});
 
   Future<Result<void>> markProcessed(String id);

@@ -56,21 +56,21 @@ class OutboxEntry {
   final int? receiverServerId;
 
   Map<String, Object?> toMap() => {
-        'id': id,
-        'event_type': eventType,
-        'voucher_id': voucherId,
-        'counterparty_account_id': counterpartyAccountId,
-        'encrypted_payload': encryptedPayload,
-        'state': state,
-        'transport': transport,
-        'retry_count': retryCount,
-        'created_at': createdAt.toIso8601String(),
-        'delivered_at': deliveredAt?.toIso8601String(),
-        'receiver_phone': receiverPhone,
-        'receiver_whatsapp': receiverWhatsapp,
-        'receiver_public_key': receiverPublicKey,
-        'receiver_server_id': receiverServerId,
-      };
+    'id': id,
+    'event_type': eventType,
+    'voucher_id': voucherId,
+    'counterparty_account_id': counterpartyAccountId,
+    'encrypted_payload': encryptedPayload,
+    'state': state,
+    'transport': transport,
+    'retry_count': retryCount,
+    'created_at': createdAt.toIso8601String(),
+    'delivered_at': deliveredAt?.toIso8601String(),
+    'receiver_phone': receiverPhone,
+    'receiver_whatsapp': receiverWhatsapp,
+    'receiver_public_key': receiverPublicKey,
+    'receiver_server_id': receiverServerId,
+  };
 
   factory OutboxEntry.fromMap(Map<String, Object?> map) {
     return OutboxEntry(
@@ -136,9 +136,9 @@ class OutboxDao {
         entry.toMap(),
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
-      return  Success(null);
+      return Success(null);
     } catch (_) {
-      return  FailureResult(
+      return FailureResult(
         DatabaseFailure(messageAr: AppStrings.theEntryCouldNot),
       );
     }
@@ -155,7 +155,7 @@ class OutboxDao {
       );
       return Success(rows.map(OutboxEntry.fromMap).toList());
     } catch (_) {
-      return  FailureResult(
+      return FailureResult(
         DatabaseFailure(messageAr: AppStrings.theOutboxCouldNot),
       );
     }
@@ -174,7 +174,7 @@ class OutboxDao {
       );
       return Success(rows.map(OutboxEntry.fromMap).toList());
     } catch (_) {
-      return  FailureResult(
+      return FailureResult(
         DatabaseFailure(messageAr: AppStrings.thePartysOutboxCould),
       );
     }
@@ -190,21 +190,29 @@ class OutboxDao {
       for (final id in ids) {
         await _db.update(
           _table,
-          {
-            'state': 'delivered',
-            'transport': transport,
-            'delivered_at': now,
-          },
+          {'state': 'delivered', 'transport': transport, 'delivered_at': now},
           where: 'id = ?',
           whereArgs: [id],
         );
       }
-      return  Success(null);
+      return Success(null);
     } catch (_) {
-      return  FailureResult(
+      return FailureResult(
         DatabaseFailure(messageAr: AppStrings.unableToUpdateDelivery),
       );
     }
+  }
+
+  /// Quarantines an entry whose payload predates authenticated encryption.
+  /// The row and payload are retained for recovery/audit; it is no longer
+  /// returned by [listPending] and cannot be transmitted by the app.
+  Future<void> markBlockedLegacy(String id) async {
+    await _db.update(
+      _table,
+      {'state': 'failed', 'transport': 'blocked_legacy_payload'},
+      where: "id = ? AND state = 'pending'",
+      whereArgs: [id],
+    );
   }
 
   /// Increment retry count for failed delivery attempts.
@@ -228,8 +236,9 @@ class OutboxDao {
 
   /// Purge delivered entries older than [days] from the outbox.
   Future<void> purgeDelivered({int days = 30}) async {
-    final cutoff =
-        DateTime.now().subtract(Duration(days: days)).toIso8601String();
+    final cutoff = DateTime.now()
+        .subtract(Duration(days: days))
+        .toIso8601String();
     await _db.delete(
       _table,
       where: "state = 'delivered' AND delivered_at < ?",

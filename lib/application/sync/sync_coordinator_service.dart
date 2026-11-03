@@ -11,6 +11,7 @@ import 'package:qayd/application/notifications/collateral_expiry_checker.dart';
 import 'package:qayd/data/repositories/outbox_dao.dart';
 import 'package:qayd/data/repositories/device_sync_outbox_dao.dart';
 import 'package:qayd/data/repositories/sync_watermark_dao.dart';
+import 'package:qayd/data/security/e2ee_envelope_format.dart';
 import 'package:qayd/domain/repositories/voucher_repository.dart';
 import 'package:qayd/application/sync/sync_event_dispatcher.dart';
 import 'package:qayd/domain/value_objects/voucher_state.dart';
@@ -202,13 +203,16 @@ class SyncCoordinatorService {
       // 3. Pull new nodes since last watermark
       final nodes = await syncRepository.pullNodes(since: lastSync);
       final targetNodes = nodes
-          .where((n) =>
-              n.targetDeviceId == null || n.targetDeviceId == currentDeviceId)
+          .where(
+            (n) =>
+                n.targetDeviceId == null || n.targetDeviceId == currentDeviceId,
+          )
           .toList();
       if (targetNodes.isNotEmpty) {
         // Feed caught-up nodes firmly into local verification pipelines
-        final appliedIds =
-            await payloadProcessor.processIncomingNodes(targetNodes);
+        final appliedIds = await payloadProcessor.processIncomingNodes(
+          targetNodes,
+        );
 
         if (appliedIds.isNotEmpty) {
           await _acknowledge(appliedIds.toList(), 'delivered');
@@ -226,6 +230,13 @@ class SyncCoordinatorService {
 
     for (final entry in pending) {
       try {
+        if (!E2EEEnvelopeFormat.isSupported(entry.encryptedPayload)) {
+          await deviceSyncOutboxDao.markBlockedLegacy(entry.id);
+          debugPrint(
+            'Sync: blocked legacy device payload ${entry.id}; local data retained.',
+          );
+          continue;
+        }
         final node = SyncNode(
           id: entry.id,
           senderId: currentUserId,
@@ -310,17 +321,26 @@ class SyncCoordinatorService {
     final deliveredIds = <String>[];
     for (final entry in entries) {
       try {
+        if (!E2EEEnvelopeFormat.isSupported(entry.encryptedPayload)) {
+          await outboxDao.markBlockedLegacy(entry.id);
+          debugPrint(
+            'Sync: blocked legacy outbox payload ${entry.id}; local data retained.',
+          );
+          continue;
+        }
         // §5.C: Build routing-aware SyncNode from stored hints.
         // Skip entries that have NO routing hint — they cannot be delivered
         // and would cause a 422. They will be retried after identity discovery.
-        final hasHint = (entry.receiverServerId != null) ||
+        final hasHint =
+            (entry.receiverServerId != null) ||
             (entry.receiverPhone?.isNotEmpty ?? false) ||
             (entry.receiverWhatsapp?.isNotEmpty ?? false) ||
             (entry.receiverPublicKey?.isNotEmpty ?? false);
 
         if (!hasHint) {
           debugPrint(
-              'Sync: ⏭ Skipping ${entry.id} — no routing hint yet. Will retry after discovery.');
+            'Sync: ⏭ Skipping ${entry.id} — no routing hint yet. Will retry after discovery.',
+          );
           continue;
         }
 
@@ -340,8 +360,10 @@ class SyncCoordinatorService {
 
         await syncRepository.pushNode(node);
         deliveredIds.add(entry.id);
-        debugPrint('Sync: ✅ Pushed node ${entry.id} (${entry.eventType}) '
-            '[routed via: ${_describeRoute(entry)}]');
+        debugPrint(
+          'Sync: ✅ Pushed node ${entry.id} (${entry.eventType}) '
+          '[routed via: ${_describeRoute(entry)}]',
+        );
       } catch (e) {
         debugPrint('Sync: ❌ Push failed for ${entry.id}: $e');
         await outboxDao.incrementRetry(entry.id);
@@ -355,10 +377,14 @@ class SyncCoordinatorService {
 
   /// Returns a human-readable routing description for debug logs.
   String _describeRoute(OutboxEntry entry) {
-    if (entry.receiverServerId != null) return 'serverId=${entry.receiverServerId}';
-    if (entry.receiverPhone?.isNotEmpty ?? false) return 'phone=${entry.receiverPhone}';
-    if (entry.receiverWhatsapp?.isNotEmpty ?? false) return 'whatsapp=${entry.receiverWhatsapp}';
-    if (entry.receiverPublicKey?.isNotEmpty ?? false) return 'pubkey=${entry.receiverPublicKey!.substring(0, 8)}...';
+    if (entry.receiverServerId != null)
+      return 'serverId=${entry.receiverServerId}';
+    if (entry.receiverPhone?.isNotEmpty ?? false)
+      return 'phone=${entry.receiverPhone}';
+    if (entry.receiverWhatsapp?.isNotEmpty ?? false)
+      return 'whatsapp=${entry.receiverWhatsapp}';
+    if (entry.receiverPublicKey?.isNotEmpty ?? false)
+      return 'pubkey=${entry.receiverPublicKey!.substring(0, 8)}...';
     return 'none';
   }
 

@@ -91,16 +91,16 @@ class ConfirmVoucherUseCase {
       if (_signingService != null &&
           _getKeyPair != null &&
           _licenseVault != null) {
-        final keyPair = await _getKeyPair!();
+        final keyPair = await _getKeyPair();
         if (keyPair != null) {
-          final licenseData = await _licenseVault!.readLicenseData();
+          final licenseData = await _licenseVault.readLicenseData();
           final myPhone = (licenseData?['user']?['phone'] ??
                   licenseData?['phone']) as String? ??
               '';
 
           String cpPhone = '';
           if (_accountRepository != null) {
-            final cpParty = await _accountRepository!.getPartyDetails(
+            final cpParty = await _accountRepository.getPartyDetails(
               draft.counterpartyId,
             );
             cpPhone = cpParty.valueOrNull?.phoneNumber ?? '';
@@ -118,7 +118,7 @@ class ConfirmVoucherUseCase {
           // If it already has a sender signature (e.g. from QR scan), we sign as receiver.
           final shouldSignAsSender = draft.senderSignatureHex == null;
 
-          final signature = _signingService!.signReceipt(signable, keyPair);
+          final signature = _signingService.signReceipt(signable, keyPair);
           voucherToConfirm = draft.attachSignature(
             signatureHex: signature.signatureHex,
             publicKeyHex: signature.signerPublicKeyHex,
@@ -180,7 +180,7 @@ class ConfirmVoucherUseCase {
 
       // §5.A: Enqueue acceptance into local outbox
       if (_syncEventDispatcher != null) {
-        _syncEventDispatcher!.dispatchVoucherAcceptance(confirmed).ignore();
+        _syncEventDispatcher.dispatchVoucherAcceptance(confirmed).ignore();
       }
 
       await _auditLogService?.log(

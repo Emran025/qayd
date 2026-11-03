@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'package:excel/excel.dart';
+import 'package:excel_plus/excel_plus.dart';
 import 'package:qayd/application/reports/dtos/trial_balance_line_dto.dart';
 import 'package:qayd/application/reports/dtos/trial_balance_output.dart';
 import 'package:qayd/application/reports/dtos/balance_sheet_output.dart';
@@ -8,13 +8,20 @@ import 'package:qayd/domain/value_objects/account_classification.dart';
 import 'package:qayd/core/utils/currency_util.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/presentation/utils/qayd_header_config.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Professional Excel generator for financial reports.
 ///
 /// Produces branded workbooks with proper headers, styled data rows,
 /// and per-currency totals.
 final class ExcelReportGenerator {
-  const ExcelReportGenerator();
+  const ExcelReportGenerator({SharedPreferences? sharedPreferences})
+    : _sharedPreferences = sharedPreferences;
+
+  final SharedPreferences? _sharedPreferences;
+
+  SharedPreferences get _prefs =>
+      _sharedPreferences ?? InjectionContainer.sharedPreferences;
 
   // ═══════════════════════════════════════════════════════════════════════
   // ── TRIAL BALANCE ──────────────────────────────────────────────────────
@@ -25,8 +32,7 @@ final class ExcelReportGenerator {
     final Sheet sheet = excel[AppStrings.trialBalance];
     excel.delete('Sheet1');
 
-    final branding =
-        QaydHeaderConfig.resolve(InjectionContainer.sharedPreferences);
+    final branding = QaydHeaderConfig.resolve(_prefs);
 
     // ── Styles ──────────────────────────────────────────────────────────
     final titleStyle = CellStyle(
@@ -77,14 +83,19 @@ final class ExcelReportGenerator {
     sheet.merge(CellIndex.indexByString('A1'), CellIndex.indexByString('H1'));
     for (var i = 0; i < 8; i++) {
       sheet
-          .cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0))
-          .cellStyle = titleStyle;
+              .cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0))
+              .cellStyle =
+          titleStyle;
     }
 
     // ── Column headers ──────────────────────────────────────────────────
     sheet.appendRow([
-      TextCellValue(InjectionContainer.sharedPreferences.getString('pdf_col_account') ?? AppStrings.theAccount),
-      TextCellValue(InjectionContainer.sharedPreferences.getString('pdf_col_currency') ?? AppStrings.currency),
+      TextCellValue(
+        _prefs.getString('pdf_col_account') ?? AppStrings.theAccount,
+      ),
+      TextCellValue(
+        _prefs.getString('pdf_col_currency') ?? AppStrings.currency,
+      ),
       TextCellValue(AppStrings.myEditorialIsIndebted),
       TextCellValue(AppStrings.creditOpening),
       TextCellValue(AppStrings.madianMovement),
@@ -94,8 +105,9 @@ final class ExcelReportGenerator {
     ]);
     for (var i = 0; i < 8; i++) {
       sheet
-          .cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 1))
-          .cellStyle = headerStyle;
+              .cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 1))
+              .cellStyle =
+          headerStyle;
     }
 
     // ── Group Data ──────────────────────────────────────────────────────
@@ -121,8 +133,11 @@ final class ExcelReportGenerator {
         final divisor = _divisor(line.currencyDigits);
         sheet.appendRow([
           TextCellValue(i == 0 ? accountRepresentation : ''),
-          TextCellValue(CurrencyUtil.getLocalizedName(line.currencyCode)
-              .replaceAll('﷼', AppStrings.sar)),
+          TextCellValue(
+            CurrencyUtil.getLocalizedName(
+              line.currencyCode,
+            ).replaceAll('﷼', AppStrings.sar),
+          ),
           DoubleCellValue(line.openingDebitMinorUnits / divisor),
           DoubleCellValue(line.openingCreditMinorUnits / divisor),
           DoubleCellValue(line.periodDebitMinorUnits / divisor),
@@ -132,8 +147,12 @@ final class ExcelReportGenerator {
         ]);
 
         for (var col = 0; col < 8; col++) {
-          final cell = sheet.cell(CellIndex.indexByColumnRow(
-              columnIndex: col, rowIndex: startRow + i));
+          final cell = sheet.cell(
+            CellIndex.indexByColumnRow(
+              columnIndex: col,
+              rowIndex: startRow + i,
+            ),
+          );
           cell.cellStyle = isParent ? parentStyle : dataStyle;
         }
       }
@@ -141,8 +160,9 @@ final class ExcelReportGenerator {
       final endRow = sheet.maxRows - 1;
       if (endRow > startRow) {
         sheet.merge(
-            CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: startRow),
-            CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: endRow));
+          CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: startRow),
+          CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: endRow),
+        );
       }
     }
 
@@ -153,8 +173,11 @@ final class ExcelReportGenerator {
       final divisor = _divisor(section.currencyDigits);
       sheet.appendRow([
         TextCellValue(AppStrings.total),
-        TextCellValue(CurrencyUtil.getLocalizedName(section.currencyCode)
-            .replaceAll('﷼', AppStrings.sar)),
+        TextCellValue(
+          CurrencyUtil.getLocalizedName(
+            section.currencyCode,
+          ).replaceAll('﷼', AppStrings.sar),
+        ),
         DoubleCellValue(section.openingDebitMinorUnits / divisor),
         DoubleCellValue(section.openingCreditMinorUnits / divisor),
         DoubleCellValue(section.periodDebitMinorUnits / divisor),
@@ -165,9 +188,14 @@ final class ExcelReportGenerator {
 
       for (var i = 0; i < 8; i++) {
         sheet
-            .cell(CellIndex.indexByColumnRow(
-                columnIndex: i, rowIndex: totalRowIndex))
-            .cellStyle = totalStyle;
+                .cell(
+                  CellIndex.indexByColumnRow(
+                    columnIndex: i,
+                    rowIndex: totalRowIndex,
+                  ),
+                )
+                .cellStyle =
+            totalStyle;
       }
     }
 
@@ -183,8 +211,7 @@ final class ExcelReportGenerator {
     final Sheet sheet = excel[AppStrings.balanceSheet];
     excel.delete('Sheet1');
 
-    final branding =
-        QaydHeaderConfig.resolve(InjectionContainer.sharedPreferences);
+    final branding = QaydHeaderConfig.resolve(_prefs);
 
     // ── Styles ──────────────────────────────────────────────────────────
     final titleStyle = CellStyle(
@@ -237,20 +264,26 @@ final class ExcelReportGenerator {
     sheet.merge(CellIndex.indexByString('A1'), CellIndex.indexByString('C1'));
     for (var i = 0; i < 3; i++) {
       sheet
-          .cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0))
-          .cellStyle = titleStyle;
+              .cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0))
+              .cellStyle =
+          titleStyle;
     }
 
     // ── Column headers ──────────────────────────────────────────────────
     sheet.appendRow([
-      TextCellValue(InjectionContainer.sharedPreferences.getString('pdf_col_account') ?? AppStrings.theAccount),
-      TextCellValue(InjectionContainer.sharedPreferences.getString('pdf_col_currency') ?? AppStrings.currency),
-      TextCellValue(InjectionContainer.sharedPreferences.getString('pdf_col_balance') ?? AppStrings.balance),
+      TextCellValue(
+        _prefs.getString('pdf_col_account') ?? AppStrings.theAccount,
+      ),
+      TextCellValue(
+        _prefs.getString('pdf_col_currency') ?? AppStrings.currency,
+      ),
+      TextCellValue(_prefs.getString('pdf_col_balance') ?? AppStrings.balance),
     ]);
     for (var i = 0; i < 3; i++) {
       sheet
-          .cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 1))
-          .cellStyle = headerStyle;
+              .cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 1))
+              .cellStyle =
+          headerStyle;
     }
 
     // ── Group and output by section ─────────────────────────────────────
@@ -290,45 +323,69 @@ final class ExcelReportGenerator {
       final assetsRowIdx = sheet.maxRows;
       sheet.appendRow([
         TextCellValue(AppStrings.totalAssets),
-        TextCellValue(CurrencyUtil.getLocalizedName(section.currencyCode)
-            .replaceAll('﷼', AppStrings.sar)),
+        TextCellValue(
+          CurrencyUtil.getLocalizedName(
+            section.currencyCode,
+          ).replaceAll('﷼', AppStrings.sar),
+        ),
         DoubleCellValue(section.totalAssetsMinorUnits / divisor),
       ]);
       for (var i = 0; i < 3; i++) {
         sheet
-            .cell(CellIndex.indexByColumnRow(
-                columnIndex: i, rowIndex: assetsRowIdx))
-            .cellStyle = totalStyle;
+                .cell(
+                  CellIndex.indexByColumnRow(
+                    columnIndex: i,
+                    rowIndex: assetsRowIdx,
+                  ),
+                )
+                .cellStyle =
+            totalStyle;
       }
 
       // Liabilities total
       final liabRowIdx = sheet.maxRows;
       sheet.appendRow([
         TextCellValue(AppStrings.totalLiabilities),
-        TextCellValue(CurrencyUtil.getLocalizedName(section.currencyCode)
-            .replaceAll('﷼', AppStrings.sar)),
+        TextCellValue(
+          CurrencyUtil.getLocalizedName(
+            section.currencyCode,
+          ).replaceAll('﷼', AppStrings.sar),
+        ),
         DoubleCellValue(section.totalLiabilitiesMinorUnits / divisor),
       ]);
       for (var i = 0; i < 3; i++) {
         sheet
-            .cell(CellIndex.indexByColumnRow(
-                columnIndex: i, rowIndex: liabRowIdx))
-            .cellStyle = totalStyle;
+                .cell(
+                  CellIndex.indexByColumnRow(
+                    columnIndex: i,
+                    rowIndex: liabRowIdx,
+                  ),
+                )
+                .cellStyle =
+            totalStyle;
       }
 
       // Equity total
       final eqRowIdx = sheet.maxRows;
       sheet.appendRow([
         TextCellValue(AppStrings.propertyRights),
-        TextCellValue(CurrencyUtil.getLocalizedName(section.currencyCode)
-            .replaceAll('﷼', AppStrings.sar)),
+        TextCellValue(
+          CurrencyUtil.getLocalizedName(
+            section.currencyCode,
+          ).replaceAll('﷼', AppStrings.sar),
+        ),
         DoubleCellValue(section.totalEquityMinorUnits / divisor),
       ]);
       for (var i = 0; i < 3; i++) {
         sheet
-            .cell(
-                CellIndex.indexByColumnRow(columnIndex: i, rowIndex: eqRowIdx))
-            .cellStyle = totalStyle;
+                .cell(
+                  CellIndex.indexByColumnRow(
+                    columnIndex: i,
+                    rowIndex: eqRowIdx,
+                  ),
+                )
+                .cellStyle =
+            totalStyle;
       }
     }
 
@@ -362,9 +419,14 @@ final class ExcelReportGenerator {
     );
     for (var i = 0; i < 3; i++) {
       sheet
-          .cell(CellIndex.indexByColumnRow(
-              columnIndex: i, rowIndex: sectionRowIdx))
-          .cellStyle = sectionStyle;
+              .cell(
+                CellIndex.indexByColumnRow(
+                  columnIndex: i,
+                  rowIndex: sectionRowIdx,
+                ),
+              )
+              .cellStyle =
+          sectionStyle;
     }
 
     // Grouping
@@ -390,14 +452,21 @@ final class ExcelReportGenerator {
         final divisor = _divisor(line.currencyDigits);
         sheet.appendRow([
           TextCellValue(i == 0 ? accountRepresentation : ''),
-          TextCellValue(CurrencyUtil.getLocalizedName(line.currencyCode)
-              .replaceAll('﷼', AppStrings.sar)),
+          TextCellValue(
+            CurrencyUtil.getLocalizedName(
+              line.currencyCode,
+            ).replaceAll('﷼', AppStrings.sar),
+          ),
           DoubleCellValue(line.balanceMinorUnits / divisor),
         ]);
 
         for (var col = 0; col < 3; col++) {
-          final cell = sheet.cell(CellIndex.indexByColumnRow(
-              columnIndex: col, rowIndex: startRow + i));
+          final cell = sheet.cell(
+            CellIndex.indexByColumnRow(
+              columnIndex: col,
+              rowIndex: startRow + i,
+            ),
+          );
           cell.cellStyle = isParent ? parentStyle : dataStyle;
         }
       }
@@ -405,8 +474,9 @@ final class ExcelReportGenerator {
       final endRow = sheet.maxRows - 1;
       if (endRow > startRow) {
         sheet.merge(
-            CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: startRow),
-            CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: endRow));
+          CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: startRow),
+          CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: endRow),
+        );
       }
     }
   }

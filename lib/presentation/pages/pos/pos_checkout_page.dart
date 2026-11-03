@@ -325,8 +325,9 @@ class _CheckoutContent extends StatelessWidget {
     );
     if (!context.mounted || !result.confirmed) return;
     if (!cubit.setCartDiscountRule(result.rule)) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(AppStrings.posDiscountInvalid)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.posDiscountInvalid)));
     }
   }
 
@@ -349,8 +350,9 @@ class _CheckoutContent extends StatelessWidget {
     );
     if (!context.mounted || !result.confirmed) return;
     if (!cubit.setLineDiscountRule(line.product.id, result.rule)) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(AppStrings.posDiscountInvalid)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.posDiscountInvalid)));
     }
   }
 
@@ -880,9 +882,9 @@ Future<_DiscountDialogResult> _showDiscountRuleDialog({
           ),
           if (existing != null)
             TextButton(
-              onPressed: () =>
-                  Navigator.of(dialogContext)
-                      .pop((confirmed: true, rule: null)),
+              onPressed: () => Navigator.of(
+                dialogContext,
+              ).pop((confirmed: true, rule: null)),
               child: Text(AppStrings.posDiscountRemove),
             ),
           FilledButton(
@@ -956,7 +958,7 @@ int? _parseCurrencyToMinor(String raw, int fractionalDigits) {
       ? BigInt.zero
       : BigInt.parse(fraction.padRight(fractionalDigits, '0'));
   final minorUnits = whole * scale + fractionValue;
-  if (minorUnits > BigInt.from(0x7fffffffffffffff)) return null;
+  if (minorUnits > BigInt.parse('7fffffffffffffff', radix: 16)) return null;
   return minorUnits.toInt();
 }
 

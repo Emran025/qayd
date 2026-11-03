@@ -54,7 +54,7 @@ final class WithdrawVoucherUseCase {
       final withdrawn = v.withdraw(now);
       final saved = await _voucherRepository.save(withdrawn);
       if (saved.isSuccess && _syncEventDispatcher != null) {
-        _syncEventDispatcher!.dispatchVoucherWithdrawal(withdrawn).ignore();
+        _syncEventDispatcher.dispatchVoucherWithdrawal(withdrawn).ignore();
       }
 
       if (saved.isSuccess) {

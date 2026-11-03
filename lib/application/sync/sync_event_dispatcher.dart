@@ -63,22 +63,29 @@ class SyncEventDispatcher {
     List<Map<String, dynamic>> attachmentMeta = [];
 
     if (voucher.attachmentRefs.isNotEmpty && attachmentRepository != null) {
-      final attachmentsResult =
-          await attachmentRepository!.getByVoucherId(voucher.id);
+      final attachmentsResult = await attachmentRepository!.getByVoucherId(
+        voucher.id,
+      );
       final fullAttachments = attachmentsResult.valueOrNull ?? [];
 
       // Map by ID for fast lookup.
-      final keyMap = {for (final a in fullAttachments) a.id.value: a.attachmentKeyHex};
+      final keyMap = {
+        for (final a in fullAttachments) a.id.value: a.attachmentKeyHex,
+      };
 
-      attachmentMeta = voucher.attachmentRefs.map((ref) => {
-        'id': ref.id.value,
-        'mime_type': ref.mimeType,
-        'byte_size': ref.byteSize,
-        // Content-blind deduplication hash.
-        'encrypted_blob_hash': ref.encryptedBlobHash,
-        // §5.E: unique per-file AES key; null = legacy device-wide key.
-        'attachment_key_hex': keyMap[ref.id.value],
-      }).toList();
+      attachmentMeta = voucher.attachmentRefs
+          .map(
+            (ref) => {
+              'id': ref.id.value,
+              'mime_type': ref.mimeType,
+              'byte_size': ref.byteSize,
+              // Content-blind deduplication hash.
+              'encrypted_blob_hash': ref.encryptedBlobHash,
+              // §5.E: unique per-file AES key; null = legacy device-wide key.
+              'attachment_key_hex': keyMap[ref.id.value],
+            },
+          )
+          .toList();
     }
 
     await _enqueueMutation(
@@ -113,24 +120,33 @@ class SyncEventDispatcher {
   /// Note: Pass the collateral AFTER image processing completes so that
   /// [collateral.imageRefs] is populated.
   Future<void> dispatchCollateralSync(
-      Voucher voucher, Collateral collateral) async {
+    Voucher voucher,
+    Collateral collateral,
+  ) async {
     // §5.E: Build image metadata. Each image has its own key from the DB.
     List<Map<String, dynamic>> imageMeta = [];
 
     if (collateral.imageRefs.isNotEmpty && attachmentRepository != null) {
-      final attachmentsResult =
-          await attachmentRepository!.getByVoucherId(voucher.id);
+      final attachmentsResult = await attachmentRepository!.getByVoucherId(
+        voucher.id,
+      );
       final fullAttachments = attachmentsResult.valueOrNull ?? [];
-      final keyMap = {for (final a in fullAttachments) a.id.value: a.attachmentKeyHex};
+      final keyMap = {
+        for (final a in fullAttachments) a.id.value: a.attachmentKeyHex,
+      };
 
-      imageMeta = collateral.imageRefs.map((ref) => {
-        'id': ref.id.value,
-        'mime_type': ref.mimeType,
-        'byte_size': ref.byteSize,
-        'encrypted_blob_hash': ref.encryptedBlobHash,
-        // §5.E: unique per-image AES key.
-        'attachment_key_hex': keyMap[ref.id.value],
-      }).toList();
+      imageMeta = collateral.imageRefs
+          .map(
+            (ref) => {
+              'id': ref.id.value,
+              'mime_type': ref.mimeType,
+              'byte_size': ref.byteSize,
+              'encrypted_blob_hash': ref.encryptedBlobHash,
+              // §5.E: unique per-image AES key.
+              'attachment_key_hex': keyMap[ref.id.value],
+            },
+          )
+          .toList();
     }
 
     await _enqueueMutation(
@@ -183,9 +199,7 @@ class SyncEventDispatcher {
     await _enqueueMutation(
       voucher: voucher,
       eventType: 'withdrawal',
-      payload: {
-        'voucher_id': voucher.id.value,
-      },
+      payload: {'voucher_id': voucher.id.value},
     );
   }
 
@@ -202,14 +216,20 @@ class SyncEventDispatcher {
     required String eventType,
     required Map<String, dynamic> payload,
     String? voucherId,
+    String? nodeId,
   }) async {
     try {
       final senderKeyPair = await getCurrentUserKeyPair();
-      if (senderKeyPair == null) return Success(null);
+      if (senderKeyPair == null) {
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.syncIdentityUnavailable),
+        );
+      }
 
       // ── Step 1: Resolve counterparty public key ──────────────────────────
-      final partyResult = await accountRepository
-          .getPartyDetails(AccountId(counterpartyAccountId));
+      final partyResult = await accountRepository.getPartyDetails(
+        AccountId(counterpartyAccountId),
+      );
       final party = partyResult.valueOrNull;
 
       // Phone/whatsapp extracted from local party details (most reliable source)
@@ -225,11 +245,13 @@ class SyncEventDispatcher {
         PublicKeyLookupResult? serverIdentity;
 
         if (receiverPhone != null && receiverPhone.isNotEmpty) {
-          serverIdentity =
-              await identityRepository.lookupByPhone(phone: receiverPhone);
+          serverIdentity = await identityRepository.lookupByPhone(
+            phone: receiverPhone,
+          );
         } else if (party?.email != null && party!.email!.isNotEmpty) {
-          serverIdentity =
-              await identityRepository.lookupByEmail(email: party.email!);
+          serverIdentity = await identityRepository.lookupByEmail(
+            email: party.email!,
+          );
         }
 
         // ── §6: Bidirectional Privacy Policy Gate (Client-Side) ──────────
@@ -240,10 +262,13 @@ class SyncEventDispatcher {
         // exists — the caller should treat this as "party not available".
         if (serverIdentity != null && serverIdentity.syncBlocked) {
           debugPrint(
-              'Sync: 🚫 §6 Bidirectional privacy block for party $counterpartyAccountId. Suppressing.');
-          return FailureResult(ValidationFailure(
-            messageAr: AppStrings.theCounterpartyHasRestricted,
-          ));
+            'Sync: 🚫 §6 Bidirectional privacy block for party $counterpartyAccountId. Suppressing.',
+          );
+          return FailureResult(
+            ValidationFailure(
+              messageAr: AppStrings.theCounterpartyHasRestricted,
+            ),
+          );
         }
 
         if (serverIdentity != null) {
@@ -256,13 +281,15 @@ class SyncEventDispatcher {
 
           // Update local party cache with discovered data (including serverId)
           if (party != null) {
-            await accountRepository.savePartyDetails(party.copyWith(
-              currentPublicKeyHex: receiverPublicKey,
-              publicKeyHistoryHex: serverIdentity.allAuthorizedKeys,
-              phoneNumber: receiverPhone ?? party.phoneNumber,
-              whatsappNumber: receiverWhatsapp ?? party.whatsappNumber,
-              serverAccountId: receiverServerId ?? party.serverAccountId,
-            ));
+            await accountRepository.savePartyDetails(
+              party.copyWith(
+                currentPublicKeyHex: receiverPublicKey,
+                publicKeyHistoryHex: serverIdentity.allAuthorizedKeys,
+                phoneNumber: receiverPhone ?? party.phoneNumber,
+                whatsappNumber: receiverWhatsapp ?? party.whatsappNumber,
+                serverAccountId: receiverServerId ?? party.serverAccountId,
+              ),
+            );
           }
         }
       } else {
@@ -275,7 +302,8 @@ class SyncEventDispatcher {
       // for server routing if serverId is unknown.
       // For "offline" counterparties (no server account), we still encrypt
       // if we have their public key from QR — and rely on phone routing.
-      final hasRoutingHint = (receiverServerId != null) ||
+      final hasRoutingHint =
+          (receiverServerId != null) ||
           (receiverPhone?.isNotEmpty ?? false) ||
           (receiverWhatsapp?.isNotEmpty ?? false) ||
           (receiverPublicKey?.isNotEmpty ?? false);
@@ -283,53 +311,59 @@ class SyncEventDispatcher {
       if (receiverPublicKey == null || receiverPublicKey.isEmpty) {
         // Cannot encrypt without a public key — suspend enqueue.
         debugPrint(
-            'Sync: ⚠️ No public key for $counterpartyAccountId. Enqueueing suspended.');
-        return FailureResult(ValidationFailure(
-          messageAr: AppStrings.theCounterpartysPublicKey,
-        ));
+          'Sync: ⚠️ No public key for $counterpartyAccountId. Enqueueing suspended.',
+        );
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.theCounterpartysPublicKey),
+        );
       }
 
       if (!hasRoutingHint) {
         // Cannot route without any hint — suspend enqueue.
         debugPrint(
-            'Sync: ⚠️ No routing hint for $counterpartyAccountId. Enqueueing suspended.');
-        return FailureResult(ValidationFailure(
-          messageAr: AppStrings.theCounterpartysPublicKey,
-        ));
+          'Sync: ⚠️ No routing hint for $counterpartyAccountId. Enqueueing suspended.',
+        );
+        return FailureResult(
+          ValidationFailure(messageAr: AppStrings.theCounterpartysPublicKey),
+        );
       }
 
       // ── Step 3: Encrypt payload for receiver ─────────────────────────────
+      // The signed envelope binds these exact values to the ciphertext.
+      final eventNodeId = nodeId ?? const Uuid().v4();
       final encrypted = await e2eeEncryptionService.encryptPayload(
         rawPayload: payload,
         senderKeyPair: senderKeyPair,
         receiverPublicKeyHex: receiverPublicKey,
+        nodeId: eventNodeId,
+        eventType: eventType,
       );
 
       // ── Step 4: Enqueue with all routing headers ──────────────────────────
-      final enqueueRes = await outboxDao.enqueue(OutboxEntry(
-        id: const Uuid().v4(),
-        eventType: eventType,
-        voucherId: voucherId,
-        counterpartyAccountId: counterpartyAccountId,
-        encryptedPayload: encrypted,
-        state: 'pending',
-        retryCount: 0,
-        createdAt: DateTime.now(),
-        // §5.C Routing headers
-        receiverPhone: receiverPhone,
-        receiverWhatsapp: receiverWhatsapp,
-        receiverPublicKey: receiverPublicKey,
-        receiverServerId: receiverServerId,
-      ));
+      final enqueueRes = await outboxDao.enqueue(
+        OutboxEntry(
+          id: eventNodeId,
+          eventType: eventType,
+          voucherId: voucherId,
+          counterpartyAccountId: counterpartyAccountId,
+          encryptedPayload: encrypted,
+          state: 'pending',
+          retryCount: 0,
+          createdAt: DateTime.now(),
+          // §5.C Routing headers
+          receiverPhone: receiverPhone,
+          receiverWhatsapp: receiverWhatsapp,
+          receiverPublicKey: receiverPublicKey,
+          receiverServerId: receiverServerId,
+        ),
+      );
 
       return enqueueRes;
     } catch (e) {
       final msg =
           'فشل المزامنة المحلية: ${TextSanitizer.sanitizeErrorMessage(e)}';
       debugPrint('Sync: ❌ Dispatch failure for $eventType: $msg');
-      return FailureResult(DatabaseFailure(
-        messageAr: msg,
-      ));
+      return FailureResult(DatabaseFailure(messageAr: msg));
     }
   }
 

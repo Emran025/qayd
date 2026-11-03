@@ -18,6 +18,7 @@ import 'package:qayd/presentation/backup/restore_cubit.dart';
 import 'package:qayd/presentation/updates/app_update_cubit.dart';
 import 'package:qayd/presentation/sync/sync_status_cubit.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
+import 'package:sodium/sodium_sumo.dart';
 import 'package:qayd/application/accounts/batch_import_accounts_from_csv_use_case.dart';
 import 'package:qayd/application/pos/activate_pos_feature_use_case.dart';
 import 'package:qayd/application/pos/create_pos_product_use_case.dart';
@@ -43,6 +44,8 @@ import 'package:qayd/application/pos/post_pos_purchase_atomically_use_case.dart'
 import 'package:qayd/application/pos/build_pos_opening_balance_posting_use_case.dart';
 import 'package:qayd/application/pos/build_pos_sale_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_sale_use_case.dart';
+import 'package:qayd/application/pos/send_pos_credit_invoice_to_chat_use_case.dart';
+import 'package:qayd/application/pos/respond_to_pos_credit_invoice_in_chat_use_case.dart';
 import 'package:qayd/application/pos/build_pos_sales_return_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_sales_return_use_case.dart';
 import 'package:qayd/application/pos/post_pos_sales_return_atomically_use_case.dart';
@@ -330,7 +333,7 @@ abstract final class InjectionContainer {
   static late final SetupIdentityUseCase setupIdentityUseCase;
   static late final UpdateProfileUseCase updateProfileUseCase;
   static late SyncIdentityToInternalAccountsUseCase
-      syncIdentityToInternalAccountsUseCase;
+  syncIdentityToInternalAccountsUseCase;
   static late final LookupPublicKeyUseCase lookupPublicKeyUseCase;
   static late final ReceiptSigningService receiptSigningService;
   static late CanSyncWithAccountUseCase canSyncWithAccountUseCase;
@@ -353,13 +356,13 @@ abstract final class InjectionContainer {
   static late PosCurrencyConverter posCurrencyConverter;
   static late RecordPosCurrencyRateUseCase recordPosCurrencyRateUseCase;
   static late ListPosCurrencyRateHistoryUseCase
-      listPosCurrencyRateHistoryUseCase;
+  listPosCurrencyRateHistoryUseCase;
 
   // ── Accounting use cases ───────────────────────────────────────────────────
 
   static late CreateAccountUseCase createAccountUseCase;
   static late BatchImportAccountsFromCsvUseCase
-      batchImportAccountsFromCsvUseCase;
+  batchImportAccountsFromCsvUseCase;
   static late UpdateAccountUseCase updateAccountUseCase;
   static late DeactivateAccountUseCase deactivateAccountUseCase;
   static late GetAccountDetailsUseCase getAccountDetailsUseCase;
@@ -405,7 +408,7 @@ abstract final class InjectionContainer {
   static late NotificationMessageRepository notificationMessageRepository;
   static late GetAutoSuggestionsUseCase getAutoSuggestionsUseCase;
   static late MarkNotificationMessageProcessedUseCase
-      markNotificationMessageProcessedUseCase;
+  markNotificationMessageProcessedUseCase;
   static late ListCurrenciesUseCase listCurrenciesUseCase;
   static late GetBaseCurrencyUseCase getBaseCurrencyUseCase;
   static late SetBaseCurrencyUseCase setBaseCurrencyUseCase;
@@ -416,7 +419,7 @@ abstract final class InjectionContainer {
   static late ManageTransactionFeeUseCase manageTransactionFeeUseCase;
   static late PosActivationRepository posActivationRepository;
   static late PosTemplateInstallationRepository
-      posTemplateInstallationRepository;
+  posTemplateInstallationRepository;
   static late ActivatePosFeatureUseCase activatePosFeatureUseCase;
   static late PosFeatureCubit posFeatureCubit;
   static late PosProductRepository posProductRepository;
@@ -427,41 +430,44 @@ abstract final class InjectionContainer {
   static late PosSalePostingRepository posSalePostingRepository;
   static late PosSalesReturnPostingRepository posSalesReturnPostingRepository;
   static late PosInvoicePaymentCollectionRepository
-      posInvoicePaymentCollectionRepository;
+  posInvoicePaymentCollectionRepository;
   static late PosPurchasePostingRepository posPurchasePostingRepository;
   static late PosPurchaseRequestIdentityRepository
-      posPurchaseRequestIdentityRepository;
+  posPurchaseRequestIdentityRepository;
   static late PosSalesReturnRequestIdentityRepository
-      posSalesReturnRequestIdentityRepository;
+  posSalesReturnRequestIdentityRepository;
   static late PosPaymentCollectionRequestIdentityRepository
-      posPaymentCollectionRequestIdentityRepository;
+  posPaymentCollectionRequestIdentityRepository;
   static late PosInvoiceReadRepository posInvoiceReadRepository;
   static late ListPosInvoicesUseCase listPosInvoicesUseCase;
   static late GetPosInvoiceDetailsUseCase getPosInvoiceDetailsUseCase;
   static late BuildPosDailySalesReportUseCase buildPosDailySalesReportUseCase;
   static late BuildPosSalePostingUseCase buildPosSalePostingUseCase;
   static late CompletePosSaleUseCase completePosSaleUseCase;
+  static late SendPosCreditInvoiceToChatUseCase
+  sendPosCreditInvoiceToChatUseCase;
+  static late RespondToPosCreditInvoiceInChatUseCase
+  respondToPosCreditInvoiceInChatUseCase;
   static late BuildPosSalesReturnPostingUseCase
-      buildPosSalesReturnPostingUseCase;
+  buildPosSalesReturnPostingUseCase;
   static late CompletePosSalesReturnUseCase completePosSalesReturnUseCase;
   static late BuildPosInvoicePaymentCollectionUseCase
-      buildPosInvoicePaymentCollectionUseCase;
+  buildPosInvoicePaymentCollectionUseCase;
   static late PostPosInvoicePaymentCollectionAtomicallyUseCase
-      postPosInvoicePaymentCollectionAtomicallyUseCase;
+  postPosInvoicePaymentCollectionAtomicallyUseCase;
   static late CompletePosInvoicePaymentCollectionUseCase
-      completePosInvoicePaymentCollectionUseCase;
+  completePosInvoicePaymentCollectionUseCase;
   static late BuildPosPurchasePostingUseCase buildPosPurchasePostingUseCase;
   static late CompletePosPurchaseUseCase completePosPurchaseUseCase;
   static late GetPosStockBalanceUseCase getPosStockBalanceUseCase;
   static late ListPosStockMovementsUseCase listPosStockMovementsUseCase;
-  static late ListPosStockDisposalLotsUseCase
-      listPosStockDisposalLotsUseCase;
+  static late ListPosStockDisposalLotsUseCase listPosStockDisposalLotsUseCase;
   static late PostPosStockDisposalAtomicallyUseCase
-      postPosStockDisposalAtomicallyUseCase;
+  postPosStockDisposalAtomicallyUseCase;
   static late BuildPosStockAdjustmentPostingUseCase
-      buildPosStockAdjustmentPostingUseCase;
+  buildPosStockAdjustmentPostingUseCase;
   static late PostPosStockAdjustmentAtomicallyUseCase
-      postPosStockAdjustmentAtomicallyUseCase;
+  postPosStockAdjustmentAtomicallyUseCase;
   static late RecordPosStockMovementUseCase recordPosStockMovementUseCase;
   static late PosStockCubit posStockCubit;
   static late CreatePosProductUseCase createPosProductUseCase;
@@ -469,23 +475,23 @@ abstract final class InjectionContainer {
   static late ListPosProductsUseCase listPosProductsUseCase;
   static late ListPosProductCategoriesUseCase listPosProductCategoriesUseCase;
   static late ResolvePosProductForCheckoutUseCase
-      resolvePosProductForCheckoutUseCase;
+  resolvePosProductForCheckoutUseCase;
   static late PosCheckoutCubit posCheckoutCubit;
   static late FindPosProductByBarcodeUseCase findPosProductByBarcodeUseCase;
   static late DeactivatePosProductUseCase deactivatePosProductUseCase;
   static late ReactivatePosProductUseCase reactivatePosProductUseCase;
   static late SavePosProductCategoryUseCase savePosProductCategoryUseCase;
   static late DeactivatePosProductCategoryUseCase
-      deactivatePosProductCategoryUseCase;
+  deactivatePosProductCategoryUseCase;
   static late ReactivatePosProductCategoryUseCase
-      reactivatePosProductCategoryUseCase;
+  reactivatePosProductCategoryUseCase;
   static late PosCatalogCubit posCatalogCubit;
   static late PosWorkspaceCubit posWorkspaceCubit;
   static late PostPosOpeningBalanceAtomicallyUseCase
-      postPosOpeningBalanceAtomicallyUseCase;
+  postPosOpeningBalanceAtomicallyUseCase;
   static late PostPosSaleAtomicallyUseCase postPosSaleAtomicallyUseCase;
   static late PostPosSalesReturnAtomicallyUseCase
-      postPosSalesReturnAtomicallyUseCase;
+  postPosSalesReturnAtomicallyUseCase;
   static late PostPosPurchaseAtomicallyUseCase postPosPurchaseAtomicallyUseCase;
 
   // ── Sync & Real-Time Components ──────────────────────────────────────────
@@ -562,7 +568,7 @@ abstract final class InjectionContainer {
   static late AuditLogService auditLogService;
   static late SeedExpenseAccountsUseCase seedExpenseAccountsUseCase;
   static late ManageAccountDefaultCostCentersUseCase
-      manageAccountDefaultCostCentersUseCase;
+  manageAccountDefaultCostCentersUseCase;
 
   // ── Legacy Migration ───────────────────────────────────────────────────────
   static late LegacyMigrationUseCase legacyMigrationUseCase;
@@ -659,7 +665,13 @@ abstract final class InjectionContainer {
     nativeNotificationService = LocalNotificationServiceImpl(sharedPreferences);
     await nativeNotificationService.initialize();
     notificationFilterService = NotificationFilterService(sharedPreferences);
-    e2eeService = const E2EEEncryptionServiceImpl();
+    try {
+      final sodium = await SodiumSumoInit.init();
+      e2eeService = E2EEEncryptionServiceImpl(sodium);
+    } catch (_) {
+      debugPrint('Secure sync unavailable: libsodium initialization failed.');
+      e2eeService = const UnavailableE2EEEncryptionService();
+    }
     counterpartyQrService = const CounterpartyQrService();
     syncRepository = ApiSyncRepository(
       apiClient,
@@ -722,7 +734,8 @@ abstract final class InjectionContainer {
 
     // ── Encryption key provider ─────────────────────────────────────────────
 
-    _encryptionKeyProvider = encryptionKeyProvider ??
+    _encryptionKeyProvider =
+        encryptionKeyProvider ??
         HardwareBackedEncryptionKeyProvider(
           hardwareIdService: hardwareIdService,
           licenseVault: licenseVault,
@@ -1091,6 +1104,15 @@ abstract final class InjectionContainer {
     notificationMessageRepository = SqliteNotificationMessageRepository(
       database,
     );
+    sendPosCreditInvoiceToChatUseCase = SendPosCreditInvoiceToChatUseCase(
+      notificationMessageRepository: notificationMessageRepository,
+      syncEventDispatcher: syncEventDispatcher,
+    );
+    respondToPosCreditInvoiceInChatUseCase =
+        RespondToPosCreditInvoiceInChatUseCase(
+          notificationMessageRepository: notificationMessageRepository,
+          syncEventDispatcher: syncEventDispatcher,
+        );
     voucherKeyService = const VoucherKeyService();
     const balanceCalculator = BalanceCalculator();
     const entryGenerator = EntryGenerator();
@@ -1189,22 +1211,22 @@ abstract final class InjectionContainer {
     posSalePostingRepository = sqlitePosSalePostingRepository;
     final sqlitePosSalesReturnPostingRepository =
         SqlitePosSalesReturnPostingRepository(
-      transactionRunner,
-      sqliteStockMovementRepository,
-      sqliteVoucherRepository,
-    );
+          transactionRunner,
+          sqliteStockMovementRepository,
+          sqliteVoucherRepository,
+        );
     posSalesReturnPostingRepository = sqlitePosSalesReturnPostingRepository;
     posInvoicePaymentCollectionRepository =
         SqlitePosInvoicePaymentCollectionRepository(
-      transactionRunner,
-      sqliteVoucherRepository,
-    );
+          transactionRunner,
+          sqliteVoucherRepository,
+        );
     final sqlitePosPurchasePostingRepository =
         SqlitePosPurchasePostingRepository(
-      transactionRunner,
-      sqliteStockMovementRepository,
-      sqliteVoucherRepository,
-    );
+          transactionRunner,
+          sqliteStockMovementRepository,
+          sqliteVoucherRepository,
+        );
     posPurchasePostingRepository = sqlitePosPurchasePostingRepository;
     posPurchaseRequestIdentityRepository =
         SqlitePosPurchaseRequestIdentityRepository(database);
@@ -1214,15 +1236,15 @@ abstract final class InjectionContainer {
         SqlitePosPaymentCollectionRequestIdentityRepository(database);
     postPosOpeningBalanceAtomicallyUseCase =
         PostPosOpeningBalanceAtomicallyUseCase(
-      writeGuard: governanceWriteGuard,
-      installationRepository: posTemplateInstallationRepository,
-      productRepository: posProductRepository,
-      accountRepository: accountRepository,
-      fiscalPeriodRepository: fiscalPeriodRepository,
-      buildPosting: BuildPosOpeningBalancePostingUseCase(),
-      postingRepository: posAccountingPostingRepository,
-      idGenerator: _idGenerator,
-    );
+          writeGuard: governanceWriteGuard,
+          installationRepository: posTemplateInstallationRepository,
+          productRepository: posProductRepository,
+          accountRepository: accountRepository,
+          fiscalPeriodRepository: fiscalPeriodRepository,
+          buildPosting: BuildPosOpeningBalancePostingUseCase(),
+          postingRepository: posAccountingPostingRepository,
+          idGenerator: _idGenerator,
+        );
     buildPosSalePostingUseCase = BuildPosSalePostingUseCase(
       productRepository: posProductRepository,
       stockRepository: posStockMovementRepository,
@@ -1260,23 +1282,23 @@ abstract final class InjectionContainer {
     );
     buildPosInvoicePaymentCollectionUseCase =
         BuildPosInvoicePaymentCollectionUseCase(
-      invoiceRepository: posInvoiceReadRepository,
-      accountRepository: accountRepository,
-    );
+          invoiceRepository: posInvoiceReadRepository,
+          accountRepository: accountRepository,
+        );
     postPosInvoicePaymentCollectionAtomicallyUseCase =
         PostPosInvoicePaymentCollectionAtomicallyUseCase(
-      writeGuard: governanceWriteGuard,
-      fiscalPeriodRepository: fiscalPeriodRepository,
-      postingRepository: posInvoicePaymentCollectionRepository,
-    );
+          writeGuard: governanceWriteGuard,
+          fiscalPeriodRepository: fiscalPeriodRepository,
+          postingRepository: posInvoicePaymentCollectionRepository,
+        );
     completePosInvoicePaymentCollectionUseCase =
         CompletePosInvoicePaymentCollectionUseCase(
-      buildPosting: buildPosInvoicePaymentCollectionUseCase,
-      postAtomically: postPosInvoicePaymentCollectionAtomicallyUseCase,
-      invoiceRepository: posInvoiceReadRepository,
-      identityRepository: posPaymentCollectionRequestIdentityRepository,
-      idGenerator: _idGenerator,
-    );
+          buildPosting: buildPosInvoicePaymentCollectionUseCase,
+          postAtomically: postPosInvoicePaymentCollectionAtomicallyUseCase,
+          invoiceRepository: posInvoiceReadRepository,
+          identityRepository: posPaymentCollectionRequestIdentityRepository,
+          idGenerator: _idGenerator,
+        );
     buildPosPurchasePostingUseCase = BuildPosPurchasePostingUseCase(
       productRepository: posProductRepository,
       installationRepository: posTemplateInstallationRepository,
@@ -1306,27 +1328,27 @@ abstract final class InjectionContainer {
         const BuildPosStockAdjustmentPostingUseCase();
     postPosStockAdjustmentAtomicallyUseCase =
         PostPosStockAdjustmentAtomicallyUseCase(
-      writeGuard: governanceWriteGuard,
-      installationRepository: posTemplateInstallationRepository,
-      productRepository: posProductRepository,
-      stockRepository: posStockMovementRepository,
-      accountRepository: accountRepository,
-      fiscalPeriodRepository: fiscalPeriodRepository,
-      buildPosting: buildPosStockAdjustmentPostingUseCase,
-      postingRepository: posAccountingPostingRepository,
-      idGenerator: _idGenerator,
-    );
+          writeGuard: governanceWriteGuard,
+          installationRepository: posTemplateInstallationRepository,
+          productRepository: posProductRepository,
+          stockRepository: posStockMovementRepository,
+          accountRepository: accountRepository,
+          fiscalPeriodRepository: fiscalPeriodRepository,
+          buildPosting: buildPosStockAdjustmentPostingUseCase,
+          postingRepository: posAccountingPostingRepository,
+          idGenerator: _idGenerator,
+        );
     postPosStockDisposalAtomicallyUseCase =
         PostPosStockDisposalAtomicallyUseCase(
-      writeGuard: governanceWriteGuard,
-      installationRepository: posTemplateInstallationRepository,
-      productRepository: posProductRepository,
-      stockRepository: posStockMovementRepository,
-      accountRepository: accountRepository,
-      fiscalPeriodRepository: fiscalPeriodRepository,
-      buildPosting: const BuildPosStockDisposalPostingUseCase(),
-      postingRepository: posAccountingPostingRepository,
-    );
+          writeGuard: governanceWriteGuard,
+          installationRepository: posTemplateInstallationRepository,
+          productRepository: posProductRepository,
+          stockRepository: posStockMovementRepository,
+          accountRepository: accountRepository,
+          fiscalPeriodRepository: fiscalPeriodRepository,
+          buildPosting: const BuildPosStockDisposalPostingUseCase(),
+          postingRepository: posAccountingPostingRepository,
+        );
     recordPosStockMovementUseCase = RecordPosStockMovementUseCase(
       posStockMovementRepository,
       posProductRepository,
@@ -1359,6 +1381,7 @@ abstract final class InjectionContainer {
       listProducts: listPosProductsUseCase,
       currencyConverter: posCurrencyConverter,
       completeSale: completePosSaleUseCase,
+      shareCreditInvoice: sendPosCreditInvoiceToChatUseCase,
       idGenerator: _idGenerator,
       discountActorId: currentDeviceId,
     );
@@ -1582,9 +1605,9 @@ abstract final class InjectionContainer {
 
     syncIdentityToInternalAccountsUseCase =
         SyncIdentityToInternalAccountsUseCase(
-      accountRepository: accountRepository,
-      licenseVault: licenseVault,
-    );
+          accountRepository: accountRepository,
+          licenseVault: licenseVault,
+        );
 
     canSyncWithAccountUseCase = CanSyncWithAccountUseCase(
       identityRepository: identityRepository,

@@ -14,6 +14,8 @@ enum SyncEventType {
   credentialBootstrap, // Companion bootstrap credentials relay
   p2pHandshake, // P2P bidirectional sync handshake
   tripartiteRequest, // Sender -> Mediator Request (A -> B)
+  posCreditInvoice, // Encrypted snapshot of an already-posted credit sale
+  posCreditInvoiceAcknowledgment, // Non-financial accept/reject acknowledgment
   unknown;
 
   static SyncEventType fromString(String val) {

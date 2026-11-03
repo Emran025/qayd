@@ -6,6 +6,7 @@ on:
     paths:
       - "lib/**"
       - "test/**"
+      - "integration_test/**"
       - "android/**"
       - "ios/**"
       - "macos/**"
@@ -23,6 +24,7 @@ on:
     paths:
       - "lib/**"
       - "test/**"
+      - "integration_test/**"
       - "android/**"
       - "ios/**"
       - "macos/**"
@@ -71,3 +73,134 @@ jobs:
 
       - name: Unit and widget tests
         run: flutter test --no-pub --reporter expanded
+
+  native_crypto:
+    name: E2EE native crypto (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: qayd-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Run real libsodium encryption and signature tests
+        run: flutter test --no-pub test/data/security/e2ee_encryption_service_impl_test.dart --reporter expanded
+
+  web_crypto:
+    name: E2EE in real Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: qayd-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Build the libsodium.js Sumo smoke target
+        run: flutter build web --release --target=test/data/security/e2ee_web_smoke.dart
+
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v2
+        id: chrome
+
+      - name: Run encryption, decryption, and tamper rejection in Chrome
+        shell: bash
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8765 --directory build/web >/tmp/qayd-web-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8765/ >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          "$CHROME_PATH" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=30000 --dump-dom http://127.0.0.1:8765/ >/tmp/qayd-web-smoke.html
+          grep -q 'E2EE_WEB_SMOKE_PASS' /tmp/qayd-web-smoke.html
+
+  android_crypto:
+    name: E2EE on Android emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: qayd-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Run libsodium integration test on Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          ndk: 28.2.13676358
+          cmake: 3.22.1
+          disable-animations: true
+          script: flutter test --no-pub integration_test/e2ee_crypto_integration_test.dart --reporter expanded
+
+  ios_crypto:
+    name: E2EE on iOS simulator
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: qayd-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Boot an available iPhone simulator
+        id: simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          simulator_id="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); devices=[d for group in data["devices"].values() for d in group if d.get("isAvailable") and d["name"].startswith("iPhone")]; print(devices[0]["udid"])')"
+          xcrun simctl boot "$simulator_id" || true
+          xcrun simctl bootstatus "$simulator_id" -b
+          echo "simulator-id=$simulator_id" >> "$GITHUB_OUTPUT"
+
+      - name: Run libsodium integration test on iOS
+        run: flutter test --no-pub integration_test/e2ee_crypto_integration_test.dart --reporter expanded -d ${{ steps.simulator.outputs.simulator-id }}

@@ -1,5 +1,7 @@
 import 'package:qayd/application/sync/audit_sync_compression_service.dart';
+
 import 'dart:convert';
+
 import 'package:qayd/data/repositories/device_sync_outbox_dao.dart';
 import 'package:qayd/domain/entities/audit_entry.dart';
 import 'package:qayd/domain/services/e2ee_encryption_service.dart';
@@ -59,17 +61,20 @@ class AuditSyncDispatcher {
       if (batchIndex != null) 'batch_index': batchIndex,
       if (totalBatches != null) 'total_batches': totalBatches,
     };
+    final nodeId = const Uuid().v4();
     final encrypted = await e2eeService.encryptPayload(
       rawPayload: payload,
       senderKeyPair: keyPair,
       receiverPublicKeyHex: receiverPublicKeyHex,
+      nodeId: nodeId,
+      eventType: 'auditBatch',
     );
 
     final envelope = '$targetDeviceId|$encrypted';
     final signature = base64Encode(utf8.encode(envelope));
     await outboxDao.enqueue(
       DeviceSyncOutboxEntry(
-        id: const Uuid().v4(),
+        id: nodeId,
         auditEntryId: entries.first.id,
         targetDeviceId: targetDeviceId,
         encryptedPayload: encrypted,

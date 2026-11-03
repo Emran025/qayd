@@ -7,17 +7,74 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:qayd/domain/services/native_notification_service.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 
+typedef NotificationPermissionRequester = Future<PermissionStatus> Function();
+
+abstract interface class LocalNotificationGateway {
+  Future<bool?> initialize({
+    required InitializationSettings settings,
+    DidReceiveNotificationResponseCallback? onDidReceiveNotificationResponse,
+  });
+
+  Future<void> show({
+    required int id,
+    String? title,
+    String? body,
+    NotificationDetails? notificationDetails,
+    String? payload,
+  });
+}
+
+final class FlutterLocalNotificationGateway
+    implements LocalNotificationGateway {
+  FlutterLocalNotificationGateway([FlutterLocalNotificationsPlugin? plugin])
+    : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
+
+  final FlutterLocalNotificationsPlugin _plugin;
+
+  @override
+  Future<bool?> initialize({
+    required InitializationSettings settings,
+    DidReceiveNotificationResponseCallback? onDidReceiveNotificationResponse,
+  }) => _plugin.initialize(
+    settings: settings,
+    onDidReceiveNotificationResponse: onDidReceiveNotificationResponse,
+  );
+
+  @override
+  Future<void> show({
+    required int id,
+    String? title,
+    String? body,
+    NotificationDetails? notificationDetails,
+    String? payload,
+  }) => _plugin.show(
+    id: id,
+    title: title,
+    body: body,
+    notificationDetails: notificationDetails,
+    payload: payload,
+  );
+}
+
 /// Concrete implementation for Android/iOS local notifications.
 class LocalNotificationServiceImpl implements NativeNotificationService {
   final SharedPreferences _prefs;
-  LocalNotificationServiceImpl(this._prefs);
+  final LocalNotificationGateway _plugin;
+  final NotificationPermissionRequester _requestNotificationPermission;
+
+  LocalNotificationServiceImpl(
+    this._prefs, {
+    LocalNotificationGateway? plugin,
+    NotificationPermissionRequester? requestNotificationPermission,
+  }) : _plugin = plugin ?? FlutterLocalNotificationGateway(),
+       _requestNotificationPermission =
+           requestNotificationPermission ?? Permission.notification.request;
 
   static const _kPeerActivity = 'notif_peer_activity';
   static const _kSelfActivity = 'notif_self_activity';
   static const _kSoundEnabled = 'notif_sound_enabled';
   static const _kVibrationEnabled = 'notif_vibration_enabled';
 
-  final _plugin = FlutterLocalNotificationsPlugin();
   final _tapController = StreamController<String?>.broadcast();
 
   @override
@@ -29,10 +86,12 @@ class LocalNotificationServiceImpl implements NativeNotificationService {
 
     // Request permission (Android 13+ requires this dynamically)
     if (!kIsWeb) {
-      await Permission.notification.request();
+      await _requestNotificationPermission();
     }
 
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
@@ -45,7 +104,7 @@ class LocalNotificationServiceImpl implements NativeNotificationService {
     );
 
     await _plugin.initialize(
-      settings : initializationSettings,
+      settings: initializationSettings,
       onDidReceiveNotificationResponse: (response) {
         debugPrint('Notification tapped: ${response.payload}');
         _tapController.add(response.payload);
@@ -95,7 +154,10 @@ class LocalNotificationServiceImpl implements NativeNotificationService {
       interruptionLevel: InterruptionLevel.timeSensitive,
     );
 
-    final details = NotificationDetails(android: androidDetails, iOS: iosDetails);
+    final details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
 
     await _plugin.show(
       id: _nextId(),
@@ -133,11 +195,12 @@ class LocalNotificationServiceImpl implements NativeNotificationService {
       enableVibration: vibration,
     );
 
-    final iosDetails = DarwinNotificationDetails(
-      presentSound: sound,
-    );
+    final iosDetails = DarwinNotificationDetails(presentSound: sound);
 
-    final details = NotificationDetails(android: androidDetails, iOS: iosDetails);
+    final details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
 
     await _plugin.show(
       id: _nextId(),

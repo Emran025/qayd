@@ -126,7 +126,7 @@ class CreateVoucherUseCase {
       bool isAutomatedExpensePosting = false;
 
       if (_accountRepository != null) {
-        final accountsRes = await _accountRepository!.getAll(
+        final accountsRes = await _accountRepository.getAll(
           activeOnly: false,
           excludeArchived: true,
         );
@@ -248,14 +248,14 @@ class CreateVoucherUseCase {
 
       if (input.confirm) {
         if (_signingService != null && _getKeyPair != null) {
-          final keyPair = await _getKeyPair?.call();
+          final keyPair = await _getKeyPair.call();
           if (keyPair != null) {
             final licenseData = await _licenseVault?.readLicenseData();
             final myPhone = licenseData?['phone'] as String? ?? '';
 
             String cpPhone = '';
             if (_accountRepository != null) {
-              final cpParty = await _accountRepository!.getPartyDetails(
+              final cpParty = await _accountRepository.getPartyDetails(
                 AccountId(input.counterpartyAccountId),
               );
               cpPhone = cpParty.valueOrNull?.phoneNumber ?? '';
@@ -273,7 +273,7 @@ class CreateVoucherUseCase {
             // If it already has a sender signature from QR, we sign as receiver.
             final shouldSignAsSender = voucher.senderSignatureHex == null;
 
-            final signature = _signingService!.signReceipt(signable, keyPair);
+            final signature = _signingService.signReceipt(signable, keyPair);
             voucher = voucher.attachSignature(
               signatureHex: signature.signatureHex,
               publicKeyHex: signature.signerPublicKeyHex,
@@ -314,7 +314,7 @@ class CreateVoucherUseCase {
         final debitId = EntryId(_idGenerator.next());
         final creditId = EntryId(_idGenerator.next());
 
-        final entries = _entryGenerator!.generateForConfirmedVoucher(
+        final entries = _entryGenerator.generateForConfirmedVoucher(
           voucher: voucher,
           transactionId: transactionId,
           debitEntryId: debitId,
@@ -351,7 +351,7 @@ class CreateVoucherUseCase {
           final tId = TransactionId(_idGenerator.next());
           final dId = EntryId(_idGenerator.next());
           final cId = EntryId(_idGenerator.next());
-          final iEntries = _entryGenerator!.generateForConfirmedVoucher(
+          final iEntries = _entryGenerator.generateForConfirmedVoucher(
             voucher: internalVoucher,
             transactionId: tId,
             debitEntryId: dId,
@@ -371,7 +371,7 @@ class CreateVoucherUseCase {
           input.costCenterTags.isNotEmpty &&
           _costCenterRepository != null) {
         for (final tag in input.costCenterTags) {
-          await _costCenterRepository!.attachVoucher(
+          await _costCenterRepository.attachVoucher(
             voucherId: voucher.id.value,
             costCenterId: tag.costCenterId,
             dimensionIds: tag.dimensionIds,
@@ -380,7 +380,7 @@ class CreateVoucherUseCase {
       }
 
       if (saved.isSuccess && input.confirm && _syncEventDispatcher != null) {
-        _syncEventDispatcher!.dispatchVoucherClaim(voucher).ignore();
+        _syncEventDispatcher.dispatchVoucherClaim(voucher).ignore();
       }
 
       // ── Handle Collateral (رهن) ──────────────────────
@@ -408,7 +408,7 @@ class CreateVoucherUseCase {
             imageRefs: const [],
           );
           final saveResult =
-              await _collateralRepository!.save(collateralWithoutImages);
+              await _collateralRepository.save(collateralWithoutImages);
           if (saveResult.isFailure) {
             // Collateral save failed — voucher is still intact.
             await _auditLogService?.log(
@@ -460,7 +460,7 @@ class CreateVoucherUseCase {
                 expiryDate: collInput.expiryDate,
                 imageRefs: collImageRefs,
               );
-              await _collateralRepository!.update(collateralWithImages);
+              await _collateralRepository.update(collateralWithImages);
             } catch (imgErr) {
               // Images failed — collateral record is already saved.
               await _auditLogService?.log(
@@ -484,7 +484,7 @@ class CreateVoucherUseCase {
               saveResult.isSuccess) {
             final collateralToSync =
                 collateralWithImages ?? collateralWithoutImages;
-            _syncEventDispatcher!
+            _syncEventDispatcher
                 .dispatchCollateralSync(voucher, collateralToSync)
                 .ignore();
           }

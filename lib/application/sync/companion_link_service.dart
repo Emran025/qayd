@@ -127,7 +127,8 @@ class CompanionLinkService {
 
     if (!success) {
       throw StateError(
-          'Failed to submit companion data for short code: $shortCode');
+        'Failed to submit companion data for short code: $shortCode',
+      );
     }
 
     return CompanionLinkSession(
@@ -167,8 +168,9 @@ class CompanionLinkService {
     }
 
     // --- CROSS-SIGNING LOGIC ---
-    final payloadToSign =
-        utf8.encode('device_certificate:$ephemeralPublicKeyHex');
+    final payloadToSign = utf8.encode(
+      'device_certificate:$ephemeralPublicKeyHex',
+    );
     final hash = Uint8List.fromList(sha256.convert(payloadToSign).bytes);
     final signature = cryptoIdentityService.sign(hash, senderPair);
     final deviceCertificate = signature.signatureHex;
@@ -188,6 +190,8 @@ class CompanionLinkService {
       rawPayload: payload.toMap(),
       senderKeyPair: senderPair,
       receiverPublicKeyHex: ephemeralPublicKeyHex,
+      nodeId: socketSessionId,
+      eventType: 'credentialBootstrap',
     );
     await apiClient.post(
       ApiEndpoints.devicesCompanionBootstrap,
@@ -205,7 +209,8 @@ class CompanionLinkService {
     VoidCallback? onPayloadReceived,
   }) async {
     debugPrint(
-        'CompanionLink: 🔍 Polling bootstrap for session: ${session.socketSessionId}');
+      'CompanionLink: 🔍 Polling bootstrap for session: ${session.socketSessionId}',
+    );
 
     // NOTE: apiClient.post() calls _extractData() internally, which already
     // unwraps the API envelope and returns body['data'] directly.
@@ -232,7 +237,8 @@ class CompanionLinkService {
     final senderPublicKey = data['sender_public_key'] as String?;
 
     debugPrint(
-        'CompanionLink: 🔍 Extracted - encrypted: ${encrypted != null}, senderKey: ${senderPublicKey != null}');
+      'CompanionLink: 🔍 Extracted - encrypted: ${encrypted != null}, senderKey: ${senderPublicKey != null}',
+    );
 
     if (encrypted == null || senderPublicKey == null) {
       return false;
@@ -245,6 +251,8 @@ class CompanionLinkService {
         encryptedPayload: encrypted,
         receiverKeyPair: session.ephemeralKeyPair,
         senderPublicKeyHex: senderPublicKey,
+        nodeId: session.socketSessionId,
+        eventType: 'credentialBootstrap',
       );
       debugPrint('CompanionLink: ✅ Decryption successful.');
     } catch (e) {
@@ -268,8 +276,10 @@ class CompanionLinkService {
       debugPrint('CompanionLink: 💾 Persisting bootstrap credentials...');
       // §C-1: Persist mnemonic + JWT for data access, and save the cross-signed
       // ephemeral keypair as this companion device's own identity.
-      final companionKeyPair =
-          await _persistBootstrap(model, session.ephemeralKeyPair);
+      final companionKeyPair = await _persistBootstrap(
+        model,
+        session.ephemeralKeyPair,
+      );
       debugPrint('CompanionLink: 🔑 Companion keypair persisted locally.');
 
       // §C-4: Register the companion's unique device key on the server.
@@ -277,7 +287,9 @@ class CompanionLinkService {
 
       debugPrint('CompanionLink: 📡 Registering companion on server...');
       await _registerCompanionDeviceWithOwnKey(
-          companionKeyPair, model.deviceCertificate);
+        companionKeyPair,
+        model.deviceCertificate,
+      );
 
       // Mark nonce as used only AFTER successful persistence to allow retries on DB failure
       _usedNonces.add(model.nonce);
@@ -300,8 +312,10 @@ class CompanionLinkService {
   /// Ed25519 keypair for device authentication and sync routing.
   /// This prevents the identity mismatch where both devices fight over
   /// the same public key on the server.
-  Future<CryptoKeyPair> _persistBootstrap(CredentialBootstrapPayload payload,
-      CryptoKeyPair ephemeralKeyPair) async {
+  Future<CryptoKeyPair> _persistBootstrap(
+    CredentialBootstrapPayload payload,
+    CryptoKeyPair ephemeralKeyPair,
+  ) async {
     debugPrint('CompanionLink: 💾 Writing JWT and license data...');
     // §C-7: Reset the initial sync flag before writing new credentials.
     // This ensures the companion_link_page waits for a fresh snapshot
@@ -334,7 +348,8 @@ class CompanionLinkService {
     // This is entirely separate from the mnemonic-derived Primary key.
     // The Primary device has already cross-signed this keypair.
     debugPrint(
-        'CompanionLink: 🔑 Storing unique companion keypair (already signed by primary)...');
+      'CompanionLink: 🔑 Storing unique companion keypair (already signed by primary)...',
+    );
     await mnemonicVault.writeKeyPair(ephemeralKeyPair);
 
     debugPrint(
@@ -351,15 +366,19 @@ class CompanionLinkService {
   /// The companion's unique key lives in user_devices.public_key only.
   /// The account's users.public_key remains the Primary's key, untouched.
   Future<void> _registerCompanionDeviceWithOwnKey(
-      CryptoKeyPair companionKeyPair, String? deviceCertificate) async {
+    CryptoKeyPair companionKeyPair,
+    String? deviceCertificate,
+  ) async {
     final publicKeyHex = companionKeyPair.publicKeyHex.toLowerCase();
     final deviceId = await getCurrentDeviceId();
     final now = DateTime.now();
     debugPrint(
-        'CompanionLink: 🆔 Attempting to register device: $deviceId with key: ${publicKeyHex.substring(0, 10)}...');
+      'CompanionLink: 🆔 Attempting to register device: $deviceId with key: ${publicKeyHex.substring(0, 10)}...',
+    );
 
     // Use the cross-signed device certificate if available, otherwise fallback.
-    final signedChallenge = deviceCertificate ??
+    final signedChallenge =
+        deviceCertificate ??
         'companion-bootstrap:$deviceId:${DateTime.now().millisecondsSinceEpoch}';
     try {
       final serverSession = await deviceRegistryRepository.pairDevice(
@@ -401,7 +420,9 @@ class CompanionLinkService {
   }
 
   bool _validateNonceAndFreshness(
-      CredentialBootstrapPayload payload, String expectedNonce) {
+    CredentialBootstrapPayload payload,
+    String expectedNonce,
+  ) {
     if (payload.nonce.isEmpty || payload.nonce != expectedNonce) return false;
     if (_usedNonces.contains(payload.nonce)) return false;
 

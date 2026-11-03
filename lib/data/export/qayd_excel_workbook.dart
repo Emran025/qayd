@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:excel/excel.dart';
+import 'package:excel_plus/excel_plus.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 
 

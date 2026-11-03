@@ -5416,6 +5416,42 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posInvoicePdfFailed => 'Could not create the invoice PDF.';
   @override
+  String get posCreditInvoiceChatTitle => 'Credit invoice';
+  @override
+  String get posCreditInvoiceAwaiting => 'Awaiting customer acknowledgment';
+  @override
+  String get posCreditInvoiceAccepted => 'Customer accepted the invoice';
+  @override
+  String get posCreditInvoiceRejected => 'Customer rejected the invoice';
+  @override
+  String get posCreditInvoiceDeliveryFailed =>
+      'Could not send the invoice; retry.';
+  @override
+  String get posCreditInvoiceResponsePendingSync =>
+      'Your response is queued until a connection is available.';
+  @override
+  String get posCreditInvoiceResponseSent =>
+      'Your invoice acknowledgment has been sent.';
+  @override
+  String get posCreditInvoiceOpenDetails => 'View invoice details';
+  @override
+  String get posCreditInvoiceRetrySend => 'Resend invoice';
+  @override
+  String get posCreditInvoiceRetryAck => 'Resend acknowledgment';
+  @override
+  String get posCreditInvoiceNeedsResponse =>
+      'Review and acknowledge or reject';
+  @override
+  String get posCreditInvoiceAcknowledgmentOnly =>
+      'This invoice is already posted; your response will not create another sale.';
+  @override
+  String get posCreditInvoiceTaxLabel => 'Tax';
+  @override
+  String get posCreditInvoicePaidLabel => 'Paid';
+  @override
+  String get syncIdentityUnavailable =>
+      'Cannot send because the digital identity is not initialized.';
+  @override
   String get posSalesReturnAction => 'Return items';
   @override
   String get posSalesReturnTitle => 'Sales return';

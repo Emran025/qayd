@@ -87,6 +87,16 @@ class DeviceSyncOutboxDao {
     );
   }
 
+  /// Retains but quarantines a legacy payload so future syncs cannot send it.
+  Future<void> markBlockedLegacy(String id) async {
+    await _db.update(
+      _table,
+      {'state': 'blocked'},
+      where: "id = ? AND state = 'pending'",
+      whereArgs: [id],
+    );
+  }
+
   Future<void> incrementRetry(String id) async {
     await _db.rawUpdate(
       'UPDATE $_table SET retry_count = retry_count + 1 WHERE id = ?',
@@ -95,8 +105,10 @@ class DeviceSyncOutboxDao {
   }
 
   Future<void> purgeDelivered({int days = 7}) async {
-    final cutoff =
-        DateTime.now().subtract(Duration(days: days)).toUtc().toIso8601String();
+    final cutoff = DateTime.now()
+        .subtract(Duration(days: days))
+        .toUtc()
+        .toIso8601String();
     await _db.delete(
       _table,
       where: 'state = ? AND sent_at IS NOT NULL AND sent_at < ?',

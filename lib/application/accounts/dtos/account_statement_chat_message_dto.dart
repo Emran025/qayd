@@ -26,6 +26,14 @@ class AccountStatementChatMessageDto {
     this.settlementLabel,
     this.settlementBalanceMinorUnits,
     this.isTransferRequest = false,
+    this.isPosCreditInvoice = false,
+    this.posInvoiceMessageId,
+    this.posInvoiceNumber,
+    this.posInvoiceTotalMinorUnits,
+    this.posInvoiceDueMinorUnits,
+    this.posInvoiceAcknowledgmentStatus,
+    this.posInvoiceDeliveryStatus,
+    this.posInvoicePayloadJson,
   });
 
   final String voucherId;
@@ -90,4 +98,15 @@ class AccountStatementChatMessageDto {
 
   /// Whether this message is a tripartite transfer request rather than a real voucher.
   final bool isTransferRequest;
+
+  /// A POS credit invoice message; its [amountMinorUnits] is always zero so
+  /// this acknowledgment-only document cannot alter statement balances.
+  final bool isPosCreditInvoice;
+  final String? posInvoiceMessageId;
+  final String? posInvoiceNumber;
+  final int? posInvoiceTotalMinorUnits;
+  final int? posInvoiceDueMinorUnits;
+  final String? posInvoiceAcknowledgmentStatus;
+  final String? posInvoiceDeliveryStatus;
+  final String? posInvoicePayloadJson;
 }

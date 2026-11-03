@@ -4,6 +4,7 @@ import 'package:archive/archive_io.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:qayd/data/file_system/backup_file_manager.dart';
+import 'safe_archive_path.dart';
 
 /// Builds and restores a ZIP archive containing **all encrypted attachment
 /// files** (voucher images, PDFs, collateral attachments, etc.).
@@ -28,9 +29,13 @@ import 'package:qayd/data/file_system/backup_file_manager.dart';
 final class AttachmentsZipBuilder {
   const AttachmentsZipBuilder({
     BackupFileManager fileManager = const BackupFileManager(),
+    this.imagesDirectoryProvider,
+    this.applicationDocumentsDirectoryProvider,
   }) : _fileManager = fileManager;
 
   final BackupFileManager _fileManager;
+  final Future<Directory?> Function()? imagesDirectoryProvider;
+  final Future<Directory> Function()? applicationDocumentsDirectoryProvider;
 
   /// File name used for Drive uploads and local backup copies.
   static const String zipFileName = 'qayd_attachments.zip';
@@ -64,16 +69,17 @@ final class AttachmentsZipBuilder {
         // Path inside the ZIP: logicalKey/path-relative-to-source-dir
         // e.g.  attachments/img_abc_enc.jpg
         //       attachments/sub/img_xyz_enc.png
-        final relInsideDir =
-            p.relative(entity.path, from: dir.path).replaceAll(r'\', '/');
+        final relInsideDir = p
+            .relative(entity.path, from: dir.path)
+            .replaceAll(r'\', '/');
         final entryName = '$_attachmentsKey/$relInsideDir';
 
-        archive.addFile(ArchiveFile(entryName, bytes.length, bytes));
+        archive.addFile(ArchiveFile.bytes(entryName, bytes));
         count++;
       }
     }
 
-    final zipData = ZipEncoder().encode(archive)!;
+    final zipData = ZipEncoder().encodeBytes(archive);
     await File(outputPath).writeAsBytes(zipData);
     return count;
   }
@@ -106,33 +112,47 @@ final class AttachmentsZipBuilder {
     final archive = ZipDecoder().decodeBytes(bytes);
 
     // Resolve the active destination directory on THIS device right now.
-    final activeDir = await _fileManager.externalImagesDir();
+    final activeDir =
+        await (imagesDirectoryProvider?.call() ??
+            _fileManager.externalImagesDir());
     if (activeDir == null) return 0;
+
+    // Validate every recognized file path before writing anything. A malicious
+    // `attachments/../../...` entry must not escape the active image directory.
+    final attachments = <ArchiveFile>[];
+    for (final entry in archive) {
+      if (!entry.isFile) continue;
+      final normalizedName = entry.name.replaceAll(r'\', '/');
+      final relative = _stripPrefix(normalizedName);
+      if (relative == null) continue;
+      if (safeArchiveDestination(activeDir.path, relative) == null ||
+          entry.readBytes() == null) {
+        throw const FormatException(
+          'Unsafe or unreadable attachment ZIP entry.',
+        );
+      }
+      attachments.add(entry);
+    }
 
     if (!activeDir.existsSync()) {
       await activeDir.create(recursive: true);
     }
 
     int count = 0;
-    for (final entry in archive) {
-      if (!entry.isFile) continue;
-
+    for (final entry in attachments) {
       // Strip the logical-key prefix.
       // "attachments/img_abc_enc.jpg"  →  "img_abc_enc.jpg"
       // "attachments/sub/img.png"      →  "sub/img.png"
       // "unknown_key/anything"         →  null  (skip)
-      final relative = _stripPrefix(entry.name);
-      if (relative == null) continue;
+      final normalizedName = entry.name.replaceAll(r'\', '/');
+      final relative = _stripPrefix(normalizedName)!;
 
       // Build the absolute path inside the active directory.
-      final destPath = p.join(
-        activeDir.path,
-        relative.replaceAll('/', p.separator),
-      );
+      final destPath = safeArchiveDestination(activeDir.path, relative)!;
 
       final destFile = File(destPath);
       await destFile.parent.create(recursive: true);
-      await destFile.writeAsBytes(entry.content as List<int>);
+      await destFile.writeAsBytes(entry.readBytes()!, flush: true);
       count++;
     }
     return count;
@@ -148,10 +168,14 @@ final class AttachmentsZipBuilder {
   Future<List<Directory>> _sourceDirs() async {
     final dirs = <Directory>[];
 
-    final externalDir = await _fileManager.externalImagesDir();
+    final externalDir =
+        await (imagesDirectoryProvider?.call() ??
+            _fileManager.externalImagesDir());
     if (externalDir != null) dirs.add(externalDir);
 
-    final docsBase = await getApplicationDocumentsDirectory();
+    final docsBase =
+        await (applicationDocumentsDirectoryProvider?.call() ??
+            getApplicationDocumentsDirectory());
     final docsImages = Directory(p.join(docsBase.path, 'qayd_images'));
     if (docsImages.existsSync() &&
         (externalDir == null || docsImages.path != externalDir.path)) {

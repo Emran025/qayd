@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:qayd/application/pos/pos_credit_invoice_chat_protocol.dart';
 import 'package:qayd/application/accounts/dtos/account_statement_chat_message_dto.dart';
 import 'package:qayd/application/accounts/dtos/statement_chat_filter_input.dart';
 import 'package:qayd/application/fiscal/fiscal_period_policy.dart';
@@ -131,13 +132,16 @@ final class ListAccountStatementChatUseCase {
       // Pre-fetch names for all involved accounts to avoid N+1 issues when isUnified
       final Map<String, String> accountNamesLookup = {};
       final involvedAccountIds = allVouchers
-          .expand((v) => [
-                v.affectedAccountId.value,
-                v.counterpartyId.value,
-                if (v.tripartiteMeta?.mediatorAccountId != null)
-                  v.tripartiteMeta!.mediatorAccountId!.value,
-              ])
+          .expand(
+            (v) => [
+              v.affectedAccountId.value,
+              v.counterpartyId.value,
+              if (v.tripartiteMeta?.mediatorAccountId != null)
+                v.tripartiteMeta!.mediatorAccountId!.value,
+            ],
+          )
           .toSet();
+      if (!isUnified) involvedAccountIds.add(counterpartyAccountId);
 
       for (final idStr in involvedAccountIds) {
         final accR = await accountRepository.getById(AccountId(idStr));
@@ -193,8 +197,9 @@ final class ListAccountStatementChatUseCase {
       }
 
       final periodsR = await fiscalPeriodRepository.listAllOrdered();
-      final periods =
-          periodsR.isSuccess ? periodsR.valueOrNull! : const <FiscalPeriod>[];
+      final periods = periodsR.isSuccess
+          ? periodsR.valueOrNull!
+          : const <FiscalPeriod>[];
 
       final latestSettlementAt = _latestSignedSettlementDate(
         allVouchers,
@@ -243,19 +248,20 @@ final class ListAccountStatementChatUseCase {
                 if (dir == 'incoming') {
                   broughtForwardByCurrency[cur] =
                       (broughtForwardByCurrency[cur] ?? 0) +
-                          v.amount.minorUnits;
+                      v.amount.minorUnits;
                 } else {
                   broughtForwardByCurrency[cur] =
                       (broughtForwardByCurrency[cur] ?? 0) -
-                          v.amount.minorUnits;
+                      v.amount.minorUnits;
                 }
               }
             }
           }
         }
 
-        periodVouchers =
-            allVouchers.where((v) => !v.date.isBefore(fromStart)).toList();
+        periodVouchers = allVouchers
+            .where((v) => !v.date.isBefore(fromStart))
+            .toList();
       }
 
       if (filter.toDate != null) {
@@ -268,8 +274,9 @@ final class ListAccountStatementChatUseCase {
           59,
           59,
         );
-        periodVouchers =
-            periodVouchers.where((v) => !v.date.isAfter(toEnd)).toList();
+        periodVouchers = periodVouchers
+            .where((v) => !v.date.isAfter(toEnd))
+            .toList();
       }
 
       // ── Apply filters ──
@@ -354,8 +361,9 @@ final class ListAccountStatementChatUseCase {
         // is not set we use the structural heuristic (affectedAccountId ==
         // subjectId AND no senderSignatureHex, meaning we didn't receive a
         // pre-signed document from outside).
-        final bool isCreator =
-            v.isInbound ? false : v.affectedAccountId == subjectId;
+        final bool isCreator = v.isInbound
+            ? false
+            : v.affectedAccountId == subjectId;
 
         // Find the "Other" party
         final otherId = v.affectedAccountId == subjectId
@@ -363,31 +371,33 @@ final class ListAccountStatementChatUseCase {
             : v.affectedAccountId.value;
         final otherName = accountNamesLookup[otherId] ?? 'Unknown';
 
-        messages.add(AccountStatementChatMessageDto(
-          voucherId: v.id.value,
-          dateIso: v.date.toIso8601String(),
-          direction: direction,
-          typeCode: v.type.name,
-          voucherStateCode: v.state.name,
-          signatureStatusCode: v.receiverStatus.name,
-          amountMinorUnits: v.amount.minorUnits,
-          currencyCode: v.currency.code,
-          currencySymbol: v.currency.symbol,
-          currencyDigits: v.currency.fractionalDigits,
-          description: mergedDescription,
-          otherPartyId: otherId,
-          otherPartyName: otherName,
-          runningBalanceMinorUnits: runningBalances[v.currency.code] ?? 0,
-          referenceNumber: v.referenceNumber,
-          mediatorAccountId: v.tripartiteMeta?.mediatorAccountId?.value,
-          mediatorName: v.tripartiteMeta?.mediatorAccountId != null
-              ? accountNamesLookup[v.tripartiteMeta!.mediatorAccountId!.value]
-              : null,
-          feeAmountMinorUnits: v.tripartiteMeta?.feeAmount?.minorUnits,
-          isCreator: isCreator,
-          originVoucherId: v.originVoucherId?.value,
-          reversalCount: v.reversalCount,
-        ));
+        messages.add(
+          AccountStatementChatMessageDto(
+            voucherId: v.id.value,
+            dateIso: v.date.toIso8601String(),
+            direction: direction,
+            typeCode: v.type.name,
+            voucherStateCode: v.state.name,
+            signatureStatusCode: v.receiverStatus.name,
+            amountMinorUnits: v.amount.minorUnits,
+            currencyCode: v.currency.code,
+            currencySymbol: v.currency.symbol,
+            currencyDigits: v.currency.fractionalDigits,
+            description: mergedDescription,
+            otherPartyId: otherId,
+            otherPartyName: otherName,
+            runningBalanceMinorUnits: runningBalances[v.currency.code] ?? 0,
+            referenceNumber: v.referenceNumber,
+            mediatorAccountId: v.tripartiteMeta?.mediatorAccountId?.value,
+            mediatorName: v.tripartiteMeta?.mediatorAccountId != null
+                ? accountNamesLookup[v.tripartiteMeta!.mediatorAccountId!.value]
+                : null,
+            feeAmountMinorUnits: v.tripartiteMeta?.feeAmount?.minorUnits,
+            isCreator: isCreator,
+            originVoucherId: v.originVoucherId?.value,
+            reversalCount: v.reversalCount,
+          ),
+        );
 
         if (_isSignedSettlementVoucher(v, myId: myId, cpId: cpId)) {
           messages.add(
@@ -417,42 +427,164 @@ final class ListAccountStatementChatUseCase {
 
       // ── Inject Transfer Requests ──
       if (!isUnified) {
-        final notifsRes =
-            await notificationMessageRepository.listUnprocessedForCounterparty(
-          counterpartyAccountId: counterpartyAccountId,
-          limit: 100, // Reasonable limit for chat history
-        );
+        final notifsRes = await notificationMessageRepository
+            .listUnprocessedForCounterparty(
+              counterpartyAccountId: counterpartyAccountId,
+              limit: 100, // Reasonable limit for chat history
+            );
         if (notifsRes.isSuccess) {
           final notifs = notifsRes.valueOrNull!;
           for (final n in notifs) {
             if (n.channel == 'tripartite_event' ||
                 (n.channel == 'outbound' && n.bodyText.contains('طلب'))) {
               try {
-                final Map<String, dynamic> p =
-                    jsonDecode(n.rawPayloadJson ?? '{}');
+                final Map<String, dynamic> p = jsonDecode(
+                  n.rawPayloadJson ?? '{}',
+                );
                 final isIncoming = n.channel == 'tripartite_event';
-                messages.add(AccountStatementChatMessageDto(
-                  voucherId: n.id,
-                  dateIso: n.createdAt.toIso8601String(),
-                  direction: isIncoming ? 'incoming' : 'outgoing',
-                  typeCode: 'transfer_request',
-                  voucherStateCode: 'draft',
-                  signatureStatusCode: 'underRequest',
-                  amountMinorUnits: p['amountMinorUnits'] ?? 0,
-                  currencyCode: p['currencyCode'] ?? '',
-                  currencySymbol:
-                      '', // Could look up, but UI handles if missing
-                  currencyDigits: 2,
-                  description: p['notes'] ?? '',
-                  otherPartyId: isIncoming
-                      ? p['destAccountId'] ?? ''
-                      : p['destAccountId'] ?? '',
-                  otherPartyName: accountNamesLookup[p['destAccountId']] ??
-                      AppStrings.unknown,
-                  isCreator: !isIncoming,
-                  isTransferRequest: true,
-                ));
+                messages.add(
+                  AccountStatementChatMessageDto(
+                    voucherId: n.id,
+                    dateIso: n.createdAt.toIso8601String(),
+                    direction: isIncoming ? 'incoming' : 'outgoing',
+                    typeCode: 'transfer_request',
+                    voucherStateCode: 'draft',
+                    signatureStatusCode: 'underRequest',
+                    amountMinorUnits: p['amountMinorUnits'] ?? 0,
+                    currencyCode: p['currencyCode'] ?? '',
+                    currencySymbol:
+                        '', // Could look up, but UI handles if missing
+                    currencyDigits: 2,
+                    description: p['notes'] ?? '',
+                    otherPartyId: isIncoming
+                        ? p['destAccountId'] ?? ''
+                        : p['destAccountId'] ?? '',
+                    otherPartyName:
+                        accountNamesLookup[p['destAccountId']] ??
+                        AppStrings.unknown,
+                    isCreator: !isIncoming,
+                    isTransferRequest: true,
+                  ),
+                );
               } catch (_) {}
+            }
+          }
+        }
+
+        final invoiceMessages = await notificationMessageRepository
+            .listForCounterpartyChannels(
+              counterpartyAccountId: counterpartyAccountId,
+              channels: const [
+                PosCreditInvoiceChatProtocol.incomingChannel,
+                PosCreditInvoiceChatProtocol.outgoingChannel,
+              ],
+              limit: 500,
+            );
+        if (invoiceMessages.isSuccess) {
+          final fromStart = filter.fromDate == null
+              ? null
+              : DateTime(
+                  filter.fromDate!.year,
+                  filter.fromDate!.month,
+                  filter.fromDate!.day,
+                );
+          final toEnd = filter.toDate == null
+              ? null
+              : DateTime(
+                  filter.toDate!.year,
+                  filter.toDate!.month,
+                  filter.toDate!.day,
+                  23,
+                  59,
+                  59,
+                  999,
+                );
+          final query = (filter.searchQuery ?? '').trim().toLowerCase();
+          for (final notification in invoiceMessages.valueOrNull!) {
+            final isIncoming =
+                notification.channel ==
+                PosCreditInvoiceChatProtocol.incomingChannel;
+            final isOutgoing =
+                notification.channel ==
+                PosCreditInvoiceChatProtocol.outgoingChannel;
+            if (!isIncoming && !isOutgoing) continue;
+            if (filter.type != null || filter.costCenterId != null) continue;
+            try {
+              final payload = PosCreditInvoiceChatProtocol.decodePayload(
+                notification.rawPayloadJson,
+              );
+              final snapshot =
+                  PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
+                    payload,
+                    expectedNodeId: notification.id,
+                  );
+              final date = snapshot.postedAt;
+              if (fromStart != null && date.isBefore(fromStart)) continue;
+              if (toEnd != null && date.isAfter(toEnd)) continue;
+
+              final acknowledgement =
+                  payload['acknowledgment_status'] as String? ?? 'pending';
+              final agreementStatus = switch (acknowledgement) {
+                'accepted' => AgreementStatus.accepted,
+                'rejected' => AgreementStatus.rejected,
+                _ => AgreementStatus.underRequest,
+              };
+              if (filter.agreementStatus != null &&
+                  filter.agreementStatus != agreementStatus) {
+                continue;
+              }
+              if (filter.amountMinMinorUnits != null &&
+                  snapshot.dueMinorUnits < filter.amountMinMinorUnits!) {
+                continue;
+              }
+              if (filter.amountMaxMinorUnits != null &&
+                  snapshot.dueMinorUnits > filter.amountMaxMinorUnits!) {
+                continue;
+              }
+              if (query.isNotEmpty &&
+                  !snapshot.invoiceNumber.toLowerCase().contains(query) &&
+                  !snapshot.currency.code.toLowerCase().contains(query) &&
+                  !snapshot.lines.any(
+                    (line) => line.productName.toLowerCase().contains(query),
+                  ) &&
+                  !snapshot.dueMinorUnits.toString().contains(query)) {
+                continue;
+              }
+
+              messages.add(
+                AccountStatementChatMessageDto(
+                  voucherId: 'pos-credit-invoice:${notification.id}',
+                  dateIso: date.toIso8601String(),
+                  direction: isIncoming ? 'incoming' : 'outgoing',
+                  typeCode: 'posCreditInvoice',
+                  voucherStateCode: 'posCreditInvoice',
+                  signatureStatusCode: agreementStatus.name,
+                  amountMinorUnits: 0,
+                  currencyCode: snapshot.currency.code,
+                  currencySymbol: snapshot.currency.symbol,
+                  currencyDigits: snapshot.currency.fractionalDigits,
+                  description:
+                      '${AppStrings.posCreditInvoiceChatTitle} #${snapshot.invoiceNumber}',
+                  otherPartyId: notification.counterpartyAccountId,
+                  otherPartyName:
+                      accountNamesLookup[notification.counterpartyAccountId] ??
+                      AppStrings.unknown,
+                  runningBalanceMinorUnits:
+                      runningBalances[snapshot.currency.code] ?? 0,
+                  isCreator: isOutgoing,
+                  isPosCreditInvoice: true,
+                  posInvoiceMessageId: notification.id,
+                  posInvoiceNumber: snapshot.invoiceNumber,
+                  posInvoiceTotalMinorUnits: snapshot.totalMinorUnits,
+                  posInvoiceDueMinorUnits: snapshot.dueMinorUnits,
+                  posInvoiceAcknowledgmentStatus: acknowledgement,
+                  posInvoiceDeliveryStatus:
+                      payload['delivery_status'] as String?,
+                  posInvoicePayloadJson: notification.rawPayloadJson,
+                ),
+              );
+            } catch (_) {
+              // Invalid or unsupported snapshots are not shown as valid invoices.
             }
           }
         }
@@ -461,11 +593,13 @@ final class ListAccountStatementChatUseCase {
       // Sort again because we just added notifications
       messages.sort((a, b) => a.dateIso.compareTo(b.dateIso));
 
-      return Success(StatementChatOutput(
-        messages: messages.reversed.toList(),
-        broughtForwardByCurrency: broughtForwardByCurrency,
-        finalBalanceByCurrency: runningBalances,
-      ));
+      return Success(
+        StatementChatOutput(
+          messages: messages.reversed.toList(),
+          broughtForwardByCurrency: broughtForwardByCurrency,
+          finalBalanceByCurrency: runningBalances,
+        ),
+      );
     } catch (e) {
       return FailureResult(failureFromDomainException(e));
     }
@@ -477,10 +611,12 @@ final class ListAccountStatementChatUseCase {
   }) {
     if (v.isTripartite) {
       final isReceipt = v.type == VoucherType.receipt;
-      final sourceId =
-          isReceipt ? v.counterpartyId : v.tripartiteMeta!.linkedPartyId;
-      final destId =
-          isReceipt ? v.tripartiteMeta!.linkedPartyId : v.counterpartyId;
+      final sourceId = isReceipt
+          ? v.counterpartyId
+          : v.tripartiteMeta!.linkedPartyId;
+      final destId = isReceipt
+          ? v.tripartiteMeta!.linkedPartyId
+          : v.counterpartyId;
 
       if (perspectiveId == sourceId) return 'outgoing';
       if (perspectiveId == destId) return 'incoming';
@@ -541,7 +677,7 @@ final class ListAccountStatementChatUseCase {
   }) {
     final betweenParties =
         (v.affectedAccountId == myId && v.counterpartyId == cpId) ||
-            (v.affectedAccountId == cpId && v.counterpartyId == myId);
+        (v.affectedAccountId == cpId && v.counterpartyId == myId);
     if (!betweenParties) return false;
     return v.state.isSettled &&
         v.senderStatus == AgreementStatus.accepted &&
