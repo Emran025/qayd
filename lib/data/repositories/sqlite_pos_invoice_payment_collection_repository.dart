@@ -42,13 +42,9 @@ final class SqlitePosInvoicePaymentCollectionRepository
       });
     } on _RepositoryFailure catch (error) {
       return FailureResult(error.failure);
-    } on DatabaseException catch (error, stackTrace) {
-      // ignore: avoid_print
-      print('POS collection replay database error: $error\n$stackTrace');
+    } on DatabaseException {
       return _databaseFailure<bool>();
-    } catch (error, stackTrace) {
-      // ignore: avoid_print
-      print('POS collection replay error: $error\n$stackTrace');
+    } catch (_) {
       return _databaseFailure<bool>();
     }
   }
@@ -397,7 +393,7 @@ final class SqlitePosInvoicePaymentCollectionRepository
       'ledger_entries',
       where: 'voucher_id = ?',
       whereArgs: [posting.accountingPosting.voucher.id.value],
-    ))
+    )).toList()
       ..sort((left, right) =>
           (left['id']! as String).compareTo(right['id']! as String));
     if (rows.length != expected.length) return false;
