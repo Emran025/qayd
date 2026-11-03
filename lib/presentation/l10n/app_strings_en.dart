@@ -5321,6 +5321,40 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posCheckoutSubtotal => 'Subtotal';
   @override
+  String get posCheckoutDiscountTotal => 'Total discount';
+  @override
+  String get posCheckoutFinalTotal => 'Total after discount';
+  @override
+  String get posDiscountCart => 'Cart discount';
+  @override
+  String get posDiscountAdd => 'Add discount';
+  @override
+  String get posDiscountEdit => 'Edit discount';
+  @override
+  String get posDiscountMethod => 'Discount type';
+  @override
+  String get posDiscountFixed => 'Fixed amount';
+  @override
+  String get posDiscountPercent => 'Percentage';
+  @override
+  String get posDiscountAmount => 'Discount amount';
+  @override
+  String get posDiscountEligibleAmount => 'Eligible amount';
+  @override
+  String get posDiscountPercentHint => 'Percentage (up to 100%)';
+  @override
+  String posDiscountPercentLimit(String maximum) =>
+      'Percentage (maximum $maximum%)';
+  @override
+  String get posDiscountReason => 'Reason (required)';
+  @override
+  String get posDiscountReasonRequired => 'Enter a reason for the discount.';
+  @override
+  String get posDiscountInvalid =>
+      'Check the discount value, currency, and limit.';
+  @override
+  String get posDiscountRemove => 'Remove discount';
+  @override
   String get posCheckoutClearCart => 'Clear cart';
   @override
   String get posCheckoutCameraActive => 'Background scanner active';
@@ -5525,24 +5559,24 @@ class AppStringsEn extends AppStringsBase {
   String get posStockMovementAllTypes => 'All movement types';
   @override
   String posStockMovementTypeLabel(String type) => switch (type) {
-        'opening' => 'Opening stock',
-        'purchase' => 'Purchase receipt',
-        'sale' => 'Sale',
-        'salesReturn' => 'Sales return',
-        'purchaseReturn' => 'Purchase return',
-        'adjustment' => 'Stock count adjustment',
-        'damage' => 'Damaged stock',
-        'expiry' => 'Expired stock',
-        _ => 'Inventory movement',
-      };
+    'opening' => 'Opening stock',
+    'purchase' => 'Purchase receipt',
+    'sale' => 'Sale',
+    'salesReturn' => 'Sales return',
+    'purchaseReturn' => 'Purchase return',
+    'adjustment' => 'Stock count adjustment',
+    'damage' => 'Damaged stock',
+    'expiry' => 'Expired stock',
+    _ => 'Inventory movement',
+  };
   @override
   String posStockDisposalReasonLabel(String code) => switch (code) {
-        'damage' => 'Damaged',
-        'expiry' => 'Expired',
-        'authorized_loss' => 'Authorized loss',
-        'other' => 'Other',
-        _ => 'Stock disposal',
-      };
+    'damage' => 'Damaged',
+    'expiry' => 'Expired',
+    'authorized_loss' => 'Authorized loss',
+    'other' => 'Other',
+    _ => 'Stock disposal',
+  };
   @override
   String get posStockDisposalTitle => 'Dispose damaged or expired stock';
   @override

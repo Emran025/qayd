@@ -1,6 +1,7 @@
 import 'dart:collection';
 
 import 'package:qayd/domain/entities/pos_invoice_signature.dart';
+import 'package:qayd/domain/entities/pos_discount_rule.dart';
 import 'package:qayd/domain/exceptions/invalid_pos_invoice_exception.dart';
 import 'package:qayd/domain/entities/pos_invoice_line_conversion.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
@@ -30,6 +31,7 @@ final class PosInvoiceLine {
     required this.sourceLineId,
     required this.createdAt,
     this.currencyConversion,
+    this.discountRule,
     this.proposedSalePrice,
     this.proposedSalePriceApplied = false,
     this.productUpdatedAtSnapshot,
@@ -50,6 +52,7 @@ final class PosInvoiceLine {
     String? barcodeSnapshot,
     String? sourceLineId,
     PosInvoiceLineConversion? currencyConversion,
+    PosDiscountRule? discountRule,
     Money? proposedSalePrice,
     bool proposedSalePriceApplied = false,
     DateTime? productUpdatedAtSnapshot,
@@ -94,6 +97,10 @@ final class PosInvoiceLine {
     if (discount.minorUnits > gross.minorUnits) {
       throw InvalidPosInvoiceException.invalidLine();
     }
+    if (discountRule != null &&
+        discountRule.amountFor(gross).minorUnits != discount.minorUnits) {
+      throw InvalidPosInvoiceException.invalidTotals();
+    }
     final net = gross.minorUnits - discount.minorUnits + tax.minorUnits;
     if (net < 0) throw InvalidPosInvoiceException.invalidLine();
     return PosInvoiceLine._(
@@ -111,6 +118,7 @@ final class PosInvoiceLine {
       sourceLineId: sourceLineId?.trim(),
       createdAt: createdAt.toUtc(),
       currencyConversion: currencyConversion,
+      discountRule: discountRule,
       proposedSalePrice: proposedSalePrice,
       proposedSalePriceApplied: proposedSalePriceApplied,
       productUpdatedAtSnapshot: productUpdatedAtSnapshot?.toUtc(),
@@ -133,6 +141,7 @@ final class PosInvoiceLine {
     String? barcodeSnapshot,
     String? sourceLineId,
     PosInvoiceLineConversion? currencyConversion,
+    PosDiscountRule? discountRule,
     Money? proposedSalePrice,
     bool proposedSalePriceApplied = false,
     DateTime? productUpdatedAtSnapshot,
@@ -152,6 +161,7 @@ final class PosInvoiceLine {
       barcodeSnapshot: barcodeSnapshot,
       sourceLineId: sourceLineId,
       currencyConversion: currencyConversion,
+      discountRule: discountRule,
       proposedSalePrice: proposedSalePrice,
       proposedSalePriceApplied: proposedSalePriceApplied,
       productUpdatedAtSnapshot: productUpdatedAtSnapshot,
@@ -177,6 +187,7 @@ final class PosInvoiceLine {
   final String? sourceLineId;
   final DateTime createdAt;
   final PosInvoiceLineConversion? currencyConversion;
+  final PosDiscountRule? discountRule;
   final Money? proposedSalePrice;
   final bool proposedSalePriceApplied;
   final DateTime? productUpdatedAtSnapshot;
@@ -204,6 +215,8 @@ final class PosInvoice {
     required this.lines,
     required this.subtotal,
     required this.discount,
+    required this.cartDiscount,
+    required this.cartDiscountRule,
     required this.tax,
     required this.total,
     required this.paid,
@@ -229,6 +242,7 @@ final class PosInvoice {
     AccountId? counterpartyAccountId,
     String? sourceInvoiceId,
     Money? discount,
+    PosDiscountRule? cartDiscountRule,
     Money? tax,
   }) {
     if (id.trim().isEmpty ||
@@ -262,7 +276,17 @@ final class PosInvoice {
       0,
       (sum, line) => sum + line.discount.minorUnits,
     );
-    final totalMinor = subtotalMinor -
+    final cartBaseMinor = subtotalMinor - lineDiscountMinor;
+    if (appliedDiscount.minorUnits > cartBaseMinor ||
+        (cartDiscountRule != null &&
+            cartDiscountRule
+                    .amountFor(Money.fromMinorUnits(cartBaseMinor, currency))
+                    .minorUnits !=
+                appliedDiscount.minorUnits)) {
+      throw InvalidPosInvoiceException.invalidTotals();
+    }
+    final totalMinor =
+        subtotalMinor -
         lineDiscountMinor -
         appliedDiscount.minorUnits +
         immutableLines.fold<int>(0, (sum, line) => sum + line.tax.minorUnits) +
@@ -284,6 +308,8 @@ final class PosInvoice {
         lineDiscountMinor + appliedDiscount.minorUnits,
         currency,
       ),
+      cartDiscount: appliedDiscount,
+      cartDiscountRule: cartDiscountRule,
       tax: Money.fromMinorUnits(
         immutableLines.fold<int>(0, (sum, line) => sum + line.tax.minorUnits) +
             appliedTax.minorUnits,
@@ -312,6 +338,10 @@ final class PosInvoice {
   final UnmodifiableListView<PosInvoiceLine> lines;
   final Money subtotal;
   final Money discount;
+
+  /// The invoice-level discount; [discount] remains the combined total.
+  final Money cartDiscount;
+  final PosDiscountRule? cartDiscountRule;
   final Money tax;
   final Money total;
   final Money paid;
@@ -335,6 +365,8 @@ final class PosInvoice {
     required List<PosInvoiceLine> lines,
     required Money subtotal,
     required Money discount,
+    Money? cartDiscount,
+    PosDiscountRule? cartDiscountRule,
     required Money tax,
     required Money total,
     required Money paid,
@@ -363,6 +395,25 @@ final class PosInvoice {
         throw InvalidPosInvoiceException.invalidLine();
       }
     }
+    final lineDiscountMinor = lines.fold<int>(
+      0,
+      (sum, line) => sum + line.discount.minorUnits,
+    );
+    final restoredCartDiscount =
+        cartDiscount ??
+        Money.fromMinorUnits(discount.minorUnits - lineDiscountMinor, currency);
+    final cartBaseMinor = subtotal.minorUnits - lineDiscountMinor;
+    if (restoredCartDiscount.isNegative ||
+        restoredCartDiscount.minorUnits > cartBaseMinor ||
+        restoredCartDiscount.minorUnits + lineDiscountMinor !=
+            discount.minorUnits ||
+        (cartDiscountRule != null &&
+            cartDiscountRule
+                    .amountFor(Money.fromMinorUnits(cartBaseMinor, currency))
+                    .minorUnits !=
+                restoredCartDiscount.minorUnits)) {
+      throw InvalidPosInvoiceException.invalidTotals();
+    }
     return PosInvoice._(
       id: id,
       invoiceNumber: invoiceNumber,
@@ -375,6 +426,8 @@ final class PosInvoice {
       lines: UnmodifiableListView(lines),
       subtotal: subtotal,
       discount: discount,
+      cartDiscount: restoredCartDiscount,
+      cartDiscountRule: cartDiscountRule,
       tax: tax,
       total: total,
       paid: paid,
@@ -406,8 +459,9 @@ final class PosInvoice {
       throw InvalidPosInvoiceException.invalidPayment();
     }
     final newDue = total.minorUnits - newPaid;
-    final newStatus =
-        newDue == 0 ? PosDocumentStatus.paid : PosDocumentStatus.partiallyPaid;
+    final newStatus = newDue == 0
+        ? PosDocumentStatus.paid
+        : PosDocumentStatus.partiallyPaid;
     if (!status.canTransitionTo(newStatus)) {
       throw InvalidPosInvoiceException.invalidTransition();
     }
@@ -433,28 +487,29 @@ final class PosInvoice {
     DateTime? postedAt,
     DateTime? updatedAt,
     PosInvoiceSignature? signature,
-  }) =>
-      PosInvoice._(
-        id: id,
-        invoiceNumber: invoiceNumber,
-        type: type,
-        status: status ?? this.status,
-        counterpartyAccountId: counterpartyAccountId,
-        warehouseId: warehouseId,
-        sourceInvoiceId: sourceInvoiceId,
-        currency: currency,
-        lines: lines,
-        subtotal: subtotal,
-        discount: discount,
-        tax: tax,
-        total: total,
-        paid: paid ?? this.paid,
-        due: due ?? this.due,
-        idempotencyKey: idempotencyKey,
-        invoiceDate: invoiceDate,
-        createdAt: createdAt,
-        updatedAt: (updatedAt ?? this.updatedAt).toUtc(),
-        postedAt: postedAt ?? this.postedAt,
-        signature: signature ?? this.signature,
-      );
+  }) => PosInvoice._(
+    id: id,
+    invoiceNumber: invoiceNumber,
+    type: type,
+    status: status ?? this.status,
+    counterpartyAccountId: counterpartyAccountId,
+    warehouseId: warehouseId,
+    sourceInvoiceId: sourceInvoiceId,
+    currency: currency,
+    lines: lines,
+    subtotal: subtotal,
+    discount: discount,
+    cartDiscount: cartDiscount,
+    cartDiscountRule: cartDiscountRule,
+    tax: tax,
+    total: total,
+    paid: paid ?? this.paid,
+    due: due ?? this.due,
+    idempotencyKey: idempotencyKey,
+    invoiceDate: invoiceDate,
+    createdAt: createdAt,
+    updatedAt: (updatedAt ?? this.updatedAt).toUtc(),
+    postedAt: postedAt ?? this.postedAt,
+    signature: signature ?? this.signature,
+  );
 }

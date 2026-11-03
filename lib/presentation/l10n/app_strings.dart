@@ -233,14 +233,12 @@ class AppStrings {
     String receiver,
     String amount,
     String reference,
-  ) =>
-      i.voucherTripartiteShareText(sender, receiver, amount, reference);
+  ) => i.voucherTripartiteShareText(sender, receiver, amount, reference);
   static String voucherStandardShareText(
     String voucherType,
     String counterpartyName,
     String amount,
-  ) =>
-      i.voucherStandardShareText(voucherType, counterpartyName, amount);
+  ) => i.voucherStandardShareText(voucherType, counterpartyName, amount);
   static String shareTextAccount(String name) => i.shareTextAccount(name);
   static String shareTextDescription(String desc) =>
       i.shareTextDescription(desc);
@@ -2726,6 +2724,23 @@ class AppStrings {
       i.posCheckoutCatalogReference;
   static String get posCheckoutPriceRequired => i.posCheckoutPriceRequired;
   static String get posCheckoutSubtotal => i.posCheckoutSubtotal;
+  static String get posCheckoutDiscountTotal => i.posCheckoutDiscountTotal;
+  static String get posCheckoutFinalTotal => i.posCheckoutFinalTotal;
+  static String get posDiscountCart => i.posDiscountCart;
+  static String get posDiscountAdd => i.posDiscountAdd;
+  static String get posDiscountEdit => i.posDiscountEdit;
+  static String get posDiscountMethod => i.posDiscountMethod;
+  static String get posDiscountFixed => i.posDiscountFixed;
+  static String get posDiscountPercent => i.posDiscountPercent;
+  static String get posDiscountAmount => i.posDiscountAmount;
+  static String get posDiscountEligibleAmount => i.posDiscountEligibleAmount;
+  static String get posDiscountPercentHint => i.posDiscountPercentHint;
+  static String posDiscountPercentLimit(String maximum) =>
+      i.posDiscountPercentLimit(maximum);
+  static String get posDiscountReason => i.posDiscountReason;
+  static String get posDiscountReasonRequired => i.posDiscountReasonRequired;
+  static String get posDiscountInvalid => i.posDiscountInvalid;
+  static String get posDiscountRemove => i.posDiscountRemove;
   static String get posCheckoutClearCart => i.posCheckoutClearCart;
   static String get posCheckoutCameraActive => i.posCheckoutCameraActive;
   static String get posCheckoutPostingPending => i.posCheckoutPostingPending;
@@ -2864,8 +2879,10 @@ class AppStrings {
   static String get posStockDisposalFailed => i.posStockDisposalFailed;
   static String get posStockDisposalVoucherLink =>
       i.posStockDisposalVoucherLink;
-  static String posStockDisposalVoucherDescription(String reason, String? detail) =>
-      i.posStockDisposalVoucherDescription(reason, detail);
+  static String posStockDisposalVoucherDescription(
+    String reason,
+    String? detail,
+  ) => i.posStockDisposalVoucherDescription(reason, detail);
   static String posStockDisposalReversalVoucherDescription(String sourceId) =>
       i.posStockDisposalReversalVoucherDescription(sourceId);
   static String get posStockDisposalReverseAction =>

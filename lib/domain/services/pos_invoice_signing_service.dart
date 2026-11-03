@@ -1,22 +1,28 @@
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_invoice_signature.dart';
+import 'package:qayd/domain/entities/pos_discount_rule.dart';
 import 'package:qayd/domain/services/receipt_signing_service.dart';
 import 'package:qayd/domain/value_objects/crypto_key_pair.dart';
 
 /// Canonical invoice signing boundary. The payload is intentionally versioned.
 final class PosInvoiceSigningService {
-  const PosInvoiceSigningService(
-      {required ReceiptSigningService receiptSigningService})
-      : _receiptSigningService = receiptSigningService;
+  const PosInvoiceSigningService({
+    required ReceiptSigningService receiptSigningService,
+  }) : _receiptSigningService = receiptSigningService;
 
   final ReceiptSigningService _receiptSigningService;
 
   String canonicalPayload(
-      PosInvoice invoice, List<PosInvoicePayment> payments) {
+    PosInvoice invoice,
+    List<PosInvoicePayment> payments,
+  ) {
+    final includesDiscountAudit =
+        invoice.cartDiscountRule != null ||
+        invoice.lines.any((line) => line.discountRule != null);
     final lines = invoice.lines
         .map(
-          (line) => [
+          (line) => <Object?>[
             line.id,
             line.productId,
             line.productNameSnapshot,
@@ -28,6 +34,7 @@ final class PosInvoiceSigningService {
             line.discount.minorUnits,
             line.tax.minorUnits,
             line.lineTotal.minorUnits,
+            if (includesDiscountAudit) _discountRulePayload(line.discountRule),
           ].join(','),
         )
         .join(';');
@@ -45,7 +52,7 @@ final class PosInvoiceSigningService {
         )
         .join(';');
     return [
-      'QAYD_POS_INVOICE_V1',
+      includesDiscountAudit ? 'QAYD_POS_INVOICE_V2' : 'QAYD_POS_INVOICE_V1',
       invoice.id,
       invoice.invoiceNumber,
       invoice.type.name,
@@ -61,9 +68,23 @@ final class PosInvoiceSigningService {
       invoice.paid.minorUnits,
       invoice.due.minorUnits,
       invoice.status.name,
+      if (includesDiscountAudit)
+        '${invoice.cartDiscount.minorUnits}:${_discountRulePayload(invoice.cartDiscountRule)}',
       lines,
       paymentPayload,
     ].join('|');
+  }
+
+  String _discountRulePayload(PosDiscountRule? rule) {
+    if (rule == null) return '-';
+    return [
+      rule.method.name,
+      rule.value,
+      rule.currencyCode ?? '',
+      rule.reason,
+      rule.actorId,
+      rule.policyMaximumBasisPoints,
+    ].join('~');
   }
 
   PosInvoiceSignature sign({

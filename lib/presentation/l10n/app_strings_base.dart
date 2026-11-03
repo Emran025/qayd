@@ -1316,7 +1316,8 @@ abstract class AppStringsBase {
   String get profileDeleteAccountExecute => 'محو بيانات الحساب';
   String get profileDeleteAccountSuccess =>
       'تم محو الحساب وجميع البيانات بنجاح.';
-  String get profileDeleteAccountWarningBody => 'هذا الإجراء سيقوم بما يلي:\n'
+  String get profileDeleteAccountWarningBody =>
+      'هذا الإجراء سيقوم بما يلي:\n'
       '• حذف جميع بياناتك المالية من هذا الجهاز.\n'
       '• حذف جميع النسخ الاحتياطية المحلية وعلى Google Drive.\n'
       '• تعطيل حسابك على السيرفر (Soft delete).\n\n'
@@ -2920,6 +2921,23 @@ abstract class AppStringsBase {
   String get posCheckoutPriceRequired =>
       'لا يوجد سعر صرف مسجل لهذه العملة بعد.';
   String get posCheckoutSubtotal => 'الإجمالي الفرعي';
+  String get posCheckoutDiscountTotal => 'إجمالي الخصم';
+  String get posCheckoutFinalTotal => 'الإجمالي بعد الخصم';
+  String get posDiscountCart => 'خصم السلة';
+  String get posDiscountAdd => 'إضافة خصم';
+  String get posDiscountEdit => 'تعديل الخصم';
+  String get posDiscountMethod => 'نوع الخصم';
+  String get posDiscountFixed => 'مبلغ ثابت';
+  String get posDiscountPercent => 'نسبة مئوية';
+  String get posDiscountAmount => 'قيمة الخصم';
+  String get posDiscountEligibleAmount => 'المبلغ المؤهل للخصم';
+  String get posDiscountPercentHint => 'النسبة المئوية (حتى 100٪)';
+  String posDiscountPercentLimit(String maximum) =>
+      'النسبة المئوية (الحد الأقصى $maximum٪)';
+  String get posDiscountReason => 'سبب الخصم (إلزامي)';
+  String get posDiscountReasonRequired => 'اكتب سبب الخصم.';
+  String get posDiscountInvalid => 'تحقق من قيمة الخصم والعملة والحد المسموح.';
+  String get posDiscountRemove => 'إزالة الخصم';
   String get posCheckoutClearCart => 'تفريغ السلة';
   String get posCheckoutCameraActive => 'المسح الخلفي مفعّل';
   String get posCheckoutPostingPending =>
@@ -3030,23 +3048,23 @@ abstract class AppStringsBase {
   String get posStockMovementAllProducts => 'كل المنتجات';
   String get posStockMovementAllTypes => 'كل أنواع الحركات';
   String posStockMovementTypeLabel(String type) => switch (type) {
-        'opening' => 'مخزون افتتاحي',
-        'purchase' => 'استلام شراء',
-        'sale' => 'بيع',
-        'salesReturn' => 'مرتجع بيع',
-        'purchaseReturn' => 'مرتجع شراء',
-        'adjustment' => 'تسوية جرد',
-        'damage' => 'تالف',
-        'expiry' => 'منتهي الصلاحية',
-        _ => 'حركة مخزون',
-      };
+    'opening' => 'مخزون افتتاحي',
+    'purchase' => 'استلام شراء',
+    'sale' => 'بيع',
+    'salesReturn' => 'مرتجع بيع',
+    'purchaseReturn' => 'مرتجع شراء',
+    'adjustment' => 'تسوية جرد',
+    'damage' => 'تالف',
+    'expiry' => 'منتهي الصلاحية',
+    _ => 'حركة مخزون',
+  };
   String posStockDisposalReasonLabel(String code) => switch (code) {
-        'damage' => 'تالف',
-        'expiry' => 'منتهي الصلاحية',
-        'authorized_loss' => 'فقد معتمد',
-        'other' => 'سبب آخر',
-        _ => 'إخراج مخزون',
-      };
+    'damage' => 'تالف',
+    'expiry' => 'منتهي الصلاحية',
+    'authorized_loss' => 'فقد معتمد',
+    'other' => 'سبب آخر',
+    _ => 'إخراج مخزون',
+  };
   String get posStockDisposalTitle => 'إخراج تالف أو منتهي الصلاحية';
   String get posStockDisposalDescription =>
       'يسجل الإخراج كحركة غير قابلة للتعديل، مع تحديث الدفعة وقيد خسارة المخزون ذرياً.';

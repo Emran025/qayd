@@ -16,9 +16,9 @@ final class PosSalePosting {
     required List<PosStockMovement> movements,
     required List<PosAccountingPosting> postings,
     required List<PosInvoicePayment> payments,
-  })  : movements = UnmodifiableListView(movements),
-        postings = UnmodifiableListView(postings),
-        payments = UnmodifiableListView(payments) {
+  }) : movements = UnmodifiableListView(movements),
+       postings = UnmodifiableListView(postings),
+       payments = UnmodifiableListView(payments) {
     if (invoice.type != PosInvoiceType.sale) {
       throw InvalidPosInvoiceException.invalidLine();
     }
@@ -78,8 +78,9 @@ final class PosSalePosting {
         throw InvalidPosInvoiceException.invalidTotals();
       }
       final isCommercial = posting.voucher.type == VoucherType.receipt;
-      final expectedCurrency =
-          isCommercial ? invoice.currency : posting.voucher.currency;
+      final expectedCurrency = isCommercial
+          ? invoice.currency
+          : posting.voucher.currency;
       if (posting.entries.isEmpty ||
           posting.voucher.currency != expectedCurrency ||
           posting.entries.any(
@@ -104,10 +105,10 @@ final class PosSalePosting {
       } else {
         cogsVouchers[posting.voucher.currency] =
             (cogsVouchers[posting.voucher.currency] ?? 0) +
-                posting.voucher.amount.minorUnits;
+            posting.voucher.amount.minorUnits;
       }
     }
-    if (commercialVouchers != invoice.total.minorUnits ||
+    if (commercialVouchers != invoice.subtotal.minorUnits ||
         cogsVouchers.length != cogsByCurrency.length ||
         cogsByCurrency.entries.any(
           (entry) => cogsVouchers[entry.key] != entry.value,
@@ -121,9 +122,9 @@ final class PosSalePosting {
       }
     }
     final paid = this.payments.fold<int>(
-          0,
-          (sum, payment) => sum + payment.amount.minorUnits,
-        );
+      0,
+      (sum, payment) => sum + payment.amount.minorUnits,
+    );
     if (paid != invoice.paid.minorUnits) {
       throw InvalidPosInvoiceException.invalidPayment();
     }

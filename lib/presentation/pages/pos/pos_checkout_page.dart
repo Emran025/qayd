@@ -8,9 +8,11 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_currency_rate.dart';
+import 'package:qayd/domain/entities/pos_discount_rule.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
+import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
 import 'package:qayd/presentation/components/atomic/qayd_app_bar.dart';
@@ -167,22 +169,23 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
       return;
     }
     await context.read<PosCheckoutCubit>().completeCheckout(
-          warehouseId: widget.warehouseId,
-          currency: _selectedCurrency,
-          advanceMinorUnits: advance,
-          paymentMethod: _paymentMethod,
-          customerAccountId: _customerAccountId == null
-              ? null
-              : AccountId(_customerAccountId!),
-          paymentAccountId:
-              _paymentAccountId == null ? null : AccountId(_paymentAccountId!),
-        );
+      warehouseId: widget.warehouseId,
+      currency: _selectedCurrency,
+      advanceMinorUnits: advance,
+      paymentMethod: _paymentMethod,
+      customerAccountId: _customerAccountId == null
+          ? null
+          : AccountId(_customerAccountId!),
+      paymentAccountId: _paymentAccountId == null
+          ? null
+          : AccountId(_paymentAccountId!),
+    );
     if (mounted &&
         context.read<PosCheckoutCubit>().state.status ==
             PosCheckoutStatus.completed) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.posCheckoutCompleted)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.posCheckoutCompleted)));
     }
   }
 
@@ -308,6 +311,49 @@ class _CheckoutContent extends StatelessWidget {
   final String? scannerError;
   final VoidCallback onToggleCamera;
 
+  Future<void> _editCartDiscount(BuildContext context) async {
+    final cubit = context.read<PosCheckoutCubit>();
+    final result = await _showDiscountRuleDialog(
+      context: context,
+      title: AppStrings.posDiscountCart,
+      existing: state.cartDiscountRule,
+      eligibleMinorUnits:
+          state.subtotalMinorUnits - state.lineDiscountMinorUnits,
+      currency: currency,
+      actorId: cubit.discountActorId,
+      policyMaximumBasisPoints: cubit.discountPolicyMaximumBasisPoints,
+    );
+    if (!context.mounted || !result.confirmed) return;
+    if (!cubit.setCartDiscountRule(result.rule)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(AppStrings.posDiscountInvalid)));
+    }
+  }
+
+  Future<void> _editLineDiscount(
+    BuildContext context,
+    PosCheckoutLineState line,
+  ) async {
+    final cubit = context.read<PosCheckoutCubit>();
+    final lineCurrency = line.unitPrice?.currency;
+    if (lineCurrency == null) return;
+    final result = await _showDiscountRuleDialog(
+      context: context,
+      title:
+          '${line.discountRule == null ? AppStrings.posDiscountAdd : AppStrings.posDiscountEdit}: ${line.product.name}',
+      existing: line.discountRule,
+      eligibleMinorUnits: line.grossMinorUnits,
+      currency: lineCurrency,
+      actorId: cubit.discountActorId,
+      policyMaximumBasisPoints: cubit.discountPolicyMaximumBasisPoints,
+    );
+    if (!context.mounted || !result.confirmed) return;
+    if (!cubit.setLineDiscountRule(line.product.id, result.rule)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(AppStrings.posDiscountInvalid)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListView(
@@ -361,9 +407,11 @@ class _CheckoutContent extends StatelessWidget {
             ),
             IconButton(
               tooltip: AppStrings.posCheckoutCameraActive,
-              icon: Icon(isBackCamera
-                  ? Icons.camera_rear_outlined
-                  : Icons.camera_front_outlined),
+              icon: Icon(
+                isBackCamera
+                    ? Icons.camera_rear_outlined
+                    : Icons.camera_front_outlined,
+              ),
               onPressed: onToggleCamera,
             ),
           ],
@@ -388,7 +436,8 @@ class _CheckoutContent extends StatelessWidget {
                 leading: const Icon(Icons.inventory_2_outlined),
                 title: Text(product.name),
                 subtitle: Text(
-                    '${product.sku} · ${formatPosMoney(product.salePrice)}'),
+                  '${product.sku} · ${formatPosMoney(product.salePrice)}',
+                ),
                 trailing: const Icon(Icons.add_circle_outline),
                 onTap: () => onAddProduct(product),
               ),
@@ -403,6 +452,8 @@ class _CheckoutContent extends StatelessWidget {
           onSetQuantity: onSetQuantity,
           onRemoveProduct: onRemoveProduct,
           onClearCart: onClearCart,
+          onEditCartDiscount: () => _editCartDiscount(context),
+          onEditLineDiscount: (line) => _editLineDiscount(context, line),
         ),
         const SizedBox(height: SpacingTokens.lg),
         _CheckoutPaymentPanel(
@@ -430,6 +481,8 @@ class _CheckoutCartSection extends StatelessWidget {
     required this.onSetQuantity,
     required this.onRemoveProduct,
     required this.onClearCart,
+    required this.onEditCartDiscount,
+    required this.onEditLineDiscount,
   });
 
   final PosCheckoutState state;
@@ -438,55 +491,69 @@ class _CheckoutCartSection extends StatelessWidget {
   final void Function(String, PosQuantity) onSetQuantity;
   final ValueChanged<String> onRemoveProduct;
   final VoidCallback onClearCart;
+  final VoidCallback onEditCartDiscount;
+  final ValueChanged<PosCheckoutLineState> onEditLineDiscount;
 
   @override
   Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Row(
         children: [
-          Row(
-            children: [
-              Text(
-                AppStrings.posCheckoutTitle,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const Spacer(),
-              TextButton(
-                onPressed: state.lines.isEmpty ? null : onClearCart,
-                child: Text(AppStrings.posCheckoutClearCart),
-              ),
-            ],
+          Text(
+            AppStrings.posCheckoutTitle,
+            style: Theme.of(context).textTheme.titleLarge,
           ),
-          const SizedBox(height: SpacingTokens.sm),
-          if (state.lines.isEmpty)
-            SizedBox(
-              height: 180,
-              child: QaydEmptyState(
-                icon: Icons.shopping_cart_outlined,
-                title: AppStrings.posCheckoutCartEmpty,
-              ),
-            )
-          else
-            ...state.lines.map(
-              (line) => _CheckoutLineTile(
-                line: line,
-                currency: currency,
-                onIncrement: () => onAddProduct(line.product),
-                onDecrement: () {
-                  final step = PosMoneyMath.scaleFactor(line.quantity.scale);
-                  final next = line.quantity.scaledUnits - step;
-                  onSetQuantity(
-                    line.product.id,
-                    PosQuantity.fromScaled(
-                      next < 0 ? 0 : next,
-                      scale: line.quantity.scale,
-                    ),
-                  );
-                },
-                onRemove: () => onRemoveProduct(line.product.id),
-              ),
-            ),
+          const Spacer(),
+          IconButton(
+            tooltip: state.cartDiscountRule == null
+                ? AppStrings.posDiscountAdd
+                : AppStrings.posDiscountEdit,
+            onPressed:
+                state.lines.isEmpty ||
+                    state.lines.any((line) => line.unitPrice == null)
+                ? null
+                : onEditCartDiscount,
+            icon: const Icon(Icons.discount_outlined),
+          ),
+          TextButton(
+            onPressed: state.lines.isEmpty ? null : onClearCart,
+            child: Text(AppStrings.posCheckoutClearCart),
+          ),
         ],
-      );
+      ),
+      const SizedBox(height: SpacingTokens.sm),
+      if (state.lines.isEmpty)
+        SizedBox(
+          height: 180,
+          child: QaydEmptyState(
+            icon: Icons.shopping_cart_outlined,
+            title: AppStrings.posCheckoutCartEmpty,
+          ),
+        )
+      else
+        ...state.lines.map(
+          (line) => _CheckoutLineTile(
+            line: line,
+            currency: currency,
+            onEditDiscount: () => onEditLineDiscount(line),
+            onIncrement: () => onAddProduct(line.product),
+            onDecrement: () {
+              final step = PosMoneyMath.scaleFactor(line.quantity.scale);
+              final next = line.quantity.scaledUnits - step;
+              onSetQuantity(
+                line.product.id,
+                PosQuantity.fromScaled(
+                  next < 0 ? 0 : next,
+                  scale: line.quantity.scale,
+                ),
+              );
+            },
+            onRemove: () => onRemoveProduct(line.product.id),
+          ),
+        ),
+    ],
+  );
 }
 
 class _CheckoutPaymentPanel extends StatelessWidget {
@@ -516,87 +583,106 @@ class _CheckoutPaymentPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(SpacingTokens.md),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(AppStrings.posCheckoutSubtotal),
-                trailing: Text(
-                  formatPosMinor(state.subtotalMinorUnits, currency),
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
+    child: Padding(
+      padding: const EdgeInsets.all(SpacingTokens.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(AppStrings.posCheckoutSubtotal),
+            trailing: Text(
+              formatPosMinor(state.subtotalMinorUnits, currency),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+          ),
+          if (state.totalDiscountMinorUnits > 0)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(AppStrings.posCheckoutDiscountTotal),
+              trailing: Text(
+                '−${formatPosMinor(state.totalDiscountMinorUnits, currency)}',
               ),
-              QaydNumericField(
-                controller: advanceController,
-                label: AppStrings.posCheckoutAdvance,
+            ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(AppStrings.posCheckoutFinalTotal),
+            trailing: Text(
+              formatPosMinor(state.totalMinorUnits, currency),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+          ),
+          QaydNumericField(
+            controller: advanceController,
+            label: AppStrings.posCheckoutAdvance,
+          ),
+          const SizedBox(height: SpacingTokens.sm),
+          DropdownButtonFormField<PosPaymentMethod>(
+            initialValue: paymentMethod,
+            decoration: InputDecoration(
+              labelText: AppStrings.posCheckoutPaymentMethod,
+            ),
+            items: [
+              DropdownMenuItem(
+                value: PosPaymentMethod.cash,
+                child: Text(AppStrings.posCheckoutCash),
               ),
-              const SizedBox(height: SpacingTokens.sm),
-              DropdownButtonFormField<PosPaymentMethod>(
-                initialValue: paymentMethod,
-                decoration: InputDecoration(
-                  labelText: AppStrings.posCheckoutPaymentMethod,
-                ),
-                items: [
-                  DropdownMenuItem(
-                    value: PosPaymentMethod.cash,
-                    child: Text(AppStrings.posCheckoutCash),
-                  ),
-                  DropdownMenuItem(
-                    value: PosPaymentMethod.bank,
-                    child: Text(AppStrings.posCheckoutBank),
-                  ),
-                  DropdownMenuItem(
-                    value: PosPaymentMethod.credit,
-                    child: Text(AppStrings.posCheckoutCredit),
-                  ),
-                  DropdownMenuItem(
-                    value: PosPaymentMethod.other,
-                    child: Text(AppStrings.posCheckoutOther),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value != null) onPaymentMethodChanged(value);
-                },
+              DropdownMenuItem(
+                value: PosPaymentMethod.bank,
+                child: Text(AppStrings.posCheckoutBank),
               ),
-              const SizedBox(height: SpacingTokens.sm),
-              QaydTextField(
-                controller: paymentAccountController,
-                readOnly: true,
-                onTap: onPickPaymentAccount,
-                label: AppStrings.posCheckoutPaymentAccount,
-                suffixIcon: const Icon(Icons.account_balance_outlined),
+              DropdownMenuItem(
+                value: PosPaymentMethod.credit,
+                child: Text(AppStrings.posCheckoutCredit),
               ),
-              const SizedBox(height: SpacingTokens.sm),
-              QaydTextField(
-                controller: customerController,
-                readOnly: true,
-                onTap: onPickCustomer,
-                label: AppStrings.posCheckoutCustomerAccount,
-                suffixIcon: const Icon(Icons.person_outline_rounded),
-              ),
-              const SizedBox(height: SpacingTokens.md),
-              FilledButton.icon(
-                onPressed: state.lines.isEmpty ||
-                        state.isBusy ||
-                        state.lines.any((line) => line.unitPrice == null)
-                    ? null
-                    : onComplete,
-                icon: const Icon(Icons.verified_outlined),
-                label: Text(AppStrings.posCheckoutComplete),
+              DropdownMenuItem(
+                value: PosPaymentMethod.other,
+                child: Text(AppStrings.posCheckoutOther),
               ),
             ],
+            onChanged: (value) {
+              if (value != null) onPaymentMethodChanged(value);
+            },
           ),
-        ),
-      );
+          const SizedBox(height: SpacingTokens.sm),
+          QaydTextField(
+            controller: paymentAccountController,
+            readOnly: true,
+            onTap: onPickPaymentAccount,
+            label: AppStrings.posCheckoutPaymentAccount,
+            suffixIcon: const Icon(Icons.account_balance_outlined),
+          ),
+          const SizedBox(height: SpacingTokens.sm),
+          QaydTextField(
+            controller: customerController,
+            readOnly: true,
+            onTap: onPickCustomer,
+            label: AppStrings.posCheckoutCustomerAccount,
+            suffixIcon: const Icon(Icons.person_outline_rounded),
+          ),
+          const SizedBox(height: SpacingTokens.md),
+          FilledButton.icon(
+            onPressed:
+                state.lines.isEmpty ||
+                    state.isBusy ||
+                    !state.hasValidDiscounts ||
+                    state.lines.any((line) => line.unitPrice == null)
+                ? null
+                : onComplete,
+            icon: const Icon(Icons.verified_outlined),
+            label: Text(AppStrings.posCheckoutComplete),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _CheckoutLineTile extends StatelessWidget {
   const _CheckoutLineTile({
     required this.line,
     required this.currency,
+    required this.onEditDiscount,
     required this.onIncrement,
     required this.onDecrement,
     required this.onRemove,
@@ -604,6 +690,7 @@ class _CheckoutLineTile extends StatelessWidget {
 
   final PosCheckoutLineState line;
   final CurrencyCode currency;
+  final VoidCallback onEditDiscount;
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
   final VoidCallback onRemove;
@@ -622,7 +709,16 @@ class _CheckoutLineTile extends StatelessWidget {
               subtitle: Text(
                 line.unitPrice == null
                     ? AppStrings.posCheckoutPriceRequired
-                    : '${line.quantity.toExactString()} × ${formatPosMoney(line.unitPrice!)} = ${formatPosMinor(line.totalMinorUnits, currency)}',
+                    : <String>[
+                        '${line.quantity.toExactString()} × ${formatPosMoney(line.unitPrice!)} = ${formatPosMinor(line.grossMinorUnits, currency)}',
+                        if (line.discountMinorUnits > 0)
+                          '${AppStrings.posCheckoutDiscountTotal}: −${formatPosMinor(line.discountMinorUnits, currency)}',
+                        if (line.discountRule != null)
+                          '${AppStrings.posDiscountReason}: ${line.discountRule!.reason}',
+                        '${AppStrings.posCheckoutFinalTotal}: ${formatPosMinor(line.totalMinorUnits, currency)}',
+                        if (!line.hasValidDiscount)
+                          AppStrings.posDiscountInvalid,
+                      ].join('\n'),
               ),
               leading: IconButton(
                 tooltip: AppStrings.posCheckoutClearCart,
@@ -642,6 +738,18 @@ class _CheckoutLineTile extends StatelessWidget {
                     icon: const Icon(Icons.add_circle_outline),
                   ),
                 ],
+              ),
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton.icon(
+                onPressed: line.unitPrice == null ? null : onEditDiscount,
+                icon: const Icon(Icons.discount_outlined),
+                label: Text(
+                  line.discountRule == null
+                      ? AppStrings.posDiscountAdd
+                      : AppStrings.posDiscountEdit,
+                ),
               ),
             ),
             if (line.product.currency != currency)
@@ -672,4 +780,210 @@ String _formatStoredRate(PosCurrencyRateQuote quote) {
   final fraction = (scaled % BigInt.from(100000000)).toString().padLeft(8, '0');
   return '1 ${quote.storedFromCurrency.code} = '
       '$whole.$fraction ${quote.storedToCurrency.code}';
+}
+
+typedef _DiscountDialogResult = ({bool confirmed, PosDiscountRule? rule});
+
+Future<_DiscountDialogResult> _showDiscountRuleDialog({
+  required BuildContext context,
+  required String title,
+  required PosDiscountRule? existing,
+  required int eligibleMinorUnits,
+  required CurrencyCode currency,
+  required String actorId,
+  required int policyMaximumBasisPoints,
+}) async {
+  var method = existing?.method ?? PosDiscountMethod.fixedAmount;
+  final amountController = TextEditingController(
+    text: existing == null
+        ? ''
+        : existing.method == PosDiscountMethod.fixedAmount
+        ? _formatMinorUnitsInput(existing.value, currency)
+        : _formatBasisPoints(existing.value),
+  );
+  final reasonController = TextEditingController(text: existing?.reason ?? '');
+  String? error;
+  final result = await showDialog<_DiscountDialogResult>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                '${AppStrings.posDiscountEligibleAmount}: '
+                '${formatPosMinor(eligibleMinorUnits, currency)}',
+              ),
+              const SizedBox(height: SpacingTokens.sm),
+              DropdownButtonFormField<PosDiscountMethod>(
+                initialValue: method,
+                decoration: InputDecoration(
+                  labelText: AppStrings.posDiscountMethod,
+                ),
+                items: [
+                  DropdownMenuItem(
+                    value: PosDiscountMethod.fixedAmount,
+                    child: Text(AppStrings.posDiscountFixed),
+                  ),
+                  DropdownMenuItem(
+                    value: PosDiscountMethod.percentage,
+                    child: Text(AppStrings.posDiscountPercent),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setDialogState(() {
+                    method = value;
+                    amountController.clear();
+                    error = null;
+                  });
+                },
+              ),
+              TextField(
+                controller: amountController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: false,
+                ),
+                decoration: InputDecoration(
+                  labelText: method == PosDiscountMethod.fixedAmount
+                      ? '${AppStrings.posDiscountAmount} (${currency.code})'
+                      : AppStrings.posDiscountPercentLimit(
+                          _formatBasisPoints(policyMaximumBasisPoints),
+                        ),
+                ),
+              ),
+              const SizedBox(height: SpacingTokens.sm),
+              TextField(
+                controller: reasonController,
+                maxLength: 120,
+                decoration: InputDecoration(
+                  labelText: AppStrings.posDiscountReason,
+                ),
+              ),
+              if (error != null)
+                Text(
+                  error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop((confirmed: false, rule: null)),
+            child: Text(MaterialLocalizations.of(context).cancelButtonLabel),
+          ),
+          if (existing != null)
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext)
+                      .pop((confirmed: true, rule: null)),
+              child: Text(AppStrings.posDiscountRemove),
+            ),
+          FilledButton(
+            onPressed: () {
+              final reason = reasonController.text.trim();
+              if (reason.isEmpty) {
+                setDialogState(
+                  () => error = AppStrings.posDiscountReasonRequired,
+                );
+                return;
+              }
+              try {
+                final PosDiscountRule rule;
+                if (method == PosDiscountMethod.fixedAmount) {
+                  final minorUnits = _parseCurrencyToMinor(
+                    amountController.text,
+                    currency.fractionalDigits,
+                  );
+                  if (minorUnits == null) throw const FormatException();
+                  rule = PosDiscountRule.fixed(
+                    amount: Money.fromMinorUnits(minorUnits, currency),
+                    reason: reason,
+                    actorId: actorId,
+                    policyMaximumBasisPoints: policyMaximumBasisPoints,
+                  );
+                } else {
+                  final basisPoints = _parsePercentageBasisPoints(
+                    amountController.text,
+                  );
+                  if (basisPoints == null) throw const FormatException();
+                  rule = PosDiscountRule.percentage(
+                    basisPoints: basisPoints,
+                    reason: reason,
+                    actorId: actorId,
+                    policyMaximumBasisPoints: policyMaximumBasisPoints,
+                  );
+                }
+                rule.amountFor(
+                  Money.fromMinorUnits(eligibleMinorUnits, currency),
+                );
+                Navigator.of(dialogContext).pop((confirmed: true, rule: rule));
+              } on Exception {
+                setDialogState(() => error = AppStrings.posDiscountInvalid);
+              }
+            },
+            child: Text(
+              existing == null
+                  ? AppStrings.posDiscountAdd
+                  : AppStrings.posDiscountEdit,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+  amountController.dispose();
+  reasonController.dispose();
+  return result ?? (confirmed: false, rule: null);
+}
+
+int? _parseCurrencyToMinor(String raw, int fractionalDigits) {
+  final normalized = raw.trim().replaceAll(',', '.');
+  if (!RegExp(r'^\d+(?:\.\d+)?$').hasMatch(normalized)) return null;
+  final parts = normalized.split('.');
+  final fraction = parts.length == 1 ? '' : parts[1];
+  if (fraction.length > fractionalDigits) return null;
+  final whole = BigInt.tryParse(parts[0]);
+  if (whole == null) return null;
+  final scale = BigInt.from(PosMoneyMath.scaleFactor(fractionalDigits));
+  final fractionValue = fraction.isEmpty
+      ? BigInt.zero
+      : BigInt.parse(fraction.padRight(fractionalDigits, '0'));
+  final minorUnits = whole * scale + fractionValue;
+  if (minorUnits > BigInt.from(0x7fffffffffffffff)) return null;
+  return minorUnits.toInt();
+}
+
+int? _parsePercentageBasisPoints(String raw) {
+  final normalized = raw.trim().replaceAll(',', '.');
+  if (!RegExp(r'^\d{1,3}(?:\.\d{1,2})?$').hasMatch(normalized)) return null;
+  final parts = normalized.split('.');
+  final whole = int.tryParse(parts[0]);
+  if (whole == null || whole > 100) return null;
+  final fraction = parts.length == 1 ? '' : parts[1];
+  final basisPoints =
+      whole * 100 +
+      (fraction.isEmpty ? 0 : int.parse(fraction.padRight(2, '0')));
+  if (basisPoints <= 0 || basisPoints > PosDiscountRule.maximumBasisPoints) {
+    return null;
+  }
+  return basisPoints;
+}
+
+String _formatBasisPoints(int basisPoints) =>
+    '${basisPoints ~/ 100}.${(basisPoints % 100).toString().padLeft(2, '0')}';
+
+String _formatMinorUnitsInput(int minorUnits, CurrencyCode currency) {
+  final digits = currency.fractionalDigits;
+  if (digits == 0) return '$minorUnits';
+  final scale = PosMoneyMath.scaleFactor(digits);
+  final whole = minorUnits ~/ scale;
+  final fraction = (minorUnits % scale).toString().padLeft(digits, '0');
+  return '$whole.$fraction';
 }

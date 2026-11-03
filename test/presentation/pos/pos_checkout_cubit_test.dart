@@ -3,6 +3,7 @@ import 'package:qayd/application/pos/list_pos_products_use_case.dart';
 import 'package:qayd/application/pos/resolve_pos_product_for_checkout_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_currency_rate.dart';
+import 'package:qayd/domain/entities/pos_discount_rule.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/repositories/pos_currency_rate_repository.dart';
 import 'package:qayd/domain/repositories/pos_product_repository.dart';
@@ -21,10 +22,11 @@ final class _Products implements PosProductRepository {
   Future<Result<PosProduct>> getById(String id) async => Success(product);
 
   @override
-  Future<Result<PosProduct?>> getByBarcode(PosBarcode barcode) async =>
-      Success(product.barcodes.any((item) => item.value == barcode.value)
-          ? product
-          : null);
+  Future<Result<PosProduct?>> getByBarcode(PosBarcode barcode) async => Success(
+    product.barcodes.any((item) => item.value == barcode.value)
+        ? product
+        : null,
+  );
 
   @override
   Future<Result<List<PosProduct>>> list({
@@ -32,12 +34,14 @@ final class _Products implements PosProductRepository {
     String? search,
   }) async {
     final query = search?.toLowerCase() ?? '';
-    final matches = query.isEmpty ||
+    final matches =
+        query.isEmpty ||
         product.name.toLowerCase().contains(query) ||
         product.sku.toLowerCase().contains(query) ||
         product.barcodes.any((item) => item.value.contains(query));
     return Success(
-        matches && (!activeOnly || product.isActive) ? [product] : []);
+      matches && (!activeOnly || product.isActive) ? [product] : [],
+    );
   }
 
   @override
@@ -74,8 +78,7 @@ final class _Rates implements PosCurrencyRateRepository {
     CurrencyCode? fromCurrency,
     CurrencyCode? toCurrency,
     int? limit,
-  }) async =>
-      const Success([]);
+  }) async => const Success([]);
 }
 
 void main() {
@@ -117,17 +120,19 @@ void main() {
     expect(cubit.state.subtotalMinorUnits, 800);
   });
 
-  test('resolves a product through advanced name search when barcode misses',
-      () async {
-    final cubit = createCubit();
-    addTearDown(cubit.close);
+  test(
+    'resolves a product through advanced name search when barcode misses',
+    () async {
+      final cubit = createCubit();
+      addTearDown(cubit.close);
 
-    await cubit.resolveAndAdd('Coffee');
+      await cubit.resolveAndAdd('Coffee');
 
-    expect(cubit.state.lines.single.product.id, 'product-1');
-    expect(cubit.state.lines.single.quantity.scaledUnits, 1000);
-    expect(cubit.state.lines.single.quantity.scale, 3);
-  });
+      expect(cubit.state.lines.single.product.id, 'product-1');
+      expect(cubit.state.lines.single.quantity.scaledUnits, 1000);
+      expect(cubit.state.lines.single.quantity.scale, 3);
+    },
+  );
 
   test('search exposes active results without mutating the cart', () async {
     final cubit = createCubit();
@@ -169,4 +174,64 @@ void main() {
     await cubit.setSaleCurrency(currency);
     expect(cubit.state.lines.single.unitPrice, product.salePrice);
   });
+
+  test(
+    'tracks valid line and cart discounts against the eligible net base',
+    () async {
+      final cubit = createCubit();
+      addTearDown(cubit.close);
+      await cubit.addProduct(product);
+
+      expect(
+        cubit.setLineDiscountRule(
+          product.id,
+          PosDiscountRule.fixed(
+            amount: Money.fromMinorUnits(100, currency),
+            reason: 'Line offer',
+            actorId: 'device-1',
+          ),
+        ),
+        isTrue,
+      );
+      expect(cubit.state.lineDiscountMinorUnits, 100);
+      expect(cubit.state.totalMinorUnits, 300);
+
+      expect(
+        cubit.setCartDiscountRule(
+          PosDiscountRule.percentage(
+            basisPoints: 1000,
+            reason: 'Cart offer',
+            actorId: 'device-1',
+          ),
+        ),
+        isTrue,
+      );
+      expect(cubit.state.cartDiscountMinorUnits, 30);
+      expect(cubit.state.totalDiscountMinorUnits, 130);
+      expect(cubit.state.totalMinorUnits, 270);
+      expect(cubit.state.hasValidDiscounts, isTrue);
+    },
+  );
+
+  test(
+    'rejects a discount larger than its line before state mutation',
+    () async {
+      final cubit = createCubit();
+      addTearDown(cubit.close);
+      await cubit.addProduct(product);
+
+      final accepted = cubit.setLineDiscountRule(
+        product.id,
+        PosDiscountRule.fixed(
+          amount: Money.fromMinorUnits(401, currency),
+          reason: 'Invalid amount',
+          actorId: 'device-1',
+        ),
+      );
+
+      expect(accepted, isFalse);
+      expect(cubit.state.lines.single.discountRule, isNull);
+      expect(cubit.state.totalMinorUnits, 400);
+    },
+  );
 }

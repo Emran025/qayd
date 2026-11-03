@@ -6,6 +6,7 @@ import 'package:qayd/core/utils/id_generator.dart';
 import 'package:qayd/domain/entities/account.dart';
 import 'package:qayd/domain/entities/pos_activation_result.dart';
 import 'package:qayd/domain/entities/pos_currency_rate.dart';
+import 'package:qayd/domain/entities/pos_discount_rule.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_product.dart';
 import 'package:qayd/domain/entities/pos_stock_lot.dart';
@@ -61,8 +62,7 @@ final class _Rates implements PosCurrencyRateRepository {
     CurrencyCode? fromCurrency,
     CurrencyCode? toCurrency,
     int? limit,
-  }) async =>
-      const Success([]);
+  }) async => const Success([]);
 }
 
 final class _Ids implements IdGenerator {
@@ -120,14 +120,14 @@ void main() {
   );
 
   Account account(String id) => Account.createRoot(
-        id: AccountId(id),
-        name: id,
-        classification: AccountClassification.custom(
-          name: id,
-          nature: id == 'revenue' ? AccountNature.credit : AccountNature.debit,
-        ),
-        createdAt: DateTime.utc(2026, 1, 1),
-      );
+    id: AccountId(id),
+    name: id,
+    classification: AccountClassification.custom(
+      name: id,
+      nature: id == 'revenue' ? AccountNature.credit : AccountNature.debit,
+    ),
+    createdAt: DateTime.utc(2026, 1, 1),
+  );
 
   BuildPosSalePostingUseCase createUseCase({
     Map<String, String>? accountIds,
@@ -174,7 +174,8 @@ void main() {
           templateKey: PosTemplateDefinition.coreTemplateKey,
           templateVersion: PosTemplateDefinition.currentVersion,
           warehouseId: 'warehouse-1',
-          accountIdsByKey: accountIds ??
+          accountIdsByKey:
+              accountIds ??
               <String, String>{
                 PosTemplateAccountKey.inventoryAsset.value: 'inventory',
                 PosTemplateAccountKey.salesRevenue.value: 'revenue',
@@ -185,7 +186,14 @@ void main() {
         ),
       ),
     );
-    for (final id in ['inventory', 'revenue', 'cogs', 'cash', 'customer']) {
+    for (final id in [
+      'inventory',
+      'revenue',
+      'cogs',
+      'cash',
+      'customer',
+      'discounts',
+    ]) {
       when(() => accounts.getById(AccountId(id)))
           .thenAnswer((_) async => Success(account(id)));
     }
@@ -205,26 +213,28 @@ void main() {
     CurrencyCode? invoiceCurrency,
     List<BuildPosSaleLineInput>? lines,
     PosDate? businessDate,
-  }) =>
-      BuildPosSalePostingInput(
-        invoiceId: 'sale-1',
-        invoiceNumber: 'S-1',
-        warehouseId: 'warehouse-1',
-        currency: invoiceCurrency ?? currency,
-        lines: lines ??
-            [
-              BuildPosSaleLineInput(
-                productId: 'product-1',
-                quantity: PosQuantity.whole(2),
-              ),
-            ],
-        idempotencyKey: 'sale-key-1',
-        invoiceDate: DateTime.utc(2026, 1, 10, 10),
-        createdAt: DateTime.utc(2026, 1, 10, 10),
-        customerAccountId: customerAccountId,
-        settlement: settlement,
-        businessDate: businessDate,
-      );
+    PosDiscountRule? cartDiscountRule,
+  }) => BuildPosSalePostingInput(
+    invoiceId: 'sale-1',
+    invoiceNumber: 'S-1',
+    warehouseId: 'warehouse-1',
+    currency: invoiceCurrency ?? currency,
+    lines:
+        lines ??
+        [
+          BuildPosSaleLineInput(
+            productId: 'product-1',
+            quantity: PosQuantity.whole(2),
+          ),
+        ],
+    idempotencyKey: 'sale-key-1',
+    invoiceDate: DateTime.utc(2026, 1, 10, 10),
+    createdAt: DateTime.utc(2026, 1, 10, 10),
+    customerAccountId: customerAccountId,
+    settlement: settlement,
+    cartDiscountRule: cartDiscountRule,
+    businessDate: businessDate,
+  );
 
   test(
     'builds a cash sale with exact COGS and two balanced postings',
@@ -271,6 +281,152 @@ void main() {
       containsAll(<int>[400, 600, 200]),
     );
   });
+
+  test(
+    'posts a discount against gross revenue in one balanced commercial leg',
+    () async {
+      final rule = PosDiscountRule.fixed(
+        amount: Money.fromMinorUnits(100, currency),
+        reason: 'Line promotion',
+        actorId: 'device-1',
+      );
+      final result =
+          await createUseCase(
+            accountIds: <String, String>{
+              PosTemplateAccountKey.inventoryAsset.value: 'inventory',
+              PosTemplateAccountKey.salesRevenue.value: 'revenue',
+              PosTemplateAccountKey.costOfGoodsSold.value: 'cogs',
+              PosTemplateAccountKey.posCash.value: 'cash',
+              PosTemplateAccountKey.discounts.value: 'discounts',
+            },
+          )(
+            input(
+              customerAccountId: AccountId('customer'),
+              lines: [
+                BuildPosSaleLineInput(
+                  productId: 'product-1',
+                  quantity: PosQuantity.whole(2),
+                  discountRule: rule,
+                ),
+              ],
+              settlement: PosSaleSettlementInput(
+                advanceMinorUnits: 400,
+                paymentMethod: PosPaymentMethod.cash,
+                paymentAccountId: AccountId('cash'),
+              ),
+            ),
+          );
+
+      expect(result.isSuccess, isTrue);
+      final sale = result.valueOrNull!;
+      expect(sale.invoice.subtotal.minorUnits, 1000);
+      expect(sale.invoice.discount.minorUnits, 100);
+      expect(sale.invoice.total.minorUnits, 900);
+      expect(sale.invoice.paid.minorUnits, 400);
+      expect(sale.invoice.due.minorUnits, 500);
+      final commercial = sale.postings.singleWhere(
+        (posting) => posting.voucher.type.name == 'receipt',
+      );
+      expect(commercial.voucher.amount.minorUnits, 1000);
+      final debits = commercial.entries
+          .where((entry) => entry.side.name == 'debit')
+          .toList();
+      final credits = commercial.entries
+          .where((entry) => entry.side.name == 'credit')
+          .toList();
+      expect(
+        debits.map((entry) => entry.accountId.value),
+        containsAll(<String>['cash', 'customer', 'discounts']),
+      );
+      expect(credits, hasLength(1));
+      expect(credits.single.accountId.value, 'revenue');
+      expect(credits.single.amount.minorUnits, 1000);
+      expect(
+        debits.fold<int>(0, (sum, entry) => sum + entry.amount.minorUnits),
+        1000,
+      );
+      expect(
+        credits.fold<int>(0, (sum, entry) => sum + entry.amount.minorUnits),
+        1000,
+      );
+    },
+  );
+
+  test(
+    'applies cart percentage after line discounts across multiple lines',
+    () async {
+      final secondProduct = PosProduct.create(
+        id: 'product-2',
+        sku: 'SKU-2',
+        name: 'Tea',
+        currency: currency,
+        salePrice: Money.fromMinorUnits(300, currency),
+        purchasePrice: Money.fromMinorUnits(100, currency),
+      );
+      final lineRule = PosDiscountRule.fixed(
+        amount: Money.fromMinorUnits(100, currency),
+        reason: 'Line offer',
+        actorId: 'device-1',
+      );
+      final cartRule = PosDiscountRule.percentage(
+        basisPoints: 1000,
+        reason: 'Cart offer',
+        actorId: 'device-1',
+      );
+      final result =
+          await createUseCase(
+            accountIds: <String, String>{
+              PosTemplateAccountKey.inventoryAsset.value: 'inventory',
+              PosTemplateAccountKey.salesRevenue.value: 'revenue',
+              PosTemplateAccountKey.costOfGoodsSold.value: 'cogs',
+              PosTemplateAccountKey.posCash.value: 'cash',
+              PosTemplateAccountKey.discounts.value: 'discounts',
+            },
+            secondProduct: secondProduct,
+            secondStockBalance: PosStockBalance(
+              quantity: PosQuantity.whole(2),
+              valuation: Money.fromMinorUnits(200, currency),
+            ),
+          )(
+            input(
+              lines: [
+                BuildPosSaleLineInput(
+                  productId: 'product-1',
+                  quantity: PosQuantity.whole(2),
+                  discountRule: lineRule,
+                ),
+                BuildPosSaleLineInput(
+                  productId: 'product-2',
+                  quantity: PosQuantity.whole(1),
+                ),
+              ],
+              cartDiscountRule: cartRule,
+            ),
+          );
+
+      expect(result.isSuccess, isTrue);
+      final sale = result.valueOrNull!;
+      expect(sale.invoice.subtotal.minorUnits, 1300);
+      expect(sale.invoice.lines.first.discount.minorUnits, 100);
+      expect(sale.invoice.cartDiscount.minorUnits, 120);
+      expect(sale.invoice.discount.minorUnits, 220);
+      expect(sale.invoice.total.minorUnits, 1080);
+      final commercial = sale.postings.singleWhere(
+        (posting) => posting.voucher.type.name == 'receipt',
+      );
+      expect(commercial.voucher.amount.minorUnits, 1300);
+      expect(
+        commercial.entries
+            .where((entry) => entry.side.name == 'debit')
+            .fold<int>(0, (sum, entry) => sum + entry.amount.minorUnits),
+        1300,
+      );
+      expect(
+        sale.postings.any((posting) => posting.voucher.type.name == 'payment'),
+        isTrue,
+      );
+    },
+  );
 
   test('rejects a credit settlement without a customer', () async {
     final result = await createUseCase()(
@@ -355,23 +511,24 @@ void main() {
             updatedAt: DateTime.utc(2026, 1, 1),
           );
 
-      final result = await createUseCase(
-        firstProduct: trackedProduct,
-        firstLots: [
-          availableLot('lot-first', 11, 2),
-          availableLot('lot-second', 20, 3),
-        ],
-      )(
-        input(
-          lines: [
-            BuildPosSaleLineInput(
-              productId: 'product-1',
-              quantity: PosQuantity.whole(3),
+      final result =
+          await createUseCase(
+            firstProduct: trackedProduct,
+            firstLots: [
+              availableLot('lot-first', 11, 2),
+              availableLot('lot-second', 20, 3),
+            ],
+          )(
+            input(
+              lines: [
+                BuildPosSaleLineInput(
+                  productId: 'product-1',
+                  quantity: PosQuantity.whole(3),
+                ),
+              ],
+              businessDate: PosDate.fromParts(2027, 1, 10),
             ),
-          ],
-          businessDate: PosDate.fromParts(2027, 1, 10),
-        ),
-      );
+          );
 
       expect(result.isSuccess, isTrue);
       final sale = result.valueOrNull!;
@@ -414,21 +571,37 @@ void main() {
       );
       expect(wrongCurrency.isFailure, isTrue);
 
-      final result = await createUseCase(quotes: [rate])(
-        input(
-          invoiceCurrency: usd,
-          lines: [
-            BuildPosSaleLineInput(
-              productId: 'product-1',
-              quantity: PosQuantity.whole(2),
-              unitPrice: Money.fromMinorUnits(700, usd),
+      final result =
+          await createUseCase(
+            quotes: [rate],
+            accountIds: <String, String>{
+              PosTemplateAccountKey.inventoryAsset.value: 'inventory',
+              PosTemplateAccountKey.salesRevenue.value: 'revenue',
+              PosTemplateAccountKey.costOfGoodsSold.value: 'cogs',
+              PosTemplateAccountKey.posCash.value: 'cash',
+              PosTemplateAccountKey.discounts.value: 'discounts',
+            },
+          )(
+            input(
+              invoiceCurrency: usd,
+              lines: [
+                BuildPosSaleLineInput(
+                  productId: 'product-1',
+                  quantity: PosQuantity.whole(2),
+                  unitPrice: Money.fromMinorUnits(700, usd),
+                  discountRule: PosDiscountRule.percentage(
+                    basisPoints: 1000,
+                    reason: 'FX line offer',
+                    actorId: 'device-1',
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      );
+          );
       expect(result.isSuccess, isTrue);
       final sale = result.valueOrNull!;
-      expect(sale.invoice.total, Money.fromMinorUnits(1400, usd));
+      expect(sale.invoice.total, Money.fromMinorUnits(1260, usd));
+      expect(sale.invoice.discount, Money.fromMinorUnits(140, usd));
       expect(
         sale.invoice.lines.single.unitPrice,
         Money.fromMinorUnits(700, usd),
@@ -442,7 +615,7 @@ void main() {
         'sar-usd-1',
       );
       expect(sale.invoice.lines.single.unitCost.currency, currency);
-      expect(sale.payments.single.amount, Money.fromMinorUnits(1400, usd));
+      expect(sale.payments.single.amount, Money.fromMinorUnits(1260, usd));
       final cogs = sale.postings.singleWhere(
         (posting) => posting.voucher.type.name == 'payment',
       );
@@ -469,43 +642,44 @@ void main() {
         salePrice: Money.fromMinorUnits(600, eur),
         purchasePrice: Money.fromMinorUnits(300, eur),
       );
-      final result = await createUseCase(
-        secondProduct: secondProduct,
-        secondStockBalance: PosStockBalance(
-          quantity: PosQuantity.whole(4),
-          valuation: Money.fromMinorUnits(300, eur),
-        ),
-        quotes: [
-          _quote(
-            id: 'sar-usd-1',
-            from: currency,
-            to: usd,
-            rateScaled: 140000000,
-          ),
-          _quote(
-            id: 'eur-usd-1',
-            from: eur,
-            to: usd,
-            rateScaled: 133333333,
-          ),
-        ],
-      )(
-        input(
-          invoiceCurrency: usd,
-          lines: [
-            BuildPosSaleLineInput(
-              productId: 'product-1',
-              quantity: PosQuantity.whole(1),
-              unitPrice: Money.fromMinorUnits(700, usd),
+      final result =
+          await createUseCase(
+            secondProduct: secondProduct,
+            secondStockBalance: PosStockBalance(
+              quantity: PosQuantity.whole(4),
+              valuation: Money.fromMinorUnits(300, eur),
             ),
-            BuildPosSaleLineInput(
-              productId: 'product-2',
-              quantity: PosQuantity.whole(1),
-              unitPrice: Money.fromMinorUnits(800, usd),
+            quotes: [
+              _quote(
+                id: 'sar-usd-1',
+                from: currency,
+                to: usd,
+                rateScaled: 140000000,
+              ),
+              _quote(
+                id: 'eur-usd-1',
+                from: eur,
+                to: usd,
+                rateScaled: 133333333,
+              ),
+            ],
+          )(
+            input(
+              invoiceCurrency: usd,
+              lines: [
+                BuildPosSaleLineInput(
+                  productId: 'product-1',
+                  quantity: PosQuantity.whole(1),
+                  unitPrice: Money.fromMinorUnits(700, usd),
+                ),
+                BuildPosSaleLineInput(
+                  productId: 'product-2',
+                  quantity: PosQuantity.whole(1),
+                  unitPrice: Money.fromMinorUnits(800, usd),
+                ),
+              ],
             ),
-          ],
-        ),
-      );
+          );
 
       expect(result.isSuccess, isTrue);
       final sale = result.valueOrNull!;

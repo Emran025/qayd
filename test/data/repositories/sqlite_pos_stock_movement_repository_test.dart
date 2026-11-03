@@ -85,7 +85,7 @@ void main() {
       await Migration040PosFoundation().up(db);
       await Migration041PosInvoiceMetadata().up(db);
       await Migration042PosProductCategories().up(db);
-      await MigrationRegistry.applyFromTo(db, fromVersion: 42, toVersion: 47);
+      await MigrationRegistry.applyFromTo(db, fromVersion: 42, toVersion: 48);
       await db.insert('pos_warehouses', <String, Object?>{
         'id': 'warehouse-1',
         'code': 'POS-MAIN',
@@ -188,7 +188,7 @@ void main() {
         await MigrationRegistry.applyFromTo(
           legacyDb,
           fromVersion: 46,
-          toVersion: 47,
+          toVersion: 48,
         );
 
         expect(await legacyDb.query('pos_stock_lots'), isEmpty);
