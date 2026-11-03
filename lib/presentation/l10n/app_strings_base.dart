@@ -2993,6 +2993,44 @@ abstract class AppStringsBase {
   String get posCreditInvoicePaidLabel => 'المدفوع';
   String get syncIdentityUnavailable =>
       'تعذر الإرسال قبل تهيئة الهوية الرقمية.';
+  String get posReceiptTitle => 'فاتورة مبيعات';
+  String get posReceiptReprintMark => 'إعادة طباعة';
+  String get posReceiptNumberLabel => 'رقم الفاتورة';
+  String get posReceiptDateLabel => 'التاريخ';
+  String get posReceiptPartyLabel => 'حساب الطرف';
+  String get posReceiptLineDiscountLabel => 'خصم الصنف';
+  String get posReceiptLineTaxLabel => 'ضريبة الصنف';
+  String get posReceiptLineTotalLabel => 'إجمالي الصنف';
+  String get posReceiptSubtotalLabel => 'الإجمالي الفرعي';
+  String get posReceiptDiscountLabel => 'الخصم المسجل';
+  String get posReceiptTaxLabel => 'الضريبة المسجلة';
+  String get posReceiptTotalLabel => 'الإجمالي';
+  String get posReceiptPaidLabel => 'المدفوع';
+  String get posReceiptDueLabel => 'المتبقي';
+  String get posReceiptPaymentMethodLabel => 'طريقة الدفع';
+  String get posReceiptDeferredDueLabel => 'مبلغ آجل مستحق';
+  String get posReceiptCash => 'نقداً';
+  String get posReceiptBank => 'تحويل بنكي';
+  String get posReceiptCredit => 'آجل';
+  String get posReceiptOther => 'أخرى';
+  String get posReceiptPrintUnavailable => 'لا توجد طابعة حرارية مهيأة.';
+  String get posReceiptPrintRequiresPostedInvoice =>
+      'لا يمكن طباعة إلا فاتورة مبيعات مرحّلة وغير ملغاة.';
+  String get posReceiptPrintUnsupported => 'الطباعة غير مدعومة على هذا الجهاز.';
+  String get posReceiptPrintPermissionDenied =>
+      'رُفض إذن الطابعة. راجع الإعدادات ثم أعد المحاولة.';
+  String get posReceiptPrintConnectionFailed =>
+      'تعذر الاتصال بالطابعة. تحقق من الاتصال ثم أعد المحاولة.';
+  String get posReceiptPrintTimedOut =>
+      'انتهت مهلة الطباعة. تحقق من الطابعة ثم أعد المحاولة.';
+  String get posReceiptPrintDisconnected =>
+      'انقطع اتصال الطابعة أثناء الطباعة. أعد المحاولة.';
+  String get posReceiptPrintOutOfPaper =>
+      'نفد ورق الطابعة. أعد تعبئته ثم أعد الطباعة.';
+  String get posReceiptPrintUnknownFailure =>
+      'تعذرت الطباعة. لم يتغير البيع؛ أعد المحاولة أو استخدم PDF.';
+  String get posReceiptHardwareNotVerified =>
+      'لم تُختبر طابعة فعلية بعد؛ الطباعة الحرارية غير مفعلة. استخدم PDF.';
   String get posSalesReturnAction => 'إرجاع أصناف';
   String get posSalesReturnTitle => 'مرتجع مبيعات';
   String get posSalesReturnDescription =>

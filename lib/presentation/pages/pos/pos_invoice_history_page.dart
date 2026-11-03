@@ -85,8 +85,9 @@ class _HistoryViewState extends State<_HistoryView> {
           }
           if (state.status == PosInvoiceHistoryStatus.failure) {
             return Center(
-              child: Text(state.failure?.messageAr ??
-                  AppStrings.posWorkspaceLoadFailed),
+              child: Text(
+                state.failure?.messageAr ?? AppStrings.posWorkspaceLoadFailed,
+              ),
             );
           }
           if (state.invoices.isEmpty) {
@@ -224,9 +225,9 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
     );
     if (!mounted || returned == null) return;
     widget.onInvoiceChanged();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.posSalesReturnSucceeded)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(AppStrings.posSalesReturnSucceeded)));
   }
 
   Future<void> _voidInvoice(PosInvoice invoice) async {
@@ -258,17 +259,18 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
     if (result.valueOrNull == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(result.failureOrNull?.messageAr ??
-              AppStrings.posSalesVoidFailed),
+          content: Text(
+            result.failureOrNull?.messageAr ?? AppStrings.posSalesVoidFailed,
+          ),
         ),
       );
       return;
     }
     _pendingVoidInput = null;
     widget.onInvoiceChanged();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.posSalesVoidSucceeded)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(AppStrings.posSalesVoidSucceeded)));
   }
 
   BuildPosSalesReturnPostingInput _newVoidInput(PosInvoice invoice) {
@@ -287,8 +289,9 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
   }
 
   Future<void> _collectPayment(PosInvoice invoice) async {
-    final amountController =
-        TextEditingController(text: invoice.due.minorUnits.toString());
+    final amountController = TextEditingController(
+      text: invoice.due.minorUnits.toString(),
+    );
     var occurredAt = DateTime.now().toUtc();
     final invoiceLocalDate = invoice.invoiceDate.toLocal();
     final firstCollectionDate = DateTime(
@@ -369,7 +372,8 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
                       : () async {
                           final selected = await showAccountPickerSheet(
                             modalContext,
-                            listAccounts: InjectionContainer.listAccountsUseCase,
+                            listAccounts:
+                                InjectionContainer.listAccountsUseCase,
                             allowedClassifications: const ['liquidAssets'],
                           );
                           if (!modalContext.mounted || selected == null) return;
@@ -384,7 +388,13 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
                   leading: const Icon(Icons.calendar_today_outlined),
                   title: Text(AppStrings.posCollectDate),
                   subtitle: Text(
-                    occurredAt.toLocal().toString().split('.').first.split(' ').first,
+                    occurredAt
+                        .toLocal()
+                        .toString()
+                        .split('.')
+                        .first
+                        .split(' ')
+                        .first,
                   ),
                   onTap: isSubmitting
                       ? null
@@ -392,7 +402,11 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
                           final local = occurredAt.toLocal();
                           final picked = await showDatePicker(
                             context: modalContext,
-                            initialDate: DateTime(local.year, local.month, local.day),
+                            initialDate: DateTime(
+                              local.year,
+                              local.month,
+                              local.day,
+                            ),
                             firstDate: firstCollectionDate,
                             lastDate: DateTime.now(),
                           );
@@ -421,9 +435,11 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
                               paymentAccountId == null) {
                             ScaffoldMessenger.of(modalContext).showSnackBar(
                               SnackBar(
-                                content: Text(paymentAccountId == null
-                                    ? AppStrings.posCollectChooseAccount
-                                    : AppStrings.posInvoicePaymentInvalid),
+                                content: Text(
+                                  paymentAccountId == null
+                                      ? AppStrings.posCollectChooseAccount
+                                      : AppStrings.posInvoicePaymentInvalid,
+                                ),
                               ),
                             );
                             return;
@@ -435,8 +451,9 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
                               invoiceId: invoice.id,
                               amountMinorUnits: amount,
                               currency: invoice.currency,
-                              paymentAccountId:
-                                  AccountId(paymentAccountId!),
+                              paymentAccountId: AccountId(
+                                paymentAccountId!,
+                              ),
                               paymentMethod: paymentMethod,
                               occurredAt: occurredAt,
                             ),
@@ -473,9 +490,8 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
     amountController.dispose();
     if (succeeded != true || !mounted) return;
     widget.onInvoiceChanged();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.posCollectSuccess)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(AppStrings.posCollectSuccess)));
   }
 
   String _paymentMethodLabel(PosPaymentMethod method) => switch (method) {
@@ -494,9 +510,8 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
           if (payments.isEmpty)
             ListTile(title: Text(AppStrings.posCollectNoPayments)),
           ...payments.map((payment) {
-            final shortId = payment.id.length > 8
-                ? payment.id.substring(0, 8)
-                : payment.id;
+            final shortId =
+                payment.id.length > 8 ? payment.id.substring(0, 8) : payment.id;
             final occurred =
                 payment.occurredAt.toLocal().toString().split('.').first;
             return ListTile(
@@ -534,9 +549,11 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
             subtitle: Text(
               '${invoice.status.name} · ${invoice.invoiceDate.toLocal().toString().split('.').first}',
             ),
-            trailing: Icon(invoice.signature == null
-                ? Icons.warning_amber_outlined
-                : Icons.verified_outlined),
+            trailing: Icon(
+              invoice.signature == null
+                  ? Icons.warning_amber_outlined
+                  : Icons.verified_outlined,
+            ),
           ),
         ),
         const SizedBox(height: SpacingTokens.md),
@@ -607,6 +624,14 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
           icon: const Icon(Icons.picture_as_pdf_outlined),
           label: Text(AppStrings.posInvoiceExportPdf),
         ),
+        const SizedBox(height: SpacingTokens.sm),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.print_disabled_outlined),
+            title: Text(AppStrings.posReceiptPrintUnavailable),
+            subtitle: Text(AppStrings.posReceiptHardwareNotVerified),
+          ),
+        ),
       ],
     );
   }
@@ -618,8 +643,9 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
     if (bytes == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(result.failureOrNull?.messageAr ??
-              AppStrings.posInvoicePdfFailed),
+          content: Text(
+            result.failureOrNull?.messageAr ?? AppStrings.posInvoicePdfFailed,
+          ),
         ),
       );
       return;

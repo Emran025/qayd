@@ -5604,24 +5604,24 @@ class AppStringsEn extends AppStringsBase {
   String get posStockMovementAllTypes => 'All movement types';
   @override
   String posStockMovementTypeLabel(String type) => switch (type) {
-    'opening' => 'Opening stock',
-    'purchase' => 'Purchase receipt',
-    'sale' => 'Sale',
-    'salesReturn' => 'Sales return',
-    'purchaseReturn' => 'Purchase return',
-    'adjustment' => 'Stock count adjustment',
-    'damage' => 'Damaged stock',
-    'expiry' => 'Expired stock',
-    _ => 'Inventory movement',
-  };
+        'opening' => 'Opening stock',
+        'purchase' => 'Purchase receipt',
+        'sale' => 'Sale',
+        'salesReturn' => 'Sales return',
+        'purchaseReturn' => 'Purchase return',
+        'adjustment' => 'Stock count adjustment',
+        'damage' => 'Damaged stock',
+        'expiry' => 'Expired stock',
+        _ => 'Inventory movement',
+      };
   @override
   String posStockDisposalReasonLabel(String code) => switch (code) {
-    'damage' => 'Damaged',
-    'expiry' => 'Expired',
-    'authorized_loss' => 'Authorized loss',
-    'other' => 'Other',
-    _ => 'Stock disposal',
-  };
+        'damage' => 'Damaged',
+        'expiry' => 'Expired',
+        'authorized_loss' => 'Authorized loss',
+        'other' => 'Other',
+        _ => 'Stock disposal',
+      };
   @override
   String get posStockDisposalTitle => 'Dispose damaged or expired stock';
   @override
@@ -5922,4 +5922,73 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posCatalogEditValidationFailed =>
       'Correct the form before saving.';
+  @override
+  String get posReceiptTitle => 'Sales receipt';
+  @override
+  String get posReceiptReprintMark => 'REPRINT';
+  @override
+  String get posReceiptNumberLabel => 'Invoice number';
+  @override
+  String get posReceiptDateLabel => 'Date';
+  @override
+  String get posReceiptPartyLabel => 'Counterparty account';
+  @override
+  String get posReceiptLineDiscountLabel => 'Item discount';
+  @override
+  String get posReceiptLineTaxLabel => 'Item tax';
+  @override
+  String get posReceiptLineTotalLabel => 'Item total';
+  @override
+  String get posReceiptSubtotalLabel => 'Subtotal';
+  @override
+  String get posReceiptDiscountLabel => 'Recorded discount';
+  @override
+  String get posReceiptTaxLabel => 'Recorded tax';
+  @override
+  String get posReceiptTotalLabel => 'Total';
+  @override
+  String get posReceiptPaidLabel => 'Paid';
+  @override
+  String get posReceiptDueLabel => 'Remaining';
+  @override
+  String get posReceiptPaymentMethodLabel => 'Payment method';
+  @override
+  String get posReceiptDeferredDueLabel => 'Credit amount due';
+  @override
+  String get posReceiptCash => 'Cash';
+  @override
+  String get posReceiptBank => 'Bank transfer';
+  @override
+  String get posReceiptCredit => 'Credit';
+  @override
+  String get posReceiptOther => 'Other';
+  @override
+  String get posReceiptPrintUnavailable => 'No thermal printer is configured.';
+  @override
+  String get posReceiptPrintRequiresPostedInvoice =>
+      'Only a posted, non-voided sales invoice can be printed.';
+  @override
+  String get posReceiptPrintUnsupported =>
+      'Printing is not supported on this device.';
+  @override
+  String get posReceiptPrintPermissionDenied =>
+      'Printer permission was denied. Check settings and retry.';
+  @override
+  String get posReceiptPrintConnectionFailed =>
+      'Could not connect to the printer. Check the connection and retry.';
+  @override
+  String get posReceiptPrintTimedOut =>
+      'Printing timed out. Check the printer and retry.';
+  @override
+  String get posReceiptPrintDisconnected =>
+      'The printer disconnected during printing. Retry the print.';
+  @override
+  String get posReceiptPrintOutOfPaper =>
+      'The printer is out of paper. Reload it and retry.';
+  @override
+  String get posReceiptPrintUnknownFailure =>
+      'Printing failed. The sale was not changed; retry or use PDF.';
+  @override
+  String get posReceiptHardwareNotVerified =>
+      'No physical printer has been tested; thermal printing is not enabled. Use PDF.';
 }
