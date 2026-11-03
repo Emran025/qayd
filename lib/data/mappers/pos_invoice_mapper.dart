@@ -14,6 +14,13 @@ abstract final class PosInvoiceMapper {
       'currency_code': invoice.currency.code,
       'subtotal_minor': invoice.subtotal.minorUnits,
       'discount_minor': invoice.discount.minorUnits,
+      'cart_discount_minor': invoice.cartDiscount.minorUnits,
+      'cart_discount_method': invoice.cartDiscountRule?.method.name,
+      'cart_discount_value': invoice.cartDiscountRule?.value,
+      'cart_discount_reason': invoice.cartDiscountRule?.reason,
+      'cart_discount_actor_id': invoice.cartDiscountRule?.actorId,
+      'cart_discount_policy_max_bps':
+          invoice.cartDiscountRule?.policyMaximumBasisPoints,
       'tax_minor': invoice.tax.minorUnits,
       'total_minor': invoice.total.minorUnits,
       'paid_minor': invoice.paid.minorUnits,
@@ -45,6 +52,11 @@ abstract final class PosInvoiceMapper {
       'unit_cost_minor': line.unitCost.minorUnits,
       'unit_cost_currency_code': line.unitCost.currency.code,
       'discount_minor': line.discount.minorUnits,
+      'discount_rule_method': line.discountRule?.method.name,
+      'discount_rule_value': line.discountRule?.value,
+      'discount_reason': line.discountRule?.reason,
+      'discount_actor_id': line.discountRule?.actorId,
+      'discount_policy_max_bps': line.discountRule?.policyMaximumBasisPoints,
       'tax_minor': line.tax.minorUnits,
       'line_total_minor': line.lineTotal.minorUnits,
       'source_line_id': line.sourceLineId,
@@ -70,8 +82,9 @@ abstract final class PosInvoiceMapper {
       'expiry_tracking_snapshot': line.expiryTrackingSnapshot == null
           ? null
           : (line.expiryTrackingSnapshot! ? 1 : 0),
-      'product_updated_at_snapshot':
-          line.productUpdatedAtSnapshot?.toUtc().toIso8601String(),
+      'product_updated_at_snapshot': line.productUpdatedAtSnapshot
+          ?.toUtc()
+          .toIso8601String(),
     };
   }
 

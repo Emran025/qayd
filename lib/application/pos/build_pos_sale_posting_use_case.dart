@@ -3,6 +3,7 @@ import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
+import 'package:qayd/domain/entities/pos_discount_rule.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_line_conversion.dart';
 import 'package:qayd/domain/entities/pos_currency_rate.dart';
@@ -21,6 +22,8 @@ import 'package:qayd/domain/services/pos_money_math.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/entry_id.dart';
+import 'package:qayd/domain/value_objects/entry_side.dart';
+import 'package:qayd/domain/entities/ledger_entry.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_date.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
@@ -43,6 +46,7 @@ final class BuildPosSalePostingInput {
     this.cashSale = true,
     this.settlement,
     this.businessDate,
+    this.cartDiscountRule,
   });
 
   final String invoiceId;
@@ -55,6 +59,7 @@ final class BuildPosSalePostingInput {
   final DateTime createdAt;
   final AccountId? customerAccountId;
   final PosDate? businessDate;
+  final PosDiscountRule? cartDiscountRule;
 
   /// When present, this is the explicit final settlement chosen by checkout.
   /// [advanceMinorUnits] is exact minor currency units and may be zero for credit.
@@ -82,12 +87,14 @@ final class BuildPosSaleLineInput {
     required this.quantity,
     this.unitPrice,
     this.rateSnapshot,
+    this.discountRule,
   });
 
   final String productId;
   final PosQuantity quantity;
   final Money? unitPrice;
   final PosCurrencyRateQuote? rateSnapshot;
+  final PosDiscountRule? discountRule;
 }
 
 /// Builds a sale payload without writing anything to SQLite.
@@ -100,13 +107,13 @@ final class BuildPosSalePostingUseCase {
     required IdGenerator idGenerator,
     required PosCurrencyConverter currencyConverter,
     EntryGenerator entryGenerator = const EntryGenerator(),
-  })  : _productRepository = productRepository,
-        _stockRepository = stockRepository,
-        _installationRepository = installationRepository,
-        _accountRepository = accountRepository,
-        _idGenerator = idGenerator,
-        _currencyConverter = currencyConverter,
-        _entryGenerator = entryGenerator;
+  }) : _productRepository = productRepository,
+       _stockRepository = stockRepository,
+       _installationRepository = installationRepository,
+       _accountRepository = accountRepository,
+       _idGenerator = idGenerator,
+       _currencyConverter = currencyConverter,
+       _entryGenerator = entryGenerator;
 
   final PosProductRepository _productRepository;
   final PosStockMovementRepository _stockRepository;
@@ -139,11 +146,13 @@ final class BuildPosSalePostingUseCase {
       final movements = <PosStockMovement>[];
       final cogsByCurrency = <CurrencyCode, int>{};
       final today = PosDate.todayLocal();
-      final invoiceBusinessDate =
-          PosDate.fromDateTime(input.invoiceDate.toLocal());
+      final invoiceBusinessDate = PosDate.fromDateTime(
+        input.invoiceDate.toLocal(),
+      );
       final requestedBusinessDate = input.businessDate ?? invoiceBusinessDate;
-      final businessDate =
-          today.isBefore(requestedBusinessDate) ? requestedBusinessDate : today;
+      final businessDate = today.isBefore(requestedBusinessDate)
+          ? requestedBusinessDate
+          : today;
       for (var lineIndex = 0; lineIndex < input.lines.length; lineIndex++) {
         final request = input.lines[lineIndex];
         final productResult = await _productRepository.getById(
@@ -204,6 +213,10 @@ final class BuildPosSalePostingUseCase {
         if (request.unitPrice != null && request.unitPrice != unitPrice) {
           return _invalid('pos_sale_price_rate_changed');
         }
+        final lineGross = PosMoneyMath.multiply(request.quantity, unitPrice);
+        final lineDiscount =
+            request.discountRule?.amountFor(lineGross) ??
+            Money.zero(input.currency);
         final line = PosInvoiceLine.create(
           id: lineId,
           invoiceId: input.invoiceId,
@@ -213,7 +226,7 @@ final class BuildPosSalePostingUseCase {
           quantity: request.quantity,
           unitPrice: unitPrice,
           unitCost: unitCost,
-          discount: Money.zero(input.currency),
+          discount: lineDiscount,
           tax: Money.zero(input.currency),
           createdAt: input.createdAt,
           currencyConversion: PosInvoiceLineConversion(
@@ -222,6 +235,7 @@ final class BuildPosSalePostingUseCase {
             targetAmount: conversion.targetAmount,
             rateSnapshot: conversion.rateSnapshot,
           ),
+          discountRule: request.discountRule,
           expiryTrackingSnapshot: product.expiryTracking,
         );
         invoiceLines.add(line);
@@ -262,9 +276,11 @@ final class BuildPosSalePostingUseCase {
         } else {
           allocations.add((quantity: request.quantity, lotId: null));
         }
-        for (var allocationIndex = 0;
-            allocationIndex < allocations.length;
-            allocationIndex++) {
+        for (
+          var allocationIndex = 0;
+          allocationIndex < allocations.length;
+          allocationIndex++
+        ) {
           final allocation = allocations[allocationIndex];
           final allocationKey = allocationIndex.toString().padLeft(6, '0');
           movements.add(
@@ -289,6 +305,24 @@ final class BuildPosSalePostingUseCase {
         }
       }
 
+      final subtotalMinor = invoiceLines.fold<int>(
+        0,
+        (sum, line) =>
+            sum +
+            PosMoneyMath.multiply(line.quantity, line.unitPrice).minorUnits,
+      );
+      final lineDiscountMinor = invoiceLines.fold<int>(
+        0,
+        (sum, line) => sum + line.discount.minorUnits,
+      );
+      final cartDiscount =
+          input.cartDiscountRule?.amountFor(
+            Money.fromMinorUnits(
+              subtotalMinor - lineDiscountMinor,
+              input.currency,
+            ),
+          ) ??
+          Money.zero(input.currency);
       var invoice = PosInvoice.draft(
         id: input.invoiceId,
         invoiceNumber: input.invoiceNumber,
@@ -300,6 +334,8 @@ final class BuildPosSalePostingUseCase {
         invoiceDate: input.invoiceDate,
         now: input.createdAt,
         counterpartyAccountId: input.customerAccountId,
+        discount: cartDiscount,
+        cartDiscountRule: input.cartDiscountRule,
       ).post(input.createdAt);
       final payments = <PosInvoicePayment>[];
       final commercialPostings = <PosAccountingPosting>[];
@@ -324,8 +360,9 @@ final class BuildPosSalePostingUseCase {
             invoice: invoice,
             amount: invoice.total,
             counterpartyAccountId: accounts.revenue,
-            affectedAccountId:
-                input.cashSale ? accounts.cash : accounts.receivable,
+            affectedAccountId: input.cashSale
+                ? accounts.cash
+                : accounts.receivable,
             description: 'POS sale ${invoice.invoiceNumber}',
             createdAt: input.createdAt,
           ),
@@ -337,6 +374,7 @@ final class BuildPosSalePostingUseCase {
             (settlement.paymentMethod == PosPaymentMethod.credit &&
                 settlement.advanceMinorUnits != 0) ||
             (settlement.advanceMinorUnits == 0 &&
+                invoice.total.minorUnits > 0 &&
                 settlement.paymentMethod != PosPaymentMethod.credit)) {
           return _invalid('pos_sale_payment_invalid');
         }
@@ -412,6 +450,29 @@ final class BuildPosSalePostingUseCase {
             ),
           );
         }
+      }
+
+      if (invoice.discount.minorUnits > 0) {
+        if (!invoice.tax.isZero) {
+          return _invalid('pos_sale_discount_tax_unsupported');
+        }
+        final discountAccountId = accounts.discounts;
+        if (discountAccountId == null) {
+          return _invalid('pos_sale_accounts_missing');
+        }
+        commercialPostings
+          ..clear()
+          ..add(
+            _discountCommercialPosting(
+              idGenerator: _idGenerator,
+              invoice: invoice,
+              payments: payments,
+              dueAccountId: input.customerAccountId ?? accounts.receivable,
+              discountAccountId: discountAccountId,
+              revenueAccountId: accounts.revenue,
+              createdAt: input.createdAt,
+            ),
+          );
       }
 
       final cogsPostings = <PosAccountingPosting>[];
@@ -498,6 +559,9 @@ final class BuildPosSalePostingUseCase {
       PosTemplateAccountKey.inventoryAsset,
       PosTemplateAccountKey.salesRevenue,
       PosTemplateAccountKey.costOfGoodsSold,
+      if (input.cartDiscountRule != null ||
+          input.lines.any((line) => line.discountRule != null))
+        PosTemplateAccountKey.discounts,
       if (input.cashSale)
         PosTemplateAccountKey.posCash
       else
@@ -527,17 +591,19 @@ final class BuildPosSalePostingUseCase {
         inventory: resolved[PosTemplateAccountKey.inventoryAsset]!,
         revenue: resolved[PosTemplateAccountKey.salesRevenue]!,
         cogs: resolved[PosTemplateAccountKey.costOfGoodsSold]!,
+        discounts: resolved[PosTemplateAccountKey.discounts],
         cash:
             resolved[PosTemplateAccountKey.posCash] ?? AccountId('unused-cash'),
-        receivable: resolved[PosTemplateAccountKey.customerReceivables] ??
+        receivable:
+            resolved[PosTemplateAccountKey.customerReceivables] ??
             AccountId('unused-receivable'),
       ),
     );
   }
 
   FailureResult<T> _invalid<T>(String code) => FailureResult(
-        ValidationFailure(messageAr: AppStrings.posInvoiceInvalid, code: code),
-      );
+    ValidationFailure(messageAr: AppStrings.posInvoiceInvalid, code: code),
+  );
 }
 
 final class _SaleAccounts {
@@ -545,6 +611,7 @@ final class _SaleAccounts {
     required this.inventory,
     required this.revenue,
     required this.cogs,
+    required this.discounts,
     required this.cash,
     required this.receivable,
   });
@@ -552,6 +619,86 @@ final class _SaleAccounts {
   final AccountId inventory;
   final AccountId revenue;
   final AccountId cogs;
+  final AccountId? discounts;
   final AccountId cash;
   final AccountId receivable;
+}
+
+/// Builds the commercial leg for a discounted sale as one balanced voucher:
+/// cash/receivable debit the net settlement, POS discounts debit the discount,
+/// and sales revenue is credited at the gross line subtotal.
+PosAccountingPosting _discountCommercialPosting({
+  required IdGenerator idGenerator,
+  required PosInvoice invoice,
+  required List<PosInvoicePayment> payments,
+  required AccountId dueAccountId,
+  required AccountId discountAccountId,
+  required AccountId revenueAccountId,
+  required DateTime createdAt,
+}) {
+  AccountId affectedAccountId = discountAccountId;
+  for (final payment in payments) {
+    if (payment.amount.minorUnits > 0) {
+      affectedAccountId = payment.accountId;
+      break;
+    }
+  }
+  if (payments.every((payment) => payment.amount.minorUnits == 0) &&
+      invoice.due.minorUnits > 0) {
+    affectedAccountId = dueAccountId;
+  }
+  final voucher = Voucher.draft(
+    id: VoucherId(idGenerator.next()),
+    type: VoucherType.receipt,
+    date: invoice.invoiceDate,
+    amount: invoice.subtotal,
+    currency: invoice.currency,
+    counterpartyId: revenueAccountId,
+    affectedAccountId: affectedAccountId,
+    referenceNumber: invoice.id,
+    description: 'POS sale ${invoice.invoiceNumber} (gross and discount)',
+    createdAt: createdAt,
+  ).confirm(createdAt);
+  final transactionId = TransactionId(idGenerator.next());
+  final entries = <LedgerEntry>[];
+  void addDebit(AccountId accountId, int minorUnits) {
+    if (minorUnits <= 0) return;
+    entries.add(
+      LedgerEntry.create(
+        id: EntryId(idGenerator.next()),
+        transactionId: transactionId,
+        accountId: accountId,
+        side: EntrySide.debit,
+        amount: Money.fromMinorUnits(minorUnits, invoice.currency),
+        currency: invoice.currency,
+        voucherId: voucher.id,
+        date: invoice.invoiceDate,
+        createdAt: createdAt,
+      ),
+    );
+  }
+
+  for (final payment in payments) {
+    addDebit(payment.accountId, payment.amount.minorUnits);
+  }
+  addDebit(dueAccountId, invoice.due.minorUnits);
+  addDebit(discountAccountId, invoice.discount.minorUnits);
+  entries.add(
+    LedgerEntry.create(
+      id: EntryId(idGenerator.next()),
+      transactionId: transactionId,
+      accountId: revenueAccountId,
+      side: EntrySide.credit,
+      amount: invoice.subtotal,
+      currency: invoice.currency,
+      voucherId: voucher.id,
+      date: invoice.invoiceDate,
+      createdAt: createdAt,
+    ),
+  );
+  return PosAccountingPosting(
+    sourceId: invoice.id,
+    voucher: voucher,
+    entries: entries,
+  );
 }

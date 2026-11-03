@@ -46,7 +46,13 @@ void main() {
         signature_hex TEXT,
         signer_public_key_hex TEXT,
         signature_payload_hash TEXT,
-        signed_at TEXT
+        signed_at TEXT,
+        cart_discount_minor INTEGER,
+        cart_discount_method TEXT,
+        cart_discount_value INTEGER,
+        cart_discount_reason TEXT,
+        cart_discount_actor_id TEXT,
+        cart_discount_policy_max_bps INTEGER
       )
     ''');
     await db.execute('''
@@ -64,7 +70,12 @@ void main() {
         tax_minor INTEGER NOT NULL,
         line_total_minor INTEGER NOT NULL,
         source_line_id TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        discount_rule_method TEXT,
+        discount_rule_value INTEGER,
+        discount_reason TEXT,
+        discount_actor_id TEXT,
+        discount_policy_max_bps INTEGER
       )
     ''');
     await db.execute('''
@@ -158,5 +169,57 @@ void main() {
     expect(result.isSuccess, isTrue);
     expect(result.valueOrNull, hasLength(1));
     expect(result.valueOrNull!.single.type.name, 'sale');
+  });
+
+  test('restores line and cart discount rules with audit context', () async {
+    await db.update(
+      'pos_invoices',
+      {
+        'discount_minor': 95,
+        'cart_discount_minor': 45,
+        'cart_discount_method': 'percentage',
+        'cart_discount_value': 1000,
+        'cart_discount_reason': 'Cart offer',
+        'cart_discount_actor_id': 'device-1',
+        'cart_discount_policy_max_bps': 10000,
+        'total_minor': 405,
+        'due_minor': 205,
+      },
+      where: 'id = ?',
+      whereArgs: ['invoice-1'],
+    );
+    await db.update(
+      'pos_invoice_lines',
+      {
+        'discount_minor': 50,
+        'line_total_minor': 450,
+        'discount_rule_method': 'fixedAmount',
+        'discount_rule_value': 50,
+        'discount_reason': 'Line offer',
+        'discount_actor_id': 'device-1',
+        'discount_policy_max_bps': 10000,
+      },
+      where: 'id = ?',
+      whereArgs: ['line-1'],
+    );
+
+    final result = await SqlitePosInvoiceReadRepository(
+      db,
+      currencies,
+    ).getById('invoice-1');
+
+    expect(result.isSuccess, isTrue);
+    final invoice = result.valueOrNull!.invoice;
+    expect(invoice.discount.minorUnits, 95);
+    expect(invoice.cartDiscount.minorUnits, 45);
+    expect(invoice.cartDiscountRule?.method.name, 'percentage');
+    expect(invoice.cartDiscountRule?.value, 1000);
+    expect(invoice.cartDiscountRule?.reason, 'Cart offer');
+    expect(invoice.cartDiscountRule?.actorId, 'device-1');
+    expect(invoice.lines.single.discountRule?.method.name, 'fixedAmount');
+    expect(invoice.lines.single.discountRule?.value, 50);
+    expect(invoice.lines.single.discountRule?.reason, 'Line offer');
+    expect(invoice.lines.single.discountRule?.actorId, 'device-1');
+    expect(invoice.total.minorUnits, 405);
   });
 }

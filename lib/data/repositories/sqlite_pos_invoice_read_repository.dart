@@ -1,6 +1,7 @@
 import 'package:qayd/application/failure_mapping.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_currency_rate.dart';
+import 'package:qayd/domain/entities/pos_discount_rule.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_details.dart';
 import 'package:qayd/domain/entities/pos_invoice_line_conversion.dart';
@@ -121,8 +122,7 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
     );
     final lines = (await Future.wait(
       lineRows.map((line) => _lineFromRow(line, currency)),
-    ))
-        .toList(growable: false);
+    )).toList(growable: false);
     final invoice = PosInvoice.fromPersistence(
       id: invoiceId,
       invoiceNumber: _string(row, 'invoice_number'),
@@ -135,6 +135,18 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
       lines: lines,
       subtotal: _money(row, 'subtotal_minor', currency),
       discount: _money(row, 'discount_minor', currency),
+      cartDiscount: row['cart_discount_minor'] == null
+          ? null
+          : _money(row, 'cart_discount_minor', currency),
+      cartDiscountRule: _ruleFromRow(
+        row,
+        methodKey: 'cart_discount_method',
+        valueKey: 'cart_discount_value',
+        reasonKey: 'cart_discount_reason',
+        actorKey: 'cart_discount_actor_id',
+        policyKey: 'cart_discount_policy_max_bps',
+        currency: currency,
+      ),
       tax: _money(row, 'tax_minor', currency),
       total: _money(row, 'total_minor', currency),
       paid: _money(row, 'paid_minor', currency),
@@ -181,6 +193,15 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
       unitPrice: _money(row, 'unit_price_minor', currency),
       unitCost: _money(row, 'unit_cost_minor', costCurrency),
       discount: _money(row, 'discount_minor', currency),
+      discountRule: _ruleFromRow(
+        row,
+        methodKey: 'discount_rule_method',
+        valueKey: 'discount_rule_value',
+        reasonKey: 'discount_reason',
+        actorKey: 'discount_actor_id',
+        policyKey: 'discount_policy_max_bps',
+        currency: currency,
+      ),
       tax: _money(row, 'tax_minor', currency),
       lineTotal: _money(row, 'line_total_minor', currency),
       sourceLineId: row['source_line_id'] as String?,
@@ -297,8 +318,41 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
     Map<String, Object?> row,
     String key,
     CurrencyCode currency,
-  ) =>
-      Money.fromMinorUnits(_int(row, key), currency);
+  ) => Money.fromMinorUnits(_int(row, key), currency);
+
+  static PosDiscountRule? _ruleFromRow(
+    Map<String, Object?> row, {
+    required String methodKey,
+    required String valueKey,
+    required String reasonKey,
+    required String actorKey,
+    required String policyKey,
+    required CurrencyCode currency,
+  }) {
+    final method = row[methodKey] as String?;
+    if (method == null) return null;
+    final value = _int(row, valueKey);
+    final reason = _string(row, reasonKey);
+    final actorId = _string(row, actorKey);
+    final policy = row[policyKey] == null ? 10000 : _asInt(row[policyKey]);
+    return switch (PosDiscountMethod.values.firstWhere(
+      (item) => item.name == method,
+      orElse: () => throw FormatException('Unknown POS discount method'),
+    )) {
+      PosDiscountMethod.fixedAmount => PosDiscountRule.fixed(
+        amount: Money.fromMinorUnits(value, currency),
+        reason: reason,
+        actorId: actorId,
+        policyMaximumBasisPoints: policy,
+      ),
+      PosDiscountMethod.percentage => PosDiscountRule.percentage(
+        basisPoints: value,
+        reason: reason,
+        actorId: actorId,
+        policyMaximumBasisPoints: policy,
+      ),
+    };
+  }
 
   static int _int(Map<String, Object?> row, String key) {
     final value = row[key];
@@ -329,17 +383,17 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
       PosDocumentStatus.values.firstWhere((status) => status.name == value);
 
   static PosInvoiceType _typeFromStorage(String value) => switch (value) {
-        'sale' => PosInvoiceType.sale,
-        'purchase' => PosInvoiceType.purchase,
-        'sales_return' => PosInvoiceType.salesReturn,
-        'purchase_return' => PosInvoiceType.purchaseReturn,
-        _ => throw FormatException('Unknown POS document type $value'),
-      };
+    'sale' => PosInvoiceType.sale,
+    'purchase' => PosInvoiceType.purchase,
+    'sales_return' => PosInvoiceType.salesReturn,
+    'purchase_return' => PosInvoiceType.purchaseReturn,
+    _ => throw FormatException('Unknown POS document type $value'),
+  };
 
   static String _typeToStorage(PosInvoiceType type) => switch (type) {
-        PosInvoiceType.sale => 'sale',
-        PosInvoiceType.purchase => 'purchase',
-        PosInvoiceType.salesReturn => 'sales_return',
-        PosInvoiceType.purchaseReturn => 'purchase_return',
-      };
+    PosInvoiceType.sale => 'sale',
+    PosInvoiceType.purchase => 'purchase',
+    PosInvoiceType.salesReturn => 'sales_return',
+    PosInvoiceType.purchaseReturn => 'purchase_return',
+  };
 }

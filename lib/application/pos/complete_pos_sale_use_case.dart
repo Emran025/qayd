@@ -4,6 +4,7 @@ import 'package:qayd/application/pos/sign_pos_invoice_use_case.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
+import 'package:qayd/domain/entities/pos_discount_rule.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 
@@ -17,9 +18,9 @@ final class CompletePosSaleUseCase {
     required BuildPosSalePostingUseCase buildPosting,
     required PostPosSaleAtomicallyUseCase postAtomically,
     required SignPosInvoiceUseCase signInvoice,
-  })  : _buildPosting = buildPosting,
-        _postAtomically = postAtomically,
-        _signInvoice = signInvoice;
+  }) : _buildPosting = buildPosting,
+       _postAtomically = postAtomically,
+       _signInvoice = signInvoice;
 
   final BuildPosSalePostingUseCase _buildPosting;
   final PostPosSaleAtomicallyUseCase _postAtomically;
@@ -36,6 +37,7 @@ final class CompletePosSaleUseCase {
     required DateTime createdAt,
     AccountId? customerAccountId,
     PosSaleSettlementInput? settlement,
+    PosDiscountRule? cartDiscountRule,
     bool cashSale = true,
   }) async {
     final buildResult = await _buildPosting(
@@ -50,6 +52,7 @@ final class CompletePosSaleUseCase {
         createdAt: createdAt,
         customerAccountId: customerAccountId,
         settlement: settlement,
+        cartDiscountRule: cartDiscountRule,
         cashSale: cashSale,
       ),
     );

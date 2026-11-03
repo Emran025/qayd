@@ -1360,6 +1360,7 @@ abstract final class InjectionContainer {
       currencyConverter: posCurrencyConverter,
       completeSale: completePosSaleUseCase,
       idGenerator: _idGenerator,
+      discountActorId: currentDeviceId,
     );
     deactivatePosProductUseCase = DeactivatePosProductUseCase(
       posProductRepository,

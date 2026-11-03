@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_signature.dart';
+import 'package:qayd/domain/entities/pos_discount_rule.dart';
 import 'package:qayd/domain/exceptions/invalid_pos_invoice_exception.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
@@ -22,6 +23,7 @@ void main() {
     int unitCost = 250,
     int discount = 0,
     int tax = 0,
+    PosDiscountRule? discountRule,
   }) {
     return PosInvoiceLine.create(
       id: 'line-1',
@@ -34,6 +36,7 @@ void main() {
       unitCost: Money.fromMinorUnits(unitCost, currency),
       discount: Money.fromMinorUnits(discount, currency),
       tax: Money.fromMinorUnits(tax, currency),
+      discountRule: discountRule,
       createdAt: DateTime.utc(2026, 1, 1, 10),
     );
   }
@@ -41,6 +44,7 @@ void main() {
   PosInvoice invoice({
     List<PosInvoiceLine>? lines,
     Money? discount,
+    PosDiscountRule? cartDiscountRule,
     Money? tax,
   }) {
     return PosInvoice.draft(
@@ -54,6 +58,7 @@ void main() {
       invoiceDate: DateTime.utc(2026, 1, 1, 10),
       now: DateTime.utc(2026, 1, 1, 10),
       discount: discount,
+      cartDiscountRule: cartDiscountRule,
       tax: tax,
     );
   }
@@ -81,6 +86,34 @@ void main() {
       expect(result.tax.minorUnits, 27);
       expect(result.total.minorUnits, 512);
     });
+
+    test(
+      'applies cart discount after line discounts and stores both totals',
+      () {
+        final lineRule = PosDiscountRule.fixed(
+          amount: Money.fromMinorUnits(50, currency),
+          reason: 'Line offer',
+          actorId: 'device-1',
+        );
+        final cartRule = PosDiscountRule.percentage(
+          basisPoints: 1000,
+          reason: 'Cart offer',
+          actorId: 'device-1',
+        );
+        final result = invoice(
+          lines: [line(discount: 50, discountRule: lineRule)],
+          discount: Money.fromMinorUnits(45, currency),
+          cartDiscountRule: cartRule,
+        );
+
+        expect(result.subtotal.minorUnits, 500);
+        expect(result.lines.single.discount.minorUnits, 50);
+        expect(result.cartDiscount.minorUnits, 45);
+        expect(result.discount.minorUnits, 95);
+        expect(result.total.minorUnits, 405);
+        expect(result.lines.single.lineTotal.minorUnits, 450);
+      },
+    );
 
     test('posts then tracks partial and full payment', () {
       final posted = invoice().post(DateTime.utc(2026, 1, 1, 11));
@@ -113,18 +146,20 @@ void main() {
       );
     });
 
-    test('rejects posting a non-draft invoice and mismatched line ownership',
-        () {
-      final posted = invoice().post(DateTime.utc(2026, 1, 1, 11));
-      expect(
-        () => posted.post(DateTime.utc(2026, 1, 1, 12)),
-        throwsA(isA<InvalidPosInvoiceException>()),
-      );
-      expect(
-        () => invoice(lines: [line(invoiceId: 'other-invoice')]),
-        throwsA(isA<InvalidPosInvoiceException>()),
-      );
-    });
+    test(
+      'rejects posting a non-draft invoice and mismatched line ownership',
+      () {
+        final posted = invoice().post(DateTime.utc(2026, 1, 1, 11));
+        expect(
+          () => posted.post(DateTime.utc(2026, 1, 1, 12)),
+          throwsA(isA<InvalidPosInvoiceException>()),
+        );
+        expect(
+          () => invoice(lines: [line(invoiceId: 'other-invoice')]),
+          throwsA(isA<InvalidPosInvoiceException>()),
+        );
+      },
+    );
 
     test('attaches only a signature for the same invoice', () {
       final value = invoice().attachSignature(
