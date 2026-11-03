@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/data/database/migrations/migration_040_pos_foundation.dart';
 import 'package:qayd/data/database/migrations/migration_041_pos_invoice_metadata.dart';
@@ -230,7 +231,13 @@ void main() {
     final invoiceRow = (await db.query('pos_invoices')).single;
 
     expect(saved.isSuccess, isTrue);
-    expect(recovered.valueOrNull, isTrue);
+    expect(
+      recovered.valueOrNull,
+      isTrue,
+      reason: recovered.failureOrNull is ValidationFailure
+          ? (recovered.failureOrNull! as ValidationFailure).code
+          : '${recovered.failureOrNull}',
+    );
     expect(replay.isSuccess, isTrue);
     expect(invoiceRow['paid_minor'], 300);
     expect(invoiceRow['due_minor'], 700);
