@@ -71,6 +71,11 @@ class UnifiedBackupManager {
 
     try {
       for (final entry in archive) {
+        if (entry.isSymbolicLink) {
+          throw const FormatException(
+            'Symbolic links are not supported in backup archives.',
+          );
+        }
         if (!entry.isFile) continue;
         if (safeArchiveDestination(extractDir.path, entry.name) == null) {
           throw const FormatException('Unsafe path in backup archive.');

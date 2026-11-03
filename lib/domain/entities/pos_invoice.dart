@@ -390,10 +390,18 @@ final class PosInvoice {
         paid.minorUnits + due.minorUnits != total.minorUnits) {
       throw InvalidPosInvoiceException.invalidTotals();
     }
+    var computedSubtotalMinor = 0;
     for (final line in lines) {
       if (line.invoiceId != id || line.unitPrice.currency != currency) {
         throw InvalidPosInvoiceException.invalidLine();
       }
+      computedSubtotalMinor += PosMoneyMath.multiply(
+        line.quantity,
+        line.unitPrice,
+      ).minorUnits;
+    }
+    if (subtotal.minorUnits != computedSubtotalMinor) {
+      throw InvalidPosInvoiceException.invalidTotals();
     }
     final lineDiscountMinor = lines.fold<int>(
       0,
@@ -412,6 +420,13 @@ final class PosInvoice {
                     .amountFor(Money.fromMinorUnits(cartBaseMinor, currency))
                     .minorUnits !=
                 restoredCartDiscount.minorUnits)) {
+      throw InvalidPosInvoiceException.invalidTotals();
+    }
+    // Persisted invoice-level tax is aggregated with line tax; only the total
+    // formula is reconstructible without adding a new persistence column.
+    final expectedTotalMinor =
+        subtotal.minorUnits - discount.minorUnits + tax.minorUnits;
+    if (total.minorUnits != expectedTotalMinor) {
       throw InvalidPosInvoiceException.invalidTotals();
     }
     return PosInvoice._(

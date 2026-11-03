@@ -121,6 +121,11 @@ final class AttachmentsZipBuilder {
     // `attachments/../../...` entry must not escape the active image directory.
     final attachments = <ArchiveFile>[];
     for (final entry in archive) {
+      if (entry.isSymbolicLink) {
+        throw const FormatException(
+          'Symbolic links are not supported in attachment ZIP entries.',
+        );
+      }
       if (!entry.isFile) continue;
       final normalizedName = entry.name.replaceAll(r'\', '/');
       final relative = _stripPrefix(normalizedName);
@@ -148,11 +153,18 @@ final class AttachmentsZipBuilder {
       final relative = _stripPrefix(normalizedName)!;
 
       // Build the absolute path inside the active directory.
-      final destPath = safeArchiveDestination(activeDir.path, relative)!;
+      var destPath = safeArchiveDestination(activeDir.path, relative);
+      if (destPath == null) {
+        throw const FormatException('Unsafe attachment ZIP entry path.');
+      }
 
       final destFile = File(destPath);
       await destFile.parent.create(recursive: true);
-      await destFile.writeAsBytes(entry.readBytes()!, flush: true);
+      destPath = safeArchiveDestination(activeDir.path, relative);
+      if (destPath == null) {
+        throw const FormatException('Unsafe attachment ZIP entry path.');
+      }
+      await File(destPath).writeAsBytes(entry.readBytes()!, flush: true);
       count++;
     }
     return count;

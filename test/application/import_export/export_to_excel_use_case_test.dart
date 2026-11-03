@@ -3,12 +3,12 @@ import 'package:qayd/application/import_export/export_to_excel_use_case.dart';
 
 void main() {
   group('ExportToExcelUseCase', () {
-    test('Should instantiate correctly and return success', () {
+    test('constructor smoke check only; export behavior is unimplemented', () {
       const useCase = ExportToExcelUseCase();
-      expect(useCase, isNotNull);
+      expect(useCase, isA<ExportToExcelUseCase>());
 
-      // Since it's a dummy placeholder, we just assert its existence.
-      // If it had a `call` method, we'd test that here for success/failure.
+      // This does not test workbook generation. Production exports are covered
+      // separately through their actual workbook builders.
     });
   });
 }

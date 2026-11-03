@@ -188,5 +188,68 @@ void main() {
         throwsA(isA<InvalidPosInvoiceException>()),
       );
     });
+
+    group('fromPersistence totals', () {
+      PosInvoice restore({
+        required int subtotal,
+        required int tax,
+        required int total,
+      }) {
+        final base = invoice();
+        return PosInvoice.fromPersistence(
+          id: base.id,
+          invoiceNumber: base.invoiceNumber,
+          type: base.type,
+          status: PosDocumentStatus.posted,
+          counterpartyAccountId: base.counterpartyAccountId,
+          warehouseId: base.warehouseId,
+          sourceInvoiceId: base.sourceInvoiceId,
+          currency: currency,
+          lines: base.lines,
+          subtotal: Money.fromMinorUnits(subtotal, currency),
+          discount: base.discount,
+          cartDiscount: base.cartDiscount,
+          cartDiscountRule: base.cartDiscountRule,
+          tax: Money.fromMinorUnits(tax, currency),
+          total: Money.fromMinorUnits(total, currency),
+          paid: Money.zero(currency),
+          due: Money.fromMinorUnits(total, currency),
+          idempotencyKey: base.idempotencyKey,
+          invoiceDate: base.invoiceDate,
+          createdAt: base.createdAt,
+          updatedAt: base.updatedAt,
+          postedAt: base.createdAt,
+          signature: null,
+        );
+      }
+
+      test('accepts a persisted invoice whose amounts match its lines', () {
+        expect(
+          restore(subtotal: 500, tax: 0, total: 500).total.minorUnits,
+          500,
+        );
+      });
+
+      test('rejects subtotal that differs from line gross', () {
+        expect(
+          () => restore(subtotal: 501, tax: 0, total: 500),
+          throwsA(isA<InvalidPosInvoiceException>()),
+        );
+      });
+
+      test('rejects tax not reflected in the persisted total', () {
+        expect(
+          () => restore(subtotal: 500, tax: 1, total: 500),
+          throwsA(isA<InvalidPosInvoiceException>()),
+        );
+      });
+
+      test('rejects total that differs from the invoice formula', () {
+        expect(
+          () => restore(subtotal: 500, tax: 0, total: 501),
+          throwsA(isA<InvalidPosInvoiceException>()),
+        );
+      });
+    });
   });
 }

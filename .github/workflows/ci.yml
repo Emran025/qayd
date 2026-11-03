@@ -46,7 +46,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FLUTTER_VERSION: "3.47.1"
+  FLUTTER_VERSION: "3.44.5"
 
 jobs:
   quality:
@@ -132,14 +132,35 @@ jobs:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
-          python3 -m http.server 8765 --directory build/web >/tmp/qayd-web-server.log 2>&1 &
+          port="$(python3 - <<'PY'
+          import socket
+
+          with socket.socket() as sock:
+              sock.bind(('127.0.0.1', 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          python3 -m http.server "$port" --bind 127.0.0.1 --directory build/web >/tmp/qayd-web-server.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          server_ready=false
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8765/ >/dev/null 2>&1; then break; fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat /tmp/qayd-web-server.log >&2
+              exit 1
+            fi
+            if curl -fsS "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
+              server_ready=true
+              break
+            fi
             sleep 1
           done
-          "$CHROME_PATH" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=30000 --dump-dom http://127.0.0.1:8765/ >/tmp/qayd-web-smoke.html
+          if [[ "$server_ready" != true ]]; then
+            cat /tmp/qayd-web-server.log >&2
+            echo 'Web smoke server did not become ready.' >&2
+            exit 1
+          fi
+          "$CHROME_PATH" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=30000 --dump-dom "http://127.0.0.1:${port}/" >/tmp/qayd-web-smoke.html
           grep -q 'E2EE_WEB_SMOKE_PASS' /tmp/qayd-web-smoke.html
 
   android_crypto:
@@ -149,6 +170,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Enable KVM for hardware-accelerated emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm -a -w /dev/kvm
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -170,16 +198,23 @@ jobs:
           profile: pixel_7_pro
           ndk: 28.2.13676358
           cmake: 3.22.1
+          emulator-boot-timeout: 900
+          disable-linux-hw-accel: false
           disable-animations: true
           script: flutter test --no-pub integration_test/e2ee_crypto_integration_test.dart --reporter expanded
 
   ios_crypto:
     name: E2EE on iOS simulator
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Select Xcode 16.4 for iOS 13 compatibility
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.4'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -191,6 +226,33 @@ jobs:
 
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
+
+      - name: Build iOS app and verify the iOS 13 deployment target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          project = Path('ios/Runner.xcodeproj/project.pbxproj').read_text()
+          targets = re.findall(r'IPHONEOS_DEPLOYMENT_TARGET\s*=\s*([0-9.]+);', project)
+          if not targets or any(float(target) > 13.0 for target in targets):
+              raise SystemExit(f'Runner project no longer supports iOS 13: {targets}')
+          PY
+          flutter build ios --debug --no-codesign
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          info = Path('build/ios/iphoneos/Runner.app/Info.plist')
+          if not info.is_file():
+              raise SystemExit(f'Missing built app Info.plist: {info}')
+          minimum = plistlib.loads(info.read_bytes()).get('MinimumOSVersion')
+          if str(minimum) != '13.0':
+              raise SystemExit(f'Built iOS MinimumOSVersion is {minimum!r}, expected 13.0')
+          print(f'Built app MinimumOSVersion={minimum}')
+          PY
 
       - name: Boot an available iPhone simulator
         id: simulator

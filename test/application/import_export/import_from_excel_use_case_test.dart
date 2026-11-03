@@ -3,12 +3,12 @@ import 'package:qayd/application/import_export/import_from_excel_use_case.dart';
 
 void main() {
   group('ImportFromExcelUseCase', () {
-    test('Should instantiate correctly and return success', () {
+    test('constructor smoke check only; import behavior is unimplemented', () {
       const useCase = ImportFromExcelUseCase();
-      expect(useCase, isNotNull);
+      expect(useCase, isA<ImportFromExcelUseCase>());
 
-      // Since it's a dummy placeholder, we just assert its existence.
-      // If it had a `call` method, we'd test that here for success/failure.
+      // This does not test workbook parsing or import behavior. No production
+      // code path currently invokes this placeholder.
     });
   });
 }

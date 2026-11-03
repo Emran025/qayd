@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:path/path.dart' as p;
 
 /// Resolves a ZIP entry name beneath [destinationDirectory], or returns `null`
@@ -26,5 +28,20 @@ String? safeArchiveDestination(String destinationDirectory, String entryName) {
   final root = p.normalize(destinationDirectory);
   final destination = p.normalize(p.join(root, relativeName));
   if (destination == root || !p.isWithin(root, destination)) return null;
+
+  // Lexical containment is not enough when a pre-existing directory or file
+  // inside the destination is a symbolic link to a path outside the root.
+  var currentPath = root;
+  for (final segment in p.split(relativeName)) {
+    currentPath = p.join(currentPath, segment);
+    try {
+      if (FileSystemEntity.typeSync(currentPath, followLinks: false) ==
+          FileSystemEntityType.link) {
+        return null;
+      }
+    } on FileSystemException {
+      return null;
+    }
+  }
   return destination;
 }

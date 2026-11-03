@@ -89,6 +89,21 @@ void main() {
       );
       expect(File(p.join(tempRoot.path, 'escaped.txt')).existsSync(), isFalse);
     });
+
+    test('rejects symbolic links in unified backup archives', () async {
+      final link = ArchiveFile.bytes(
+        UnifiedBackupManager.identityEntryName,
+        utf8.encode('not an identity file'),
+      )..symbolicLink = '../outside.txt';
+      final archive = Archive()..addFile(link);
+      final zipPath = p.join(tempRoot.path, 'symbolic_link.qback');
+      await File(zipPath).writeAsBytes(ZipEncoder().encodeBytes(archive));
+
+      await expectLater(
+        manager.unpack(zipPath),
+        throwsA(isA<FormatException>()),
+      );
+    });
   });
 
   group('AttachmentsZipBuilder compatibility', () {
@@ -220,6 +235,67 @@ void main() {
         );
       },
     );
+
+    test('rejects symbolic links in attachment archives', () async {
+      final activeDir = Directory(p.join(tempRoot.path, 'active'));
+      final link = ArchiveFile.bytes(
+        'attachments/link.txt',
+        utf8.encode('not a regular attachment'),
+      )..symbolicLink = '../../outside.txt';
+      final archive = Archive()..addFile(link);
+      final zipPath = p.join(tempRoot.path, 'symbolic_link_attachments.zip');
+      await File(zipPath).writeAsBytes(ZipEncoder().encodeBytes(archive));
+      final builder = AttachmentsZipBuilder(
+        imagesDirectoryProvider: () async => activeDir,
+        applicationDocumentsDirectoryProvider: () async => tempRoot,
+      );
+
+      await expectLater(
+        builder.restoreFromZip(zipPath),
+        throwsA(isA<FormatException>()),
+      );
+      expect(activeDir.existsSync(), isFalse);
+    });
+
+    test(
+      'rejects extraction through an existing destination symlink',
+      () async {
+        final activeDir = Directory(p.join(tempRoot.path, 'active'));
+        final outsideDir = Directory(p.join(tempRoot.path, 'outside'));
+        await activeDir.create(recursive: true);
+        await outsideDir.create(recursive: true);
+        await Link(p.join(activeDir.path, 'nested')).create(outsideDir.path);
+
+        final archive = Archive()
+          ..addFile(
+            ArchiveFile.bytes(
+              'attachments/nested/escaped.txt',
+              utf8.encode('escape'),
+            ),
+          );
+        final zipPath = p.join(tempRoot.path, 'symlink_escape.zip');
+        await File(zipPath).writeAsBytes(ZipEncoder().encodeBytes(archive));
+        final builder = AttachmentsZipBuilder(
+          imagesDirectoryProvider: () async => activeDir,
+          applicationDocumentsDirectoryProvider: () async => tempRoot,
+        );
+
+        Object? restoreError;
+        try {
+          await builder.restoreFromZip(zipPath);
+        } catch (error) {
+          restoreError = error;
+        }
+        expect(restoreError, isA<FormatException>());
+        expect(
+          File(p.join(outsideDir.path, 'escaped.txt')).existsSync(),
+          isFalse,
+        );
+      },
+      skip: Platform.isWindows
+          ? 'Windows symlink creation requires privileges'
+          : false,
+    );
   });
 
   test(
@@ -232,8 +308,19 @@ void main() {
 
       expect(safeArchiveDestination(root.path, '../escape.txt'), isNull);
       expect(safeArchiveDestination(root.path, r'..\escape.txt'), isNull);
+      expect(
+        safeArchiveDestination(root.path, 'nested/../../escape.txt'),
+        isNull,
+      );
       expect(safeArchiveDestination(root.path, 'C:/escape.txt'), isNull);
+      expect(safeArchiveDestination(root.path, 'C:relative.txt'), isNull);
       expect(safeArchiveDestination(root.path, '/escape.txt'), isNull);
+      expect(
+        safeArchiveDestination(root.path, r'\\server\share\file.txt'),
+        isNull,
+      );
+      expect(safeArchiveDestination(root.path, 'bad\u0000name'), isNull);
+      expect(safeArchiveDestination(root.path, '.'), isNull);
       expect(
         safeArchiveDestination(root.path, 'nested/receipt.png'),
         p.join(root.path, 'nested', 'receipt.png'),

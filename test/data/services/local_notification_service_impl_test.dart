@@ -101,6 +101,28 @@ void main() {
   );
 
   test(
+    'forwards tapped notification payload through the response stream',
+    () async {
+      await service.initialize();
+      final tapped = expectLater(
+        service.onNotificationTap,
+        emits('voucher:123'),
+      );
+
+      gateway.onResponse!(
+        const NotificationResponse(
+          notificationResponseType:
+              NotificationResponseType.selectedNotification,
+          id: 123,
+          payload: 'voucher:123',
+        ),
+      );
+
+      await tapped;
+    },
+  );
+
+  test(
     'important notification retains its high-priority financial channel',
     () async {
       await service.showImportantNotification(
@@ -123,6 +145,11 @@ void main() {
       expect(android.playSound, isFalse);
       expect(android.enableVibration, isFalse);
       expect(call.details!.iOS!.presentAlert, isTrue);
+      expect(call.details!.iOS!.presentSound, isFalse);
+      expect(
+        call.details!.iOS!.interruptionLevel,
+        InterruptionLevel.timeSensitive,
+      );
     },
   );
 
@@ -148,6 +175,36 @@ void main() {
       expect(call.details!.android!.channelId, 'qayd_default_channel');
       expect(call.details!.android!.playSound, isFalse);
       expect(call.details!.android!.enableVibration, isFalse);
+    },
+  );
+
+  test(
+    'important notification respects disabled peer-activity preference',
+    () async {
+      await preferences.setBool('notif_peer_activity', false);
+
+      await service.showImportantNotification(
+        title: 'Suppressed claim',
+        body: 'Peer activity is disabled.',
+      );
+
+      expect(gateway.calls, isEmpty);
+    },
+  );
+
+  test(
+    'sound and vibration default to enabled when no preference is stored',
+    () async {
+      await preferences.remove('notif_sound_enabled');
+      await preferences.remove('notif_vibration_enabled');
+
+      await service.showLocalNotification(
+        title: 'Defaults',
+        body: 'Preferences absent.',
+      );
+
+      expect(gateway.calls.single.details!.android!.playSound, isTrue);
+      expect(gateway.calls.single.details!.android!.enableVibration, isTrue);
     },
   );
 }

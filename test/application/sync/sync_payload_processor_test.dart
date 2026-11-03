@@ -116,6 +116,9 @@ void main() {
     when(() => mockFilterRepo.isSelfActivityEnabled).thenReturn(true);
 
     registerFallbackValue(AccountId(localSenderAccountUuid));
+    registerFallbackValue(
+      PartyDetails(accountId: AccountId(localSenderAccountUuid)),
+    );
 
     processor = SyncPayloadProcessor(
       identityRepository: mockIdentityRepo,
@@ -140,6 +143,147 @@ void main() {
 
     registerFallbackValue(
       CryptoKeyPair(publicKey: Uint8List(32), privateKey: Uint8List(32)),
+    );
+  });
+
+  group('SyncPayloadProcessor - sender key authorization', () {
+    test(
+      'does not apply or acknowledge a phone match with an unapproved key',
+      () async {
+        final accountId = AccountId(localSenderAccountUuid);
+        final authorizedKey = List.filled(64, 'a').join();
+        final unapprovedKey = List.filled(64, 'b').join();
+        const nodeId = 'node-unapproved-sender-key';
+        const senderPhone = '0500000000';
+        final node = SyncNode(
+          id: nodeId,
+          senderId: 101,
+          eventType: SyncEventType.p2pHandshake,
+          encryptedPayload: 'valid-envelope-signed-by-unapproved-key',
+          syncState: 'pending',
+          senderPublicKey: unapprovedKey,
+          senderPhone: senderPhone,
+        );
+
+        when(
+          () => mockAccountRepo.findAccountByPublicKey(unapprovedKey),
+        ).thenAnswer((_) async => const Success<AccountId?>(null));
+        when(
+          () => mockAccountRepo.findAccountByPhone(senderPhone),
+        ).thenAnswer((_) async => Success(accountId));
+        when(() => mockAccountRepo.getPartyDetails(accountId)).thenAnswer(
+          (_) async => Success(
+            PartyDetails(
+              accountId: accountId,
+              phoneNumber: senderPhone,
+              currentPublicKeyHex: authorizedKey,
+            ),
+          ),
+        );
+        when(
+          () => mockE2ee.decryptPayload(
+            encryptedPayload: node.encryptedPayload,
+            receiverKeyPair: any(named: 'receiverKeyPair'),
+            senderPublicKeyHex: unapprovedKey,
+            nodeId: nodeId,
+            eventType: SyncEventType.p2pHandshake.name,
+          ),
+        ).thenAnswer((_) async => <String, dynamic>{'accepted': true});
+        when(
+          () => mockE2ee.decryptPayload(
+            encryptedPayload: node.encryptedPayload,
+            receiverKeyPair: any(named: 'receiverKeyPair'),
+            senderPublicKeyHex: authorizedKey,
+            nodeId: nodeId,
+            eventType: SyncEventType.p2pHandshake.name,
+          ),
+        ).thenThrow(
+          StateError('Envelope was not signed by the authorized key'),
+        );
+
+        final applied = await processor.processIncomingNodes([node]);
+
+        expect(applied, isEmpty);
+        verifyNever(
+          () => mockE2ee.decryptPayload(
+            encryptedPayload: node.encryptedPayload,
+            receiverKeyPair: any(named: 'receiverKeyPair'),
+            senderPublicKeyHex: unapprovedKey,
+            nodeId: nodeId,
+            eventType: SyncEventType.p2pHandshake.name,
+          ),
+        );
+        verify(
+          () => mockE2ee.decryptPayload(
+            encryptedPayload: node.encryptedPayload,
+            receiverKeyPair: any(named: 'receiverKeyPair'),
+            senderPublicKeyHex: authorizedKey,
+            nodeId: nodeId,
+            eventType: SyncEventType.p2pHandshake.name,
+          ),
+        ).called(1);
+      },
+    );
+
+    test(
+      'accepts a recorded historical paired key without rewriting party keys',
+      () async {
+        final accountId = AccountId(localSenderAccountUuid);
+        final currentKey = List.filled(64, 'a').join();
+        final historicalKey = List.filled(64, 'b').join();
+        const nodeId = 'node-historical-authorized-sender-key';
+        const senderPhone = '0500000000';
+        final node = SyncNode(
+          id: nodeId,
+          senderId: 101,
+          eventType: SyncEventType.p2pHandshake,
+          encryptedPayload: 'valid-envelope-signed-by-historical-key',
+          syncState: 'pending',
+          senderPublicKey: historicalKey,
+          senderPhone: senderPhone,
+        );
+        final party = PartyDetails(
+          accountId: accountId,
+          phoneNumber: senderPhone,
+          currentPublicKeyHex: currentKey,
+          publicKeyHistoryHex: [historicalKey],
+        );
+
+        when(
+          () => mockAccountRepo.findAccountByPublicKey(historicalKey),
+        ).thenAnswer((_) async => const Success<AccountId?>(null));
+        when(
+          () => mockAccountRepo.findAccountByPhone(senderPhone),
+        ).thenAnswer((_) async => Success(accountId));
+        when(
+          () => mockAccountRepo.getPartyDetails(accountId),
+        ).thenAnswer((_) async => Success(party));
+        when(
+          () => mockE2ee.decryptPayload(
+            encryptedPayload: node.encryptedPayload,
+            receiverKeyPair: any(named: 'receiverKeyPair'),
+            senderPublicKeyHex: historicalKey,
+            nodeId: nodeId,
+            eventType: SyncEventType.p2pHandshake.name,
+          ),
+        ).thenAnswer((_) async => <String, dynamic>{'verified': true});
+
+        final applied = await processor.processIncomingNodes([node]);
+
+        expect(applied, contains(nodeId));
+        expect(party.currentPublicKeyHex, currentKey);
+        expect(party.publicKeyHistoryHex, [historicalKey]);
+        verify(
+          () => mockE2ee.decryptPayload(
+            encryptedPayload: node.encryptedPayload,
+            receiverKeyPair: any(named: 'receiverKeyPair'),
+            senderPublicKeyHex: historicalKey,
+            nodeId: nodeId,
+            eventType: SyncEventType.p2pHandshake.name,
+          ),
+        ).called(1);
+        verifyNever(() => mockAccountRepo.savePartyDetails(any()));
+      },
     );
   });
 

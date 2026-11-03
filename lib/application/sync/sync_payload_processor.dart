@@ -48,17 +48,24 @@ List<String> _orderedDecryptPublicKeys({
   required SyncNode node,
   required PartyDetails party,
 }) {
+  final authorizedKeys = <String>{
+    for (final key in party.allAuthorizedKeys)
+      if (key.trim().isNotEmpty) key.trim().toLowerCase(),
+  };
   final out = <String>[];
 
   void add(String? hex) {
     final v = (hex ?? '').trim();
     if (v.isEmpty) return;
     final normalized = v.toLowerCase();
+    if (!authorizedKeys.contains(normalized)) return;
     if (!out.contains(normalized)) {
       out.add(normalized);
     }
   }
 
+  // Sender metadata is not an authorization source. On phone/WhatsApp
+  // fallback, only keys already attached to this party may authenticate data.
   add(node.senderPublicKey);
   for (final k in party.allAuthorizedKeys) {
     add(k);
