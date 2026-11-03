@@ -8,7 +8,6 @@ import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment_collection_posting.dart';
-import 'package:qayd/domain/entities/voucher.dart';
 import 'package:qayd/domain/repositories/pos_invoice_payment_collection_repository.dart';
 import 'package:qayd/domain/value_objects/account_nature.dart';
 import 'package:qayd/domain/value_objects/entry_side.dart';
