@@ -56,8 +56,14 @@ void main() {
       expect(result.isSuccess, isTrue);
       final activation = result.valueOrNull!;
       expect(activation.alreadyInstalled, isFalse);
-      expect(activation.accountIdsByKey, hasLength(11));
-      expect((await db.query('accounts')), hasLength(11));
+      expect(activation.accountIdsByKey, hasLength(12));
+      expect(
+        activation.accountIdsByKey[
+          PosTemplateAccountKey.inventoryLossExpense.value
+        ],
+        isNotNull,
+      );
+      expect((await db.query('accounts')), hasLength(12));
       expect((await db.query('pos_warehouses')), hasLength(1));
       expect((await db.query('pos_template_installs')), hasLength(1));
       expect((await db.query('pos_settings')), hasLength(1));
@@ -185,11 +191,11 @@ void main() {
       );
 
       expect(upgraded.isSuccess, isTrue);
-      expect(upgraded.valueOrNull!.accountIdsByKey, hasLength(11));
-      expect((await db.query('accounts')), hasLength(11));
+      expect(upgraded.valueOrNull!.accountIdsByKey, hasLength(12));
+      expect((await db.query('accounts')), hasLength(12));
       for (final row in await db.query('accounts')) {
         final metadata = jsonDecode(row['metadata']! as String) as Map;
-        expect(metadata['pos_template_version'], 2);
+        expect(metadata['pos_template_version'], PosTemplateDefinition.currentVersion);
       }
     });
 
@@ -209,7 +215,7 @@ void main() {
       expect(first.isSuccess, isTrue);
       expect(second.isSuccess, isTrue);
       expect(second.valueOrNull!.alreadyInstalled, isTrue);
-      expect((await db.query('accounts')), hasLength(11));
+      expect((await db.query('accounts')), hasLength(12));
       expect((await db.query('pos_warehouses')), hasLength(1));
       expect((await db.query('pos_template_installs')), hasLength(1));
     });
@@ -225,7 +231,7 @@ void main() {
 
       expect(disabled.isSuccess, isTrue);
       expect((await repository.isEnabled()).valueOrNull, isFalse);
-      expect((await db.query('accounts')), hasLength(11));
+      expect((await db.query('accounts')), hasLength(12));
       expect((await db.query('pos_template_installs')), hasLength(1));
       expect((await db.query('pos_warehouses')), hasLength(1));
     });

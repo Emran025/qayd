@@ -133,6 +133,7 @@ PosStockMovement _receipt(
   required String id,
   required int quantity,
   required int unitCost,
+  String? lotId,
 }) =>
     PosStockMovement.create(
       id: id,
@@ -144,6 +145,7 @@ PosStockMovement _receipt(
       unitCost: Money.fromMinorUnits(unitCost, currency),
       sourceType: 'test',
       sourceId: id,
+      lotId: lotId,
       occurredAt: DateTime.utc(2026, 1, 1),
       idempotencyKey: 'key-$id',
       createdAt: DateTime.utc(2026, 1, 1),
@@ -297,8 +299,20 @@ void main() {
       currency: currency,
       quantityScale: 0,
     )
-        .apply(_receipt(currency, id: 'lower-cost-stock', quantity: 2, unitCost: 100))
-        .apply(_receipt(currency, id: 'higher-cost-stock', quantity: 2, unitCost: 200));
+        .apply(_receipt(
+          currency,
+          id: 'lower-cost-stock',
+          quantity: 2,
+          unitCost: 100,
+          lotId: 'lot-selected',
+        ))
+        .apply(_receipt(
+          currency,
+          id: 'higher-cost-stock',
+          quantity: 2,
+          unitCost: 200,
+          lotId: 'lot-high-cost',
+        ));
     when(() => stock.getBalance(
           productId: 'product-1',
           warehouseId: 'warehouse-1',
