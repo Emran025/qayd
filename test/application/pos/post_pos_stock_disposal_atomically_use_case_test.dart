@@ -317,15 +317,17 @@ void main() {
           productId: 'product-1',
           warehouseId: 'warehouse-1',
         )).thenAnswer((_) async => Success(weightedBalance));
-    final selectedLot = PosStockLot.create(
+    final selectedLot = PosStockLot.restore(
       id: 'lot-selected',
       productId: 'product-1',
       warehouseId: 'warehouse-1',
       supplierLotNumber: 'LOT-100',
       expiryDate: PosDate.fromParts(2026, 12, 31),
       receivedQuantity: PosQuantity.whole(2),
+      remainingQuantity: PosQuantity.whole(2),
       unitCost: Money.fromMinorUnits(100, currency),
       createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
     );
     when(() => stock.getDisposalLots(
           productId: 'product-1',
