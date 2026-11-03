@@ -70,7 +70,7 @@ final class SqlitePosInvoicePaymentCollectionRepository
           _fail('pos_collection_invoice_missing');
         }
         final invoiceRow = invoiceRows.single;
-        _validateFreshPosting(txn, invoiceRow, posting);
+        await _validateFreshPosting(txn, invoiceRow, posting);
 
         final updated = await txn.update(
           'pos_invoices',
