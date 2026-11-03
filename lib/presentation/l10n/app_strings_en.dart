@@ -5358,6 +5358,26 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posInvoiceDueLabel => 'Remaining due';
   @override
+  String get posCollectAction => 'Record collection';
+  @override
+  String get posCollectAmount => 'Collected amount (minor currency units)';
+  @override
+  String get posCollectDate => 'Collection date';
+  @override
+  String get posCollectReceivingAccount => 'Receiving account (cash/bank)';
+  @override
+  String get posCollectPaymentMethod => 'Collection method';
+  @override
+  String get posCollectChooseAccount => 'Choose a cash or bank account.';
+  @override
+  String get posCollectHistoryTitle => 'Collection history';
+  @override
+  String get posCollectNoPayments => 'No collections recorded.';
+  @override
+  String get posCollectSubmit => 'Post collection atomically';
+  @override
+  String get posCollectSuccess => 'Collection and accounting entry recorded.';
+  @override
   String get posInvoiceExportPdf => 'Export and share PDF';
   @override
   String get posInvoicePdfFailed => 'Could not create the invoice PDF.';

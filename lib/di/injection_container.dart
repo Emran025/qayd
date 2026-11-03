@@ -46,6 +46,9 @@ import 'package:qayd/application/pos/complete_pos_sale_use_case.dart';
 import 'package:qayd/application/pos/build_pos_sales_return_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_sales_return_use_case.dart';
 import 'package:qayd/application/pos/post_pos_sales_return_atomically_use_case.dart';
+import 'package:qayd/application/pos/build_pos_invoice_payment_collection_use_case.dart';
+import 'package:qayd/application/pos/complete_pos_invoice_payment_collection_use_case.dart';
+import 'package:qayd/application/pos/post_pos_invoice_payment_collection_atomically_use_case.dart';
 import 'package:qayd/application/pos/build_pos_purchase_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_purchase_use_case.dart';
 import 'package:qayd/application/pos/list_pos_invoices_use_case.dart';
@@ -56,6 +59,8 @@ import 'package:qayd/application/pos/sign_pos_invoice_use_case.dart';
 import 'package:qayd/application/pos/build_pos_invoice_pdf_use_case.dart';
 import 'package:qayd/domain/services/pos_invoice_signing_service.dart';
 import 'package:qayd/domain/repositories/pos_invoice_read_repository.dart';
+import 'package:qayd/domain/repositories/pos_invoice_payment_collection_repository.dart';
+import 'package:qayd/domain/repositories/pos_payment_collection_request_identity_repository.dart';
 import 'package:qayd/data/pdf/cairo_pos_invoice_pdf_generator.dart';
 import 'package:qayd/data/repositories/sqlite_pos_invoice_read_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_currency_rate_repository.dart';
@@ -146,6 +151,8 @@ import 'package:qayd/data/repositories/sqlite_pos_sales_return_posting_repositor
 import 'package:qayd/data/repositories/sqlite_pos_purchase_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_purchase_request_identity_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sales_return_request_identity_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_invoice_payment_collection_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_payment_collection_request_identity_repository.dart';
 import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
 import 'package:qayd/data/security/app_pin_storage.dart';
 import 'package:qayd/data/security/hardware_id_service.dart';
@@ -419,11 +426,15 @@ abstract final class InjectionContainer {
   static late PosAccountingPostingRepository posAccountingPostingRepository;
   static late PosSalePostingRepository posSalePostingRepository;
   static late PosSalesReturnPostingRepository posSalesReturnPostingRepository;
+  static late PosInvoicePaymentCollectionRepository
+      posInvoicePaymentCollectionRepository;
   static late PosPurchasePostingRepository posPurchasePostingRepository;
   static late PosPurchaseRequestIdentityRepository
       posPurchaseRequestIdentityRepository;
   static late PosSalesReturnRequestIdentityRepository
       posSalesReturnRequestIdentityRepository;
+  static late PosPaymentCollectionRequestIdentityRepository
+      posPaymentCollectionRequestIdentityRepository;
   static late PosInvoiceReadRepository posInvoiceReadRepository;
   static late ListPosInvoicesUseCase listPosInvoicesUseCase;
   static late GetPosInvoiceDetailsUseCase getPosInvoiceDetailsUseCase;
@@ -433,6 +444,12 @@ abstract final class InjectionContainer {
   static late BuildPosSalesReturnPostingUseCase
       buildPosSalesReturnPostingUseCase;
   static late CompletePosSalesReturnUseCase completePosSalesReturnUseCase;
+  static late BuildPosInvoicePaymentCollectionUseCase
+      buildPosInvoicePaymentCollectionUseCase;
+  static late PostPosInvoicePaymentCollectionAtomicallyUseCase
+      postPosInvoicePaymentCollectionAtomicallyUseCase;
+  static late CompletePosInvoicePaymentCollectionUseCase
+      completePosInvoicePaymentCollectionUseCase;
   static late BuildPosPurchasePostingUseCase buildPosPurchasePostingUseCase;
   static late CompletePosPurchaseUseCase completePosPurchaseUseCase;
   static late GetPosStockBalanceUseCase getPosStockBalanceUseCase;
@@ -1177,6 +1194,11 @@ abstract final class InjectionContainer {
       sqliteVoucherRepository,
     );
     posSalesReturnPostingRepository = sqlitePosSalesReturnPostingRepository;
+    posInvoicePaymentCollectionRepository =
+        SqlitePosInvoicePaymentCollectionRepository(
+      transactionRunner,
+      sqliteVoucherRepository,
+    );
     final sqlitePosPurchasePostingRepository =
         SqlitePosPurchasePostingRepository(
       transactionRunner,
@@ -1188,6 +1210,8 @@ abstract final class InjectionContainer {
         SqlitePosPurchaseRequestIdentityRepository(database);
     posSalesReturnRequestIdentityRepository =
         SqlitePosSalesReturnRequestIdentityRepository(database);
+    posPaymentCollectionRequestIdentityRepository =
+        SqlitePosPaymentCollectionRequestIdentityRepository(database);
     postPosOpeningBalanceAtomicallyUseCase =
         PostPosOpeningBalanceAtomicallyUseCase(
       writeGuard: governanceWriteGuard,
@@ -1233,6 +1257,25 @@ abstract final class InjectionContainer {
       signInvoice: signPosInvoiceUseCase,
       invoiceRepository: posInvoiceReadRepository,
       requestIdentityRepository: posSalesReturnRequestIdentityRepository,
+    );
+    buildPosInvoicePaymentCollectionUseCase =
+        BuildPosInvoicePaymentCollectionUseCase(
+      invoiceRepository: posInvoiceReadRepository,
+      accountRepository: accountRepository,
+    );
+    postPosInvoicePaymentCollectionAtomicallyUseCase =
+        PostPosInvoicePaymentCollectionAtomicallyUseCase(
+      writeGuard: governanceWriteGuard,
+      fiscalPeriodRepository: fiscalPeriodRepository,
+      postingRepository: posInvoicePaymentCollectionRepository,
+    );
+    completePosInvoicePaymentCollectionUseCase =
+        CompletePosInvoicePaymentCollectionUseCase(
+      buildPosting: buildPosInvoicePaymentCollectionUseCase,
+      postAtomically: postPosInvoicePaymentCollectionAtomicallyUseCase,
+      invoiceRepository: posInvoiceReadRepository,
+      identityRepository: posPaymentCollectionRequestIdentityRepository,
+      idGenerator: _idGenerator,
     );
     buildPosPurchasePostingUseCase = BuildPosPurchasePostingUseCase(
       productRepository: posProductRepository,

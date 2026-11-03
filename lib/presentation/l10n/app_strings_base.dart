@@ -2939,6 +2939,16 @@ abstract class AppStringsBase {
   String get posInvoiceDetailTitle => 'تفاصيل الفاتورة';
   String get posInvoiceNotFound => 'تعذر العثور على الفاتورة.';
   String get posInvoiceDueLabel => 'المتبقي';
+  String get posCollectAction => 'تسجيل تحصيل';
+  String get posCollectAmount => 'المبلغ المحصّل (بوحدات العملة الصغرى)';
+  String get posCollectDate => 'تاريخ التحصيل';
+  String get posCollectReceivingAccount => 'حساب الاستلام (نقد/بنك)';
+  String get posCollectPaymentMethod => 'طريقة التحصيل';
+  String get posCollectChooseAccount => 'اختر حساباً نقدياً أو بنكياً.';
+  String get posCollectHistoryTitle => 'سجل التحصيل';
+  String get posCollectNoPayments => 'لا توجد تحصيلات مسجلة.';
+  String get posCollectSubmit => 'ترحيل التحصيل ذرياً';
+  String get posCollectSuccess => 'تم تسجيل التحصيل والقيد المحاسبي.';
   String get posInvoiceExportPdf => 'تصدير ومشاركة PDF';
   String get posInvoicePdfFailed => 'تعذر إنشاء PDF الفاتورة.';
   String get posSalesReturnAction => 'إرجاع أصناف';
