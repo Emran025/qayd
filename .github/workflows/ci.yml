@@ -216,7 +216,7 @@ jobs:
   ios_crypto:
     name: E2EE on iOS simulator
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -275,4 +275,4 @@ jobs:
           echo "simulator-id=$simulator_id" >> "$GITHUB_OUTPUT"
 
       - name: Run libsodium integration test on iOS
-        run: flutter test --no-pub integration_test/e2ee_crypto_integration_test.dart --reporter expanded -d ${{ steps.simulator.outputs.simulator-id }}
+        run: flutter test --no-dds --verbose --no-pub integration_test/e2ee_crypto_integration_test.dart --reporter expanded -d ${{ steps.simulator.outputs.simulator-id }}
