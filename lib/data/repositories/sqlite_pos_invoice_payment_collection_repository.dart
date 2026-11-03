@@ -42,9 +42,13 @@ final class SqlitePosInvoicePaymentCollectionRepository
       });
     } on _RepositoryFailure catch (error) {
       return FailureResult(error.failure);
-    } on DatabaseException {
+    } on DatabaseException catch (error, stackTrace) {
+      // ignore: avoid_print
+      print('POS collection replay database error: $error\n$stackTrace');
       return _databaseFailure<bool>();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      // ignore: avoid_print
+      print('POS collection replay error: $error\n$stackTrace');
       return _databaseFailure<bool>();
     }
   }
