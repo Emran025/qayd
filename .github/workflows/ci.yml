@@ -171,12 +171,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Enable KVM for hardware-accelerated emulator
+      - name: Detect KVM; fall back to software acceleration if unavailable
+        id: kvm
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          test -r /dev/kvm -a -w /dev/kvm
+          if [ -c /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules || true
+            sudo udevadm trigger --name-match=kvm || true
+            sudo chmod 666 /dev/kvm || true
+          fi
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            echo "disable_linux_hw_accel=false" >> "$GITHUB_OUTPUT"
+            echo "KVM available; using hardware acceleration."
+          else
+            echo "disable_linux_hw_accel=true" >> "$GITHUB_OUTPUT"
+            echo "KVM unavailable; using software acceleration."
+          fi
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -199,7 +209,7 @@ jobs:
           ndk: 28.2.13676358
           cmake: 3.22.1
           emulator-boot-timeout: 900
-          disable-linux-hw-accel: false
+          disable-linux-hw-accel: ${{ steps.kvm.outputs.disable_linux_hw_accel }}
           disable-animations: true
           script: flutter test --no-pub integration_test/e2ee_crypto_integration_test.dart --reporter expanded
 
