@@ -93,6 +93,15 @@ def apply_source_backport(source: str) -> str:
 
     source = replace_once(
         source,
+        """  DeviceLogReader getLogReader({covariant IOSApp? app, bool includePastLogs = false}) {
+""",
+        """  _IOSSimulatorLogReader getLogReader({covariant IOSApp? app, bool includePastLogs = false}) {
+""",
+        "iOS simulator log-reader return type",
+    )
+
+    source = replace_once(
+        source,
         """  Future<void> _start() async {
     // Unified logging iOS 11 and greater (introduced in iOS 10).
 """,
