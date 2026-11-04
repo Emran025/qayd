@@ -4,15 +4,15 @@
 Flutter 3.44.5 can launch an iOS simulator app before `simctl log stream`
 starts consuming output, thereby missing the one-time Dart VM Service URL.
 This script applies the upstream readiness handshake to the CI-only Flutter
-SDK checkout, then rebuilds Flutter's cached tool snapshot. It is intentionally
-strict and idempotent so SDK drift fails closed instead of changing unrelated
-Flutter source silently.
+SDK checkout and directly rebuilds the cached tool snapshot using the SDK's
+already-resolved package configuration. It is strict and idempotent so SDK
+source drift fails closed rather than changing unrelated Flutter code.
 """
 
 from __future__ import annotations
 
-import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -137,25 +137,53 @@ def apply_source_backport(source: str) -> str:
 
 
 def rebuild_flutter_tool_snapshot() -> None:
-    cache = FLUTTER_ROOT / "bin/cache"
-    (cache / "flutter_tools.snapshot").unlink(missing_ok=True)
-    (cache / "flutter_tools.stamp").unlink(missing_ok=True)
+    version_file = FLUTTER_ROOT / "version"
+    if version_file.is_file():
+        actual_version = version_file.read_text().strip()
+        if actual_version != EXPECTED_FLUTTER_VERSION:
+            raise SystemExit(
+                f"Expected pinned Flutter {EXPECTED_FLUTTER_VERSION}, found {actual_version!r}."
+            )
 
-    flutter = FLUTTER_ROOT / "bin/flutter"
-    result = subprocess.run(
-        [str(flutter), "--version", "--machine"],
-        cwd=FLUTTER_ROOT,
+    revision = subprocess.run(
+        ["git", "-C", str(FLUTTER_ROOT), "rev-parse", "HEAD"],
         check=True,
         capture_output=True,
         text=True,
-    )
-    version_info = json.loads(result.stdout)
-    actual_version = version_info.get("frameworkVersion")
-    if actual_version != EXPECTED_FLUTTER_VERSION:
-        raise SystemExit(
-            f"Expected pinned Flutter {EXPECTED_FLUTTER_VERSION}, found {actual_version!r}."
-        )
-    print(f"Rebuilt Flutter tool snapshot with Flutter {actual_version}.")
+    ).stdout.strip()
+    tool_args = os.environ.get("FLUTTER_TOOL_ARGS", "")
+    compile_key = f"{revision}:{tool_args}"
+
+    cache = FLUTTER_ROOT / "bin/cache"
+    snapshot = cache / "flutter_tools.snapshot"
+    stamp = cache / "flutter_tools.stamp"
+    snapshot.unlink(missing_ok=True)
+    stamp.unlink(missing_ok=True)
+
+    tools_dir = FLUTTER_ROOT / "packages/flutter_tools"
+    dart = FLUTTER_ROOT / "bin/cache/dart-sdk/bin/dart"
+    package_config = tools_dir / ".dart_tool/package_config.json"
+    entrypoint = tools_dir / "bin/flutter_tools.dart"
+    for required in (dart, package_config, entrypoint):
+        if not required.is_file():
+            raise SystemExit(f"Missing Flutter tool bootstrap input: {required}")
+
+    command = [
+        str(dart),
+        "--verbosity=error",
+        *shlex.split(tool_args),
+        f"--snapshot={snapshot}",
+        "--snapshot-kind=app-jit",
+        f"--packages={package_config}",
+        "--no-enable-mirrors",
+        str(entrypoint),
+    ]
+    print("Rebuilding the pinned Flutter tool snapshot directly from resolved SDK packages.")
+    subprocess.run(command, cwd=FLUTTER_ROOT, check=True)
+    if not snapshot.is_file():
+        raise SystemExit("Flutter tool snapshot compilation completed without creating a snapshot.")
+    stamp.write_text(compile_key)
+    print(f"Rebuilt the Flutter tool snapshot from Flutter {EXPECTED_FLUTTER_VERSION} source.")
 
 
 source = SOURCE.read_text()
