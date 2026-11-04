@@ -203,6 +203,9 @@ def main() -> int:
         "flutter",
         "test",
         "--verbose",
+        # Use the VM Service directly: DDS fails to connect to the discovered
+        # host-loopback port on this iOS simulator runner.
+        "--no-dds",
         "--no-pub",
         "integration_test/e2ee_crypto_integration_test.dart",
         "--reporter",
