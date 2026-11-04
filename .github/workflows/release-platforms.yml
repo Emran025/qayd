@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  FLUTTER_VERSION: "3.44.5"
+  FLUTTER_VERSION: "3.47.1"
   QAYD_API_URL: ${{ secrets.QAYD_API_URL }}
   QAYD_IOS_BUNDLE_ID: ${{ vars.QAYD_IOS_BUNDLE_ID || 'com.accsystem.qayd' }}
   QAYD_MACOS_BUNDLE_ID: ${{ vars.QAYD_MACOS_BUNDLE_ID || 'com.accsystem.qayd.macos' }}
@@ -76,7 +76,7 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode 16.4 for iOS 13 compatibility
+      - name: Select Xcode 16.4 for iOS 15 compatibility
         if: matrix.platform == 'ios-unsigned'
         uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -108,7 +108,7 @@ jobs:
         run: flutter create --platforms=windows --project-name qayd .
       - name: Resolve dependencies
         run: flutter pub get --enforce-lockfile
-      - name: Verify source project keeps the iOS 13 deployment target
+      - name: Verify source project targets iOS 15.0
         if: matrix.platform == 'ios-unsigned'
         shell: bash
         run: |
@@ -119,8 +119,22 @@ jobs:
 
           project = Path('ios/Runner.xcodeproj/project.pbxproj').read_text()
           targets = re.findall(r'IPHONEOS_DEPLOYMENT_TARGET\s*=\s*([0-9.]+);', project)
-          if not targets or any(float(target) > 13.0 for target in targets):
-              raise SystemExit(f'Runner project no longer supports iOS 13: {targets}')
+          if not targets or any(float(target) != 15.0 for target in targets):
+              raise SystemExit(f'Runner project must target iOS 15.0 in every configuration: {targets}')
+          PY
+      - name: Verify source project targets macOS 12.0
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          project = Path('macos/Runner.xcodeproj/project.pbxproj').read_text()
+          targets = re.findall(r'MACOSX_DEPLOYMENT_TARGET\s*=\s*([0-9.]+);', project)
+          if not targets or any(float(target) != 12.0 for target in targets):
+              raise SystemExit(f'Runner project must target macOS 12.0 in every configuration: {targets}')
           PY
       - name: Validate production API configuration
         if: env.QAYD_API_URL != ''
@@ -152,7 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           ${{ matrix.command }} --dart-define="QAYD_API_URL=${QAYD_API_URL:-}"
-      - name: Verify built iOS artifact keeps iOS 13 compatibility
+      - name: Verify built iOS artifact targets iOS 15.0
         if: matrix.platform == 'ios-unsigned'
         shell: bash
         run: |
@@ -165,9 +179,26 @@ jobs:
           if not info.is_file():
               raise SystemExit(f'Missing built app Info.plist: {info}')
           minimum = plistlib.loads(info.read_bytes()).get('MinimumOSVersion')
-          if str(minimum) != '13.0':
-              raise SystemExit(f'Built app MinimumOSVersion is {minimum!r}, expected 13.0')
+          if str(minimum) != '15.0':
+              raise SystemExit(f'Built app MinimumOSVersion is {minimum!r}, expected 15.0')
           print(f'Built app MinimumOSVersion={minimum}')
+          PY
+      - name: Verify built macOS artifact targets macOS 12.0
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          info = Path('build/macos/Build/Products/Release/qayd.app/Contents/Info.plist')
+          if not info.is_file():
+              raise SystemExit(f'Missing built macOS app Info.plist: {info}')
+          minimum = plistlib.loads(info.read_bytes()).get('LSMinimumSystemVersion')
+          if str(minimum) != '12.0':
+              raise SystemExit(f'Built macOS LSMinimumSystemVersion is {minimum!r}, expected 12.0')
+          print(f'Built app LSMinimumSystemVersion={minimum}')
           PY
       - name: Archive artifact
         shell: bash

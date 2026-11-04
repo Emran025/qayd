@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Backport Flutter PR #193142's iOS Simulator VM-service log-reader fix.
 
-Flutter 3.44.5 can launch an iOS simulator app before `simctl log stream`
+Flutter 3.47.1 can launch an iOS simulator app before `simctl log stream`
 starts consuming output, thereby missing the one-time Dart VM Service URL.
 This script applies only the upstream readiness handshake to the CI-only
 Flutter SDK checkout and rebuilds the cached tool snapshot using the SDK's
@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 FLUTTER_ROOT = Path(os.environ["FLUTTER_ROOT"])
-EXPECTED_FLUTTER_VERSION = os.environ.get("FLUTTER_VERSION", "3.44.5")
+EXPECTED_FLUTTER_VERSION = os.environ.get("FLUTTER_VERSION", "3.47.1")
 SOURCE = FLUTTER_ROOT / "packages/flutter_tools/lib/src/ios/simulators.dart"
 
 

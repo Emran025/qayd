@@ -48,7 +48,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FLUTTER_VERSION: "3.44.5"
+  FLUTTER_VERSION: "3.47.1"
 
 jobs:
   quality:
@@ -223,7 +223,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16.4 for iOS 13 compatibility
+      - name: Select Xcode 16.4 for iOS 15 compatibility
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '16.4'
@@ -239,7 +239,7 @@ jobs:
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
 
-      - name: Build iOS app and verify the iOS 13 deployment target
+      - name: Build iOS app and verify the iOS 15 deployment target
         shell: bash
         run: |
           set -euo pipefail
@@ -249,8 +249,8 @@ jobs:
 
           project = Path('ios/Runner.xcodeproj/project.pbxproj').read_text()
           targets = re.findall(r'IPHONEOS_DEPLOYMENT_TARGET\s*=\s*([0-9.]+);', project)
-          if not targets or any(float(target) > 13.0 for target in targets):
-              raise SystemExit(f'Runner project no longer supports iOS 13: {targets}')
+          if not targets or any(float(target) != 15.0 for target in targets):
+              raise SystemExit(f'Runner project must target iOS 15.0 in every configuration: {targets}')
           PY
           flutter build ios --debug --no-codesign
           python3 - <<'PY'
@@ -261,8 +261,8 @@ jobs:
           if not info.is_file():
               raise SystemExit(f'Missing built app Info.plist: {info}')
           minimum = plistlib.loads(info.read_bytes()).get('MinimumOSVersion')
-          if str(minimum) != '13.0':
-              raise SystemExit(f'Built iOS MinimumOSVersion is {minimum!r}, expected 13.0')
+          if str(minimum) != '15.0':
+              raise SystemExit(f'Built iOS MinimumOSVersion is {minimum!r}, expected 15.0')
           print(f'Built app MinimumOSVersion={minimum}')
           PY
 
