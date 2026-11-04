@@ -9,12 +9,15 @@ fail instead of waiting for GitHub's generic step timeout.
 from __future__ import annotations
 
 import os
+import re
 import select
 import signal
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 WAIT_MARKER = b"Waiting for VM Service port to be available"
@@ -26,6 +29,33 @@ VM_SERVICE_MARKERS = (
 DEFAULT_WAIT_TIMEOUT_SECONDS = 8 * 60
 DEFAULT_TEST_TIMEOUT_SECONDS = 25 * 60
 DIAGNOSTIC_OUTPUT_LIMIT = 40_000
+VM_SERVICE_URI_RE = re.compile(
+    rb"(?:VM Service URL on device:|Dart VM Service is listening on)\s*(https?://[^\s]+)"
+)
+
+
+def _probe_vm_service_uri(uri: str) -> str:
+    try:
+        parsed = urlsplit(uri)
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError as error:
+        return f"[iOS VM Service host probe] invalid service URI: {error}"
+
+    if host is None or port is None:
+        return "[iOS VM Service host probe] discovered URI has no host/port."
+
+    try:
+        with socket.create_connection((host, port), timeout=1.0):
+            return (
+                "[iOS VM Service host probe] TCP connection succeeded to "
+                f"{host}:{port}."
+            )
+    except OSError as error:
+        return (
+            "[iOS VM Service host probe] TCP connection failed to "
+            f"{host}:{port}: {type(error).__name__}: {error}"
+        )
 
 
 def _run_diagnostic(
@@ -186,8 +216,19 @@ def main() -> int:
             str(DEFAULT_TEST_TIMEOUT_SECONDS),
         )
     )
+    host_vm_service_port = os.environ.get(
+        "IOS_HOST_VM_SERVICE_PORT", "51614"
+    ).strip()
     if not simulator_id:
         print("SIMULATOR_ID is required for the iOS integration test.", file=sys.stderr)
+        return 2
+    if not host_vm_service_port.isdecimal() or not (
+        1 <= int(host_vm_service_port) <= 65535
+    ):
+        print(
+            "IOS_HOST_VM_SERVICE_PORT must be an integer from 1 through 65535.",
+            file=sys.stderr,
+        )
         return 2
     if timeout_seconds < 60:
         print("VM Service watchdog must be at least 60 seconds.", file=sys.stderr)
@@ -207,6 +248,7 @@ def main() -> int:
         # host-loopback port on this iOS simulator runner.
         "--no-dds",
         "--no-pub",
+        f"--host-vmservice-port={host_vm_service_port}",
         "integration_test/e2ee_crypto_integration_test.dart",
         "--reporter",
         "expanded",
@@ -263,6 +305,14 @@ def main() -> int:
                 if service_wait_started is not None and any(
                     marker in log_buffer for marker in VM_SERVICE_MARKERS
                 ):
+                    uri_match = VM_SERVICE_URI_RE.search(log_buffer)
+                    if uri_match is not None:
+                        probe_result = _probe_vm_service_uri(
+                            uri_match.group(1).decode("ascii", errors="replace")
+                        )
+                        print(probe_result, flush=True)
+                        captured_log.write((probe_result + "\n").encode())
+                        captured_log.flush()
                     service_wait_started = None
                     log_buffer.clear()
 
