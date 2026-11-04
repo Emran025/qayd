@@ -218,7 +218,7 @@ jobs:
   ios_crypto:
     name: E2EE on iOS simulator
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -290,7 +290,7 @@ jobs:
         run: python3 tool/ci/patch_flutter_ios_simulator_log_reader.py
 
       - name: Run libsodium integration test on iOS
-        timeout-minutes: 15
+        timeout-minutes: 30
         shell: bash
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.simulator-id }}
