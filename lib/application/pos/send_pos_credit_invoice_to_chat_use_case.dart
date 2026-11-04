@@ -82,7 +82,7 @@ final class SendPosCreditInvoiceToChatUseCase {
               payload: stored,
               expectedNodeId: nodeId,
             );
-        return _dispatchAndRecord(
+        return await _dispatchAndRecord(
           notification: existing,
           nodeId: nodeId,
           eventPayload: eventPayload,
