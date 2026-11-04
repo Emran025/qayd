@@ -7,7 +7,7 @@ on:
       - "lib/**"
       - "test/**"
       - "integration_test/**"
-      - "test_driver/**"
+      - "tool/ci/**"
       - "android/**"
       - "ios/**"
       - "macos/**"
@@ -26,7 +26,7 @@ on:
       - "lib/**"
       - "test/**"
       - "integration_test/**"
-      - "test_driver/**"
+      - "tool/ci/**"
       - "android/**"
       - "ios/**"
       - "macos/**"
@@ -285,15 +285,17 @@ jobs:
           xcrun simctl bootstatus "$simulator_id" -b
           echo "simulator-id=$simulator_id" >> "$GITHUB_OUTPUT"
 
+      - name: Backport iOS simulator VM-service log-reader race fix
+        shell: bash
+        run: python3 tool/ci/patch_flutter_ios_simulator_log_reader.py
+
       - name: Run libsodium integration test on iOS
         shell: bash
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.simulator-id }}
         run: |
           set -euo pipefail
-          # flutter test hard-codes VM-service publication off on iOS 14+; drive can opt in.
           flutter devices --device-timeout 30
-          flutter drive --publish-port --no-pub --verbose \
-            --driver=test_driver/integration_test.dart \
-            --target=integration_test/e2ee_crypto_integration_test.dart \
-            -d "$SIMULATOR_ID" --timeout=600
+          flutter test --no-dds --verbose --no-pub \
+            integration_test/e2ee_crypto_integration_test.dart \
+            --reporter expanded -d "$SIMULATOR_ID"
