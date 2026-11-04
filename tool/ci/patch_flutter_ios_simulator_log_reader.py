@@ -3,12 +3,10 @@
 
 Flutter 3.44.5 can launch an iOS simulator app before `simctl log stream`
 starts consuming output, thereby missing the one-time Dart VM Service URL.
-This script applies the upstream readiness handshake to the CI-only Flutter
-SDK checkout, exposes the existing host/device VM-service port options to
-`flutter test` for a same-port simulator route without mDNS, and directly
-rebuilds the cached tool snapshot using the SDK's already-resolved package
-configuration. It is strict and idempotent so SDK source drift fails closed
-rather than changing unrelated Flutter code.
+This script applies only the upstream readiness handshake to the CI-only
+Flutter SDK checkout and rebuilds the cached tool snapshot using the SDK's
+already-resolved package configuration. It is strict and idempotent so SDK
+source drift fails closed rather than changing unrelated Flutter code.
 """
 
 from __future__ import annotations
@@ -22,7 +20,6 @@ from pathlib import Path
 FLUTTER_ROOT = Path(os.environ["FLUTTER_ROOT"])
 EXPECTED_FLUTTER_VERSION = os.environ.get("FLUTTER_VERSION", "3.44.5")
 SOURCE = FLUTTER_ROOT / "packages/flutter_tools/lib/src/ios/simulators.dart"
-TEST_SOURCE = FLUTTER_ROOT / "packages/flutter_tools/lib/src/commands/test.dart"
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -161,32 +158,6 @@ def apply_source_backport(source: str) -> str:
     return source
 
 
-def apply_test_port_options_backport(source: str) -> str:
-    call = "    usesPortOptions(verboseHelp: verboseHelp);\n"
-    if call not in source:
-        source = replace_once(
-            source,
-            "    addDdsOptions(verboseHelp: verboseHelp);\n",
-            call + "    addDdsOptions(verboseHelp: verboseHelp);\n",
-            "flutter test VM-service port options",
-        )
-
-    port_options = (
-        "        hostVmServicePort: hostVmservicePort,\n"
-        "        deviceVmServicePort: deviceVmservicePort,\n"
-    )
-    if port_options not in source:
-        source = replace_once(
-            source,
-            "      disableServiceAuthCodes: boolArg('disable-service-auth-codes'),\n",
-            "      disableServiceAuthCodes: boolArg('disable-service-auth-codes'),\n"
-            + port_options,
-            "flutter test DebuggingOptions VM-service ports",
-        )
-    print("Flutter test VM-service port options are enabled and passed to DebuggingOptions.")
-    return source
-
-
 def rebuild_flutter_tool_snapshot() -> None:
     version_file = FLUTTER_ROOT / "version"
     if version_file.is_file():
@@ -242,9 +213,4 @@ patched_source = apply_source_backport(source)
 if patched_source != source:
     SOURCE.write_text(patched_source)
     print(f"Applied Flutter PR #193142 iOS simulator log-reader fix to {SOURCE}.")
-test_source = TEST_SOURCE.read_text()
-patched_test_source = apply_test_port_options_backport(test_source)
-if patched_test_source != test_source:
-    TEST_SOURCE.write_text(patched_test_source)
-    print(f"Enabled explicit VM-service port selection in {TEST_SOURCE} for CI.")
 rebuild_flutter_tool_snapshot()

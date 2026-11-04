@@ -297,17 +297,7 @@ jobs:
         run: |
           set -euo pipefail
           flutter devices --device-timeout 30
-          # The iOS Simulator port forwarder is pass-through; pin one free port on both ends.
-          vm_service_port="$(python3 - <<'PY'
-          import socket
-          with socket.socket() as sock:
-              sock.bind(('127.0.0.1', 0))
-              print(sock.getsockname()[1])
-          PY
-          )"
-          echo "Using identical host/device VM Service port: $vm_service_port"
-          flutter test --no-dds --verbose --no-pub \
-            --host-vmservice-port="$vm_service_port" \
-            --device-vmservice-port="$vm_service_port" \
+          # Let Flutter discover the simulator's actual VM Service port; iOS Simulator forwarding is identity-only.
+          flutter test --verbose --no-pub \
             integration_test/e2ee_crypto_integration_test.dart \
             --reporter expanded -d "$SIMULATOR_ID"
