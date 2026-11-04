@@ -7,7 +7,6 @@ on:
       - "lib/**"
       - "test/**"
       - "integration_test/**"
-      - "test_driver/**"
       - "tool/ci/**"
       - "android/**"
       - "ios/**"
@@ -27,7 +26,6 @@ on:
       - "lib/**"
       - "test/**"
       - "integration_test/**"
-      - "test_driver/**"
       - "tool/ci/**"
       - "android/**"
       - "ios/**"
@@ -299,7 +297,17 @@ jobs:
         run: |
           set -euo pipefail
           flutter devices --device-timeout 30
-          flutter drive --no-pub --verbose \
-            --driver=test_driver/integration_test.dart \
-            --target=integration_test/e2ee_crypto_integration_test.dart \
-            -d "$SIMULATOR_ID" --timeout=600
+          # The iOS Simulator port forwarder is pass-through; pin one free port on both ends.
+          vm_service_port="$(python3 - <<'PY'
+          import socket
+          with socket.socket() as sock:
+              sock.bind(('127.0.0.1', 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          echo "Using identical host/device VM Service port: $vm_service_port"
+          flutter test --no-dds --verbose --no-pub \
+            --host-vmservice-port="$vm_service_port" \
+            --device-vmservice-port="$vm_service_port" \
+            integration_test/e2ee_crypto_integration_test.dart \
+            --reporter expanded -d "$SIMULATOR_ID"
