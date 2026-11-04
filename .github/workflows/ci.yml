@@ -7,7 +7,6 @@ on:
       - "lib/**"
       - "test/**"
       - "integration_test/**"
-      - "test_driver/**"
       - "tool/ci/**"
       - "android/**"
       - "ios/**"
@@ -27,7 +26,6 @@ on:
       - "lib/**"
       - "test/**"
       - "integration_test/**"
-      - "test_driver/**"
       - "tool/ci/**"
       - "android/**"
       - "ios/**"
@@ -292,13 +290,13 @@ jobs:
         run: python3 tool/ci/patch_flutter_ios_simulator_log_reader.py
 
       - name: Run libsodium integration test on iOS
+        timeout-minutes: 15
         shell: bash
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.simulator-id }}
         run: |
           set -euo pipefail
           flutter devices --device-timeout 30
-          flutter drive --publish-port --no-pub --verbose \
-            --driver=test_driver/integration_test.dart \
-            --target=integration_test/e2ee_crypto_integration_test.dart \
-            -d "$SIMULATOR_ID" --timeout=600
+          flutter test --verbose --no-pub \
+            integration_test/e2ee_crypto_integration_test.dart \
+            --reporter expanded -d "$SIMULATOR_ID"
