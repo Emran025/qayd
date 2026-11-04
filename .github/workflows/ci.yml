@@ -296,7 +296,6 @@ jobs:
           SIMULATOR_ID: ${{ steps.simulator.outputs.simulator-id }}
           APP_BUNDLE_ID: com.accsystem.qayd
           IOS_VM_SERVICE_WAIT_TIMEOUT_SECONDS: 480
-          IOS_HOST_VM_SERVICE_PORT: "51614"
         run: |
           set -euo pipefail
           flutter devices --device-timeout 30

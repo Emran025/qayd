@@ -216,19 +216,8 @@ def main() -> int:
             str(DEFAULT_TEST_TIMEOUT_SECONDS),
         )
     )
-    host_vm_service_port = os.environ.get(
-        "IOS_HOST_VM_SERVICE_PORT", "51614"
-    ).strip()
     if not simulator_id:
         print("SIMULATOR_ID is required for the iOS integration test.", file=sys.stderr)
-        return 2
-    if not host_vm_service_port.isdecimal() or not (
-        1 <= int(host_vm_service_port) <= 65535
-    ):
-        print(
-            "IOS_HOST_VM_SERVICE_PORT must be an integer from 1 through 65535.",
-            file=sys.stderr,
-        )
         return 2
     if timeout_seconds < 60:
         print("VM Service watchdog must be at least 60 seconds.", file=sys.stderr)
@@ -248,7 +237,6 @@ def main() -> int:
         # host-loopback port on this iOS simulator runner.
         "--no-dds",
         "--no-pub",
-        f"--host-vmservice-port={host_vm_service_port}",
         "integration_test/e2ee_crypto_integration_test.dart",
         "--reporter",
         "expanded",
