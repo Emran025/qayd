@@ -7,6 +7,7 @@ on:
       - "lib/**"
       - "test/**"
       - "integration_test/**"
+      - "test_driver/**"
       - "android/**"
       - "ios/**"
       - "macos/**"
@@ -25,6 +26,7 @@ on:
       - "lib/**"
       - "test/**"
       - "integration_test/**"
+      - "test_driver/**"
       - "android/**"
       - "ios/**"
       - "macos/**"
@@ -289,7 +291,9 @@ jobs:
           SIMULATOR_ID: ${{ steps.simulator.outputs.simulator-id }}
         run: |
           set -euo pipefail
+          # flutter test hard-codes VM-service publication off on iOS 14+; drive can opt in.
           flutter devices --device-timeout 30
-          flutter test --no-dds --verbose --no-pub \
-            integration_test/e2ee_crypto_integration_test.dart \
-            --reporter expanded -d "$SIMULATOR_ID"
+          flutter drive --publish-port --no-pub --verbose \
+            --driver=test_driver/integration_test.dart \
+            --target=integration_test/e2ee_crypto_integration_test.dart \
+            -d "$SIMULATOR_ID" --timeout=600
