@@ -12,6 +12,7 @@ import 'package:qayd/domain/entities/pos_credit_invoice_chat_snapshot.dart';
 import 'package:qayd/domain/repositories/notification_message_repository.dart';
 import 'package:qayd/domain/repositories/account_repository.dart';
 import 'package:qayd/domain/repositories/identity_repository.dart';
+import 'package:qayd/domain/repositories/sync_inbound_event_journal_repository.dart';
 import 'package:qayd/domain/services/e2ee_encryption_service.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/crypto_key_pair.dart';
@@ -52,6 +53,9 @@ class MockVoucherKeyService extends Mock implements VoucherKeyService {}
 
 class MockNotificationFilterService extends Mock
     implements NotificationFilterService {}
+
+class MockSyncInboundEventJournalRepository extends Mock
+    implements SyncInboundEventJournalRepository {}
 
 final _testPosCreditInvoicePdf = Uint8List.fromList(
   utf8.encode('%PDF-1.4\n% processor test\n%%EOF\n'),
@@ -230,7 +234,7 @@ void main() {
     );
 
     test(
-      'accepts a recorded historical paired key without rewriting party keys',
+      'decrypts with a historical paired key but does not ack a delegated event',
       () async {
         final accountId = AccountId(localSenderAccountUuid);
         final currentKey = List.filled(64, 'a').join();
@@ -274,7 +278,7 @@ void main() {
 
         final applied = await processor.processIncomingNodes([node]);
 
-        expect(applied, contains(nodeId));
+        expect(applied, isEmpty);
         expect(party.currentPublicKeyHex, currentKey);
         expect(party.publicKeyHistoryHex, [historicalKey]);
         verify(
@@ -629,6 +633,107 @@ void main() {
       );
       verifyNoMoreInteractions(mockVoucherRepo);
       verifyNoMoreInteractions(mockLedgerRepo);
+    });
+  });
+
+  group('SyncPayloadProcessor - delegated sync events', () {
+    test('does not acknowledge delegated or unsupported events here', () async {
+      final accountId = AccountId(localSenderAccountUuid);
+      final senderKey = List.filled(64, 'a').join();
+      final journal = MockSyncInboundEventJournalRepository();
+      final delegatedProcessor = SyncPayloadProcessor(
+        identityRepository: mockIdentityRepo,
+        voucherRepository: mockVoucherRepo,
+        ledgerRepository: mockLedgerRepo,
+        accountRepository: mockAccountRepo,
+        currencyRepository: MockCurrencyRepository(),
+        e2eeService: mockE2ee,
+        signingService: MockReceiptSigningService(),
+        getCurrentUserKeyPair: () async => CryptoKeyPair.fromHex(
+          publicKeyHex:
+              '0000000000000000000000000000000000000000000000000000000000000000',
+          privateKeyHex:
+              '0000000000000000000000000000000000000000000000000000000000000000',
+        ),
+        attachmentRepository: MockAttachmentRepository(),
+        collateralRepository: MockCollateralRepository(),
+        voucherKeyService: MockVoucherKeyService(),
+        notificationMessageRepository: mockNotificationRepo,
+        notificationFilterService: mockFilterRepo,
+        inboundEventJournal: journal,
+      );
+      final nodes = <SyncNode>[
+        for (final eventType in <SyncEventType>[
+          SyncEventType.credentialBootstrap,
+          SyncEventType.p2pHandshake,
+          SyncEventType.unknown,
+        ])
+          SyncNode(
+            id: 'delegated-${eventType.name}',
+            senderId: 101,
+            eventType: eventType,
+            encryptedPayload: 'opaque-${eventType.name}',
+            syncState: 'pending',
+            senderPublicKey: senderKey,
+          ),
+      ];
+
+      when(
+        () => mockAccountRepo.findAccountByPublicKey(senderKey),
+      ).thenAnswer((_) async => Success<AccountId?>(accountId));
+      when(() => mockAccountRepo.getPartyDetails(accountId)).thenAnswer(
+        (_) async => Success(
+          PartyDetails(accountId: accountId, currentPublicKeyHex: senderKey),
+        ),
+      );
+      when(
+        () => journal.beginProcessing(
+          nodeId: any(named: 'nodeId'),
+          senderPublicKey: any(named: 'senderPublicKey'),
+          eventType: any(named: 'eventType'),
+          payloadFingerprint: any(named: 'payloadFingerprint'),
+        ),
+      ).thenAnswer((_) async => SyncInboundEventClaim.claimed);
+      when(
+        () => mockE2ee.decryptPayload(
+          encryptedPayload: any(named: 'encryptedPayload'),
+          receiverKeyPair: any(named: 'receiverKeyPair'),
+          senderPublicKeyHex: senderKey,
+          nodeId: any(named: 'nodeId'),
+          eventType: any(named: 'eventType'),
+        ),
+      ).thenAnswer((_) async => <String, dynamic>{'handled': true});
+      when(
+        () => journal.quarantine(
+          nodeId: any(named: 'nodeId'),
+          reason: SyncInboundQuarantineReason.delegatedEvent,
+          encryptedPayload: any(named: 'encryptedPayload'),
+        ),
+      ).thenAnswer((_) async {});
+      when(
+        () => journal.quarantine(
+          nodeId: any(named: 'nodeId'),
+          reason: SyncInboundQuarantineReason.unsupportedEventType,
+          encryptedPayload: any(named: 'encryptedPayload'),
+        ),
+      ).thenAnswer((_) async {});
+
+      final applied = await delegatedProcessor.processIncomingNodes(nodes);
+
+      expect(applied, isEmpty);
+      for (final node in nodes) {
+        final reason = node.eventType == SyncEventType.unknown
+            ? SyncInboundQuarantineReason.unsupportedEventType
+            : SyncInboundQuarantineReason.delegatedEvent;
+        verify(
+          () => journal.quarantine(
+            nodeId: node.id,
+            reason: reason,
+            encryptedPayload: node.encryptedPayload,
+          ),
+        ).called(1);
+      }
+      verifyNever(() => journal.markApplied(any()));
     });
   });
 }

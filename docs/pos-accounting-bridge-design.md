@@ -64,7 +64,9 @@ The adjustment use case rejects inactive products, invalid quantity scales/curre
 
 ## Cross-device sync boundary
 
-The Laravel sync API is a blind relay for opaque encrypted payloads; it does not need POS-specific plaintext endpoints or tables. However, the Flutter client currently emits and applies only its registered sync event types. POS products, stock movements, and invoices are not yet emitted through the outbox or applied by the inbound processor; an unrecognized event is treated as `unknown` and returned as processed. POS data therefore remains local to the device today. Before enabling cross-device POS sync, define versioned encrypted event envelopes plus replay/idempotency, conflict, ordering, and acknowledgement behavior, then add client-side dispatch/processor coverage. Do not send financial records in plaintext to the API.
+The Laravel sync API remains a blind relay for opaque encrypted payloads; it does not need POS-specific plaintext endpoints or tables. POS products, stock movements, invoices, purchases, returns, and payments are not yet emitted through a transactional outbox or applied by an inbound POS processor. The existing credit-invoice chat event shares an already-posted invoice snapshot and PDF with a counterparty; it does not replicate the financial posting to another device.
+
+The general inbound processor now leaves `unknown` events unacknowledged and retains unsupported or delegated encrypted events in the local SQLCipher journal. Events from an unpaired sender remain pending for a later pairing decision. This protects acknowledgement semantics but does not provide an atomic inbox/outbox: a crash between a domain commit and the journal update can still cause a handler-specific replay. See [the proposed POS multi-device E2EE safety ADR](adr/pos-e2ee-multidevice-sync.md) for the exposed-metadata inventory, trust boundary, decisions still required, and explicit non-goals. Do not send financial records in plaintext to the API or claim that POS financial multi-device sync is enabled.
 
 ## Remaining UI and workflow scope
 

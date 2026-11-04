@@ -236,6 +236,7 @@ import 'package:qayd/application/vouchers/settle_voucher_use_case.dart';
 import 'package:qayd/application/sync/p2p_sync_service.dart';
 import 'package:qayd/data/repositories/outbox_dao.dart';
 import 'package:qayd/data/repositories/device_sync_outbox_dao.dart';
+import 'package:qayd/data/repositories/sqlite_sync_inbound_event_journal_repository.dart';
 import 'package:qayd/data/repositories/sync_watermark_dao.dart';
 import 'package:qayd/data/repositories/sqlite_device_session_repository.dart';
 import 'package:qayd/domain/services/signature_verification_engine.dart';
@@ -962,6 +963,7 @@ abstract final class InjectionContainer {
       notificationFilterService: notificationFilterService,
       auditLogService: auditLogService,
       auditSyncProcessor: auditSyncProcessor,
+      inboundEventJournal: SqliteSyncInboundEventJournalRepository(database),
       onDecryptionFailure: (nodeId) =>
           syncStatusCubit.reportDecryptionfailure(nodeId),
     );
