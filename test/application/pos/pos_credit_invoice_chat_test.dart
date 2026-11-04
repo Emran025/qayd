@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:qayd/application/pos/build_pos_invoice_pdf_use_case.dart';
 import 'package:qayd/application/pos/pos_credit_invoice_chat_protocol.dart';
 import 'package:qayd/application/pos/respond_to_pos_credit_invoice_in_chat_use_case.dart';
 import 'package:qayd/application/pos/send_pos_credit_invoice_to_chat_use_case.dart';
@@ -11,7 +13,9 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/notification_message.dart';
 import 'package:qayd/domain/entities/pos_credit_invoice_chat_snapshot.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
+import 'package:qayd/domain/entities/pos_sales_report.dart';
 import 'package:qayd/domain/repositories/notification_message_repository.dart';
+import 'package:qayd/domain/services/pos_invoice_pdf_generator.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
 import 'package:qayd/domain/value_objects/money.dart';
@@ -22,6 +26,24 @@ class _MockNotificationMessageRepository extends Mock
     implements NotificationMessageRepository {}
 
 class _MockSyncEventDispatcher extends Mock implements SyncEventDispatcher {}
+
+class _FixedPdfGenerator implements PosInvoicePdfGenerator {
+  const _FixedPdfGenerator(this.bytes);
+
+  final Uint8List bytes;
+
+  @override
+  Future<Result<Uint8List>> buildInvoicePdf(PosInvoice invoice) async =>
+      Success(bytes);
+
+  @override
+  Future<Result<Uint8List>> buildSalesReportPdf(PosSalesReport report) async =>
+      Success(bytes);
+}
+
+final _testPdfBytes = Uint8List.fromList(
+  utf8.encode('%PDF-1.4\n% test credit invoice\n%%EOF\n'),
+);
 
 Map<String, dynamic> _snapshotJson() => <String, dynamic>{
   'schema': PosCreditInvoiceChatSnapshot.schema,
@@ -228,6 +250,7 @@ void main() {
         final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
           invoiceNodeId: nodeId,
           snapshot: snapshot,
+          pdfBytes: _testPdfBytes,
         );
 
         expect(
@@ -236,6 +259,24 @@ void main() {
             expectedNodeId: nodeId,
           ).fingerprint,
           snapshot.fingerprint,
+        );
+        expect(
+          PosCreditInvoiceChatProtocol.pdfBytesFromEventPayload(
+            eventPayload,
+            expectedInvoiceFingerprint: snapshot.fingerprint,
+          ),
+          orderedEquals(_testPdfBytes),
+        );
+        final tampered = Map<String, dynamic>.from(eventPayload);
+        tampered['pdf_attachment'] = Map<String, dynamic>.from(
+          eventPayload['pdf_attachment'] as Map,
+        )..['sha256'] = List<String>.filled(64, '0').join();
+        expect(
+          () => PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
+            tampered,
+            expectedNodeId: nodeId,
+          ),
+          throwsFormatException,
         );
         expect(
           () => PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
@@ -257,6 +298,7 @@ void main() {
           () => PosCreditInvoiceChatProtocol.invoiceEventPayload(
             invoiceNodeId: 'replayed-node',
             snapshot: snapshot,
+            pdfBytes: _testPdfBytes,
           ),
           throwsFormatException,
         );
@@ -322,6 +364,9 @@ void main() {
       useCase = SendPosCreditInvoiceToChatUseCase(
         notificationMessageRepository: notifications,
         syncEventDispatcher: sync,
+        pdfUseCase: BuildPosInvoicePdfUseCase(
+          generator: _FixedPdfGenerator(_testPdfBytes),
+        ),
       );
     });
 
@@ -374,6 +419,13 @@ void main() {
                 as Map<String, dynamic>;
         expect(sentPayload['invoice_id'], invoice.id);
         expect(sentPayload['fingerprint'], isNotEmpty);
+        expect(
+          PosCreditInvoiceChatProtocol.pdfBytesFromEventPayload(
+            sentPayload,
+            expectedInvoiceFingerprint: sentPayload['fingerprint'] as String,
+          ),
+          orderedEquals(_testPdfBytes),
+        );
         verify(
           () => notifications.insert(
             id: nodeId,
@@ -442,6 +494,48 @@ void main() {
       expect(invoice.status, PosDocumentStatus.posted);
       expect(invoice.due.minorUnits, 2500);
     });
+
+    test(
+      'fails closed when the generated PDF exceeds the inline limit',
+      () async {
+        final invoice = _postedInvoice();
+        final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(invoice.id);
+        when(
+          () => notifications.findById(nodeId),
+        ).thenAnswer((_) async => null);
+        final oversizedUseCase = SendPosCreditInvoiceToChatUseCase(
+          notificationMessageRepository: notifications,
+          syncEventDispatcher: sync,
+          pdfUseCase: BuildPosInvoicePdfUseCase(
+            generator: _FixedPdfGenerator(
+              Uint8List(PosCreditInvoiceChatProtocol.maxPdfAttachmentBytes + 1),
+            ),
+          ),
+        );
+
+        final result = await oversizedUseCase(invoice);
+
+        expect(result.isFailure, isTrue);
+        verifyNever(
+          () => notifications.insert(
+            id: nodeId,
+            bodyText: any(named: 'bodyText'),
+            channel: PosCreditInvoiceChatProtocol.outgoingChannel,
+            counterpartyAccountId: 'customer-account',
+            createdAtIso: any(named: 'createdAtIso'),
+            rawPayloadJson: any(named: 'rawPayloadJson'),
+          ),
+        );
+        verifyNever(
+          () => sync.dispatchGenericEvent(
+            counterpartyAccountId: any(named: 'counterpartyAccountId'),
+            eventType: any(named: 'eventType'),
+            payload: any(named: 'payload'),
+            nodeId: any(named: 'nodeId'),
+          ),
+        );
+      },
+    );
   });
 
   group('RespondToPosCreditInvoiceInChatUseCase', () {
@@ -466,6 +560,7 @@ void main() {
       final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
         invoiceNodeId: invoiceNodeId,
         snapshot: snapshot,
+        pdfBytes: _testPdfBytes,
       );
       final localPayload = PosCreditInvoiceChatProtocol.localInvoicePayload(
         eventPayload: eventPayload,

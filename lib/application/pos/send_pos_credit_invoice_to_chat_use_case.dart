@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:qayd/application/pos/build_pos_invoice_pdf_use_case.dart';
 import 'package:qayd/application/pos/pos_credit_invoice_chat_protocol.dart';
 import 'package:qayd/application/sync/sync_event_dispatcher.dart';
 import 'package:qayd/core/error/failures.dart';
@@ -14,11 +15,16 @@ final class SendPosCreditInvoiceToChatUseCase {
   const SendPosCreditInvoiceToChatUseCase({
     required NotificationMessageRepository notificationMessageRepository,
     required SyncEventDispatcher syncEventDispatcher,
+    required BuildPosInvoicePdfUseCase pdfUseCase,
   }) : _notifications = notificationMessageRepository,
-       _sync = syncEventDispatcher;
+       _sync = syncEventDispatcher,
+       _pdfUseCase = pdfUseCase;
 
   final NotificationMessageRepository _notifications;
+
   final SyncEventDispatcher _sync;
+
+  final BuildPosInvoicePdfUseCase _pdfUseCase;
 
   /// Shares only an already-posted sale that still has an amount due.
   /// A chat-delivery failure never rolls back or changes the POS sale.
@@ -71,6 +77,16 @@ final class SendPosCreditInvoiceToChatUseCase {
                 stored['delivery_status'] != 'failed')) {
           return const Success(null);
         }
+        final eventPayload =
+            PosCreditInvoiceChatProtocol.networkInvoiceEventPayloadFromLocal(
+              payload: stored,
+              expectedNodeId: nodeId,
+            );
+        return _dispatchAndRecord(
+          notification: existing,
+          nodeId: nodeId,
+          eventPayload: eventPayload,
+        );
       } on FormatException {
         return const FailureResult(
           ValidationFailure(
@@ -78,17 +94,30 @@ final class SendPosCreditInvoiceToChatUseCase {
           ),
         );
       }
-      return _dispatchAndRecord(
-        notification: existing,
-        snapshot: snapshot,
-        nodeId: nodeId,
+    }
+
+    final pdfResult = await _pdfUseCase.forInvoice(snapshot.toPdfInvoice());
+    final pdfBytes = pdfResult.valueOrNull;
+    if (pdfBytes == null) {
+      return FailureResult(
+        pdfResult.failureOrNull ??
+            const ValidationFailure(
+              messageAr: 'تعذر إنشاء PDF آمن لإرساله في المحادثة.',
+            ),
       );
     }
 
-    final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
-      invoiceNodeId: nodeId,
-      snapshot: snapshot,
-    );
+    late final Map<String, dynamic> eventPayload;
+    try {
+      eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
+        invoiceNodeId: nodeId,
+        snapshot: snapshot,
+        pdfBytes: pdfBytes,
+      );
+    } on FormatException catch (error) {
+      return FailureResult(ValidationFailure(messageAr: error.message));
+    }
+
     final localPayload = PosCreditInvoiceChatProtocol.localInvoicePayload(
       eventPayload: eventPayload,
       acknowledgementStatus: 'pending',
@@ -117,13 +146,14 @@ final class SendPosCreditInvoiceToChatUseCase {
     );
     return _dispatchAndRecord(
       notification: notification,
-      snapshot: snapshot,
       nodeId: nodeId,
+      eventPayload: eventPayload,
     );
   }
 
   /// Retries only a failed or interrupted send; queued messages remain the
-  /// responsibility of the existing sync outbox.
+  /// responsibility of the existing sync outbox. It reuses the exact PDF bytes
+  /// persisted with the original invoice snapshot.
   Future<Result<void>> retry(String notificationId) async {
     final notification = await _notifications.findById(notificationId);
     if (notification == null ||
@@ -141,14 +171,15 @@ final class SendPosCreditInvoiceToChatUseCase {
               payload['delivery_status'] != 'failed')) {
         return const Success(null);
       }
-      final snapshot = PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
-        payload,
-        expectedNodeId: notification.id,
-      );
+      final eventPayload =
+          PosCreditInvoiceChatProtocol.networkInvoiceEventPayloadFromLocal(
+            payload: payload,
+            expectedNodeId: notification.id,
+          );
       return await _dispatchAndRecord(
         notification: notification,
-        snapshot: snapshot,
         nodeId: notification.id,
+        eventPayload: eventPayload,
       );
     } on FormatException {
       return const FailureResult(
@@ -159,13 +190,9 @@ final class SendPosCreditInvoiceToChatUseCase {
 
   Future<Result<void>> _dispatchAndRecord({
     required NotificationMessage notification,
-    required PosCreditInvoiceChatSnapshot snapshot,
     required String nodeId,
+    required Map<String, dynamic> eventPayload,
   }) async {
-    final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
-      invoiceNodeId: nodeId,
-      snapshot: snapshot,
-    );
     final dispatched = await _sync.dispatchGenericEvent(
       counterpartyAccountId: notification.counterpartyAccountId,
       eventType: PosCreditInvoiceChatProtocol.invoiceEventType,
@@ -179,7 +206,7 @@ final class SendPosCreditInvoiceToChatUseCase {
       final localPayload = PosCreditInvoiceChatProtocol.decodePayload(
         latest.rawPayloadJson,
       );
-      // Keep any acknowledgement that arrived while the send was being queued.
+      // Keep any acknowledgment that arrived while the send was being queued.
       localPayload['delivery_status'] = dispatched.isSuccess
           ? 'queued'
           : 'failed';

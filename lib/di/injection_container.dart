@@ -1104,9 +1104,14 @@ abstract final class InjectionContainer {
     notificationMessageRepository = SqliteNotificationMessageRepository(
       database,
     );
+    posInvoicePdfGenerator = const CairoPosInvoicePdfGenerator();
+    buildPosInvoicePdfUseCase = BuildPosInvoicePdfUseCase(
+      generator: posInvoicePdfGenerator,
+    );
     sendPosCreditInvoiceToChatUseCase = SendPosCreditInvoiceToChatUseCase(
       notificationMessageRepository: notificationMessageRepository,
       syncEventDispatcher: syncEventDispatcher,
+      pdfUseCase: buildPosInvoicePdfUseCase,
     );
     respondToPosCreditInvoiceInChatUseCase =
         RespondToPosCreditInvoiceInChatUseCase(
@@ -1626,11 +1631,6 @@ abstract final class InjectionContainer {
     );
     voucherPdfGenerator = const CairoVoucherPdfGenerator();
     accountStatementPdfGenerator = const CairoAccountStatementPdfGenerator();
-    posInvoicePdfGenerator = const CairoPosInvoicePdfGenerator();
-    buildPosInvoicePdfUseCase = BuildPosInvoicePdfUseCase(
-      generator: posInvoicePdfGenerator,
-    );
-
     analyzeForSuggestionsUseCase = AnalyzeForSuggestionsUseCase(
       voucherRepository,
       notificationMessageRepository,

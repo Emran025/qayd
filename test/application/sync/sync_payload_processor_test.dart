@@ -53,6 +53,10 @@ class MockVoucherKeyService extends Mock implements VoucherKeyService {}
 class MockNotificationFilterService extends Mock
     implements NotificationFilterService {}
 
+final _testPosCreditInvoicePdf = Uint8List.fromList(
+  utf8.encode('%PDF-1.4\n% processor test\n%%EOF\n'),
+);
+
 Map<String, dynamic> _creditInvoiceSnapshotJson() => <String, dynamic>{
   'schema': PosCreditInvoiceChatSnapshot.schema,
   'invoice_id': 'sync-pos-invoice-001',
@@ -481,6 +485,7 @@ void main() {
       final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
         invoiceNodeId: invoiceNodeId,
         snapshot: snapshot,
+        pdfBytes: _testPosCreditInvoicePdf,
       );
       final node = SyncNode(
         id: invoiceNodeId,
@@ -547,6 +552,7 @@ void main() {
       final invoiceEvent = PosCreditInvoiceChatProtocol.invoiceEventPayload(
         invoiceNodeId: invoiceNodeId,
         snapshot: snapshot,
+        pdfBytes: _testPosCreditInvoicePdf,
       );
       final outgoingPayload = PosCreditInvoiceChatProtocol.localInvoicePayload(
         eventPayload: invoiceEvent,

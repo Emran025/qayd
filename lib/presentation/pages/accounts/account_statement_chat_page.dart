@@ -527,27 +527,21 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
         payload,
         expectedNodeId: notificationId,
       );
+      final pdfBytes = PosCreditInvoiceChatProtocol.pdfBytesFromEventPayload(
+        payload,
+        expectedInvoiceFingerprint: snapshot.fingerprint,
+      );
       showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
-        builder: (sheetContext) => _PosCreditInvoiceDetailsSheet(
+        builder: (_) => _PosCreditInvoiceDetailsSheet(
           snapshot: snapshot,
           onExportPdf: () async {
-            final result = await InjectionContainer.buildPosInvoicePdfUseCase
-                .forInvoice(snapshot.toPdfInvoice());
-            if (!sheetContext.mounted) return;
-            final bytes = result.valueOrNull;
-            if (bytes == null) {
-              QaydSnackBar.show(
-                sheetContext,
-                result.failureOrNull?.messageAr ??
-                    AppStrings.posInvoicePdfFailed,
-                type: QaydSnackBarType.error,
-              );
-              return;
-            }
-            await sharePdfBytes(bytes, '${snapshot.invoiceNumber}.pdf');
+            await sharePdfBytes(
+              pdfBytes,
+              'pos-credit-invoice-${snapshot.fingerprint.substring(0, 12)}.pdf',
+            );
           },
         ),
       );

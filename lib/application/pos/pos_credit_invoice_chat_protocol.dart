@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:qayd/domain/entities/pos_credit_invoice_chat_snapshot.dart';
 import 'package:uuid/uuid.dart';
 
@@ -9,16 +11,24 @@ abstract final class PosCreditInvoiceChatProtocol {
   static const invoiceEventType = 'posCreditInvoice';
   static const acknowledgementEventType = 'posCreditInvoiceAcknowledgment';
   static const invoiceEventSchema = 'qayd_pos_credit_invoice_event_v1';
-  static const acknowledgementSchema = 'qayd_pos_credit_invoice_ack_v1';
+  static const acknowledgementSchema = 'qayd_pos_credit_ack_v1';
+  static const pdfAttachmentSchema = 'qayd_pos_credit_invoice_pdf_v1';
+  static const pdfAttachmentFileName = 'pos-credit-invoice.pdf';
+  static const maxPdfAttachmentBytes = 128 * 1024;
+  static const _maxEncodedPdfBytes = ((maxPdfAttachmentBytes + 2) ~/ 3) * 4;
   static const maxEventPayloadBytes =
-      PosCreditInvoiceChatSnapshot.maxSerializedBytes + 1024;
+      PosCreditInvoiceChatSnapshot.maxSerializedBytes +
+      _maxEncodedPdfBytes +
+      2048;
   static const maxAcknowledgmentPayloadBytes = 1024;
+
   static const _eventFields = <String>{
     'schema',
     'invoice_node_id',
     'invoice_id',
     'fingerprint',
     'invoice_snapshot',
+    'pdf_attachment',
   };
   static const _localInvoiceFields = <String>{
     'acknowledgment_status',
@@ -27,6 +37,15 @@ abstract final class PosCreditInvoiceChatProtocol {
     'acknowledgment_delivery_status',
     'acknowledgment_received_at',
     'acknowledgment_node_id',
+  };
+  static const _pdfAttachmentFields = <String>{
+    'schema',
+    'mime_type',
+    'file_name',
+    'invoice_fingerprint',
+    'byte_size',
+    'sha256',
+    'content_base64',
   };
   static const _acknowledgmentFields = <String>{
     'schema',
@@ -50,25 +69,88 @@ abstract final class PosCreditInvoiceChatProtocol {
     'qayd:pos-credit-ack:$invoiceNodeId:$fingerprint',
   );
 
+  /// The PDF bytes are part of the payload passed to the existing E2EE sync
+  /// dispatcher. The relay receives only the encrypted outer envelope.
   static Map<String, dynamic> invoiceEventPayload({
     required String invoiceNodeId,
     required PosCreditInvoiceChatSnapshot snapshot,
+    required Uint8List pdfBytes,
   }) {
-    if (invoiceNodeId !=
-        PosCreditInvoiceChatProtocol.invoiceNodeId(snapshot.invoiceId)) {
+    if (invoiceNodeId != invoiceNodeIdForSnapshot(snapshot)) {
       throw const FormatException('Invalid POS credit invoice node id.');
     }
+    final attachment = _pdfAttachment(snapshot, pdfBytes);
     final payload = <String, dynamic>{
       'schema': invoiceEventSchema,
       'invoice_node_id': invoiceNodeId,
       'invoice_id': snapshot.invoiceId,
       'fingerprint': snapshot.fingerprint,
       'invoice_snapshot': snapshot.toJson(),
+      'pdf_attachment': attachment,
     };
     if (utf8.encode(jsonEncode(payload)).length > maxEventPayloadBytes) {
       throw const FormatException('POS credit invoice event is too large.');
     }
     return payload;
+  }
+
+  static String invoiceNodeIdForSnapshot(
+    PosCreditInvoiceChatSnapshot snapshot,
+  ) => invoiceNodeId(snapshot.invoiceId);
+
+  /// Validates a persisted local chat event and returns only the network fields,
+  /// excluding delivery/acknowledgment state maintained by this device.
+  static Map<String, dynamic> networkInvoiceEventPayloadFromLocal({
+    required Map<String, dynamic> payload,
+    required String expectedNodeId,
+  }) {
+    snapshotFromEventPayload(payload, expectedNodeId: expectedNodeId);
+    return <String, dynamic>{for (final key in _eventFields) key: payload[key]};
+  }
+
+  static Uint8List pdfBytesFromEventPayload(
+    Map<String, dynamic> payload, {
+    required String expectedInvoiceFingerprint,
+  }) {
+    final rawAttachment = payload['pdf_attachment'];
+    if (rawAttachment is! Map ||
+        rawAttachment.length != _pdfAttachmentFields.length ||
+        rawAttachment.keys.any((key) => !_pdfAttachmentFields.contains(key)) ||
+        !_pdfAttachmentFields.every(rawAttachment.containsKey)) {
+      throw const FormatException('Missing or invalid POS invoice PDF.');
+    }
+    final attachment = Map<String, dynamic>.from(rawAttachment);
+    final encoded = attachment['content_base64'];
+    final declaredBytes = attachment['byte_size'];
+    final declaredHash = attachment['sha256'];
+    if (attachment['schema'] != pdfAttachmentSchema ||
+        attachment['mime_type'] != 'application/pdf' ||
+        attachment['file_name'] != pdfAttachmentFileName ||
+        attachment['invoice_fingerprint'] != expectedInvoiceFingerprint ||
+        encoded is! String ||
+        encoded.isEmpty ||
+        encoded.length > _maxEncodedPdfBytes ||
+        declaredBytes is! int ||
+        declaredBytes <= 0 ||
+        declaredBytes > maxPdfAttachmentBytes ||
+        declaredHash is! String ||
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(declaredHash)) {
+      throw const FormatException('Invalid POS invoice PDF metadata.');
+    }
+
+    late final Uint8List bytes;
+    try {
+      bytes = base64Decode(encoded);
+    } on FormatException {
+      throw const FormatException('Invalid POS invoice PDF encoding.');
+    }
+    if (base64Encode(bytes) != encoded ||
+        bytes.length != declaredBytes ||
+        !_hasPdfSignature(bytes) ||
+        crypto.sha256.convert(bytes).toString() != declaredHash) {
+      throw const FormatException('POS invoice PDF integrity check failed.');
+    }
+    return bytes;
   }
 
   static Map<String, dynamic> localInvoicePayload({
@@ -88,8 +170,7 @@ abstract final class PosCreditInvoiceChatProtocol {
     required String status,
     required DateTime respondedAt,
   }) {
-    if (invoiceNodeId !=
-            PosCreditInvoiceChatProtocol.invoiceNodeId(invoiceId) ||
+    if (invoiceNodeId != invoiceNodeIdFor(invoiceId) ||
         !RegExp(r'^[0-9a-f]{64}$').hasMatch(fingerprint) ||
         (status != 'accepted' && status != 'rejected')) {
       throw const FormatException('Invalid POS credit invoice acknowledgment.');
@@ -142,7 +223,7 @@ abstract final class PosCreditInvoiceChatProtocol {
         respondedAt.length > 64 ||
         DateTime.tryParse(respondedAt) == null ||
         eventInvoiceNodeId != expectedNodeId ||
-        eventInvoiceNodeId != invoiceNodeId(invoiceId)) {
+        eventInvoiceNodeId != invoiceNodeIdFor(invoiceId)) {
       return false;
     }
     return true;
@@ -183,11 +264,47 @@ abstract final class PosCreditInvoiceChatProtocol {
       Map<String, dynamic>.from(payload['invoice_snapshot'] as Map),
     );
     if (payload['invoice_id'] != snapshot.invoiceId ||
-        expectedNodeId !=
-            PosCreditInvoiceChatProtocol.invoiceNodeId(snapshot.invoiceId) ||
+        expectedNodeId != invoiceNodeIdForSnapshot(snapshot) ||
         payload['fingerprint'] != snapshot.fingerprint) {
       throw const FormatException('POS credit invoice fingerprint mismatch.');
     }
+    pdfBytesFromEventPayload(
+      payload,
+      expectedInvoiceFingerprint: snapshot.fingerprint,
+    );
     return snapshot;
   }
+
+  static Map<String, dynamic> _pdfAttachment(
+    PosCreditInvoiceChatSnapshot snapshot,
+    Uint8List bytes,
+  ) {
+    if (bytes.isEmpty ||
+        bytes.length > maxPdfAttachmentBytes ||
+        !_hasPdfSignature(bytes)) {
+      throw const FormatException('POS invoice PDF is missing or too large.');
+    }
+    return <String, dynamic>{
+      'schema': pdfAttachmentSchema,
+      'mime_type': 'application/pdf',
+      'file_name': pdfAttachmentFileName,
+      'invoice_fingerprint': snapshot.fingerprint,
+      'byte_size': bytes.length,
+      'sha256': crypto.sha256.convert(bytes).toString(),
+      'content_base64': base64Encode(bytes),
+    };
+  }
+
+  static bool _hasPdfSignature(Uint8List bytes) {
+    if (bytes.length < 9 || String.fromCharCodes(bytes.take(5)) != '%PDF-') {
+      return false;
+    }
+    final tailStart = bytes.length > 32 ? bytes.length - 32 : 0;
+    return String.fromCharCodes(bytes.skip(tailStart)).contains('%%EOF');
+  }
+
+  static String invoiceNodeIdFor(String invoiceId) => const Uuid().v5(
+    Namespace.url.value,
+    'qayd:pos-credit-invoice:$invoiceId',
+  );
 }

@@ -269,10 +269,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          simulator_id="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); devices=[d for group in data["devices"].values() for d in group if d.get("isAvailable") and d["name"].startswith("iPhone")]; print(devices[0]["udid"])')"
-          xcrun simctl boot "$simulator_id" || true
+          xcrun simctl list runtimes
+          xcrun simctl list devices available
+          simulator_id="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); runtime="com.apple.CoreSimulator.SimRuntime.iOS-18-5"; devices=[d for d in data["devices"].get(runtime,[]) if d.get("isAvailable") and d["name"].startswith("iPhone")]; devices.sort(key=lambda d:(d["name"]!="iPhone 16",d["name"])); print(devices[0]["udid"] if devices else "")')"
+          if [[ -z "$simulator_id" ]]; then
+            echo 'No available iPhone simulator for the pinned iOS 18.5 runtime.' >&2
+            exit 1
+          fi
+          simulator_state="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next((d["state"] for group in data["devices"].values() for d in group if d["udid"]==sys.argv[1]), "Unknown"))' "$simulator_id")"
+          if [[ "$simulator_state" != "Booted" ]]; then
+            xcrun simctl boot "$simulator_id"
+          fi
           xcrun simctl bootstatus "$simulator_id" -b
           echo "simulator-id=$simulator_id" >> "$GITHUB_OUTPUT"
 
       - name: Run libsodium integration test on iOS
-        run: flutter test --no-dds --verbose --no-pub integration_test/e2ee_crypto_integration_test.dart --reporter expanded -d ${{ steps.simulator.outputs.simulator-id }}
+        shell: bash
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.simulator-id }}
+        run: |
+          set -euo pipefail
+          flutter devices --device-timeout 30
+          flutter test --no-dds --device-timeout 120 --verbose --no-pub \
+            integration_test/e2ee_crypto_integration_test.dart \
+            --reporter expanded -d "$SIMULATOR_ID"
