@@ -7,6 +7,7 @@ on:
       - "lib/**"
       - "test/**"
       - "integration_test/**"
+      - "test_driver/**"
       - "tool/ci/**"
       - "android/**"
       - "ios/**"
@@ -26,6 +27,7 @@ on:
       - "lib/**"
       - "test/**"
       - "integration_test/**"
+      - "test_driver/**"
       - "tool/ci/**"
       - "android/**"
       - "ios/**"
@@ -297,6 +299,7 @@ jobs:
         run: |
           set -euo pipefail
           flutter devices --device-timeout 30
-          flutter test --verbose --no-pub \
-            integration_test/e2ee_crypto_integration_test.dart \
-            --reporter expanded -d "$SIMULATOR_ID"
+          flutter drive --no-pub --verbose \
+            --driver=test_driver/integration_test.dart \
+            --target=integration_test/e2ee_crypto_integration_test.dart \
+            -d "$SIMULATOR_ID" --timeout=600
