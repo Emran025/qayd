@@ -290,6 +290,6 @@ jobs:
         run: |
           set -euo pipefail
           flutter devices --device-timeout 30
-          flutter test --no-dds --device-timeout 120 --verbose --no-pub \
+          flutter test --no-dds --verbose --no-pub \
             integration_test/e2ee_crypto_integration_test.dart \
             --reporter expanded -d "$SIMULATOR_ID"
