@@ -30,7 +30,11 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def apply_source_backport(source: str) -> str:
-    if "await logReader._ready.future;" in source:
+    if (
+        "await logReader._ready.future;" in source
+        and "final _logReaders = <IOSApp?, _IOSSimulatorLogReader>{};" in source
+        and "_IOSSimulatorLogReader getLogReader(" in source
+    ):
         print("Flutter iOS simulator log-reader source fix is already present.")
         return source
 
@@ -89,6 +93,15 @@ def apply_source_backport(source: str) -> str:
   var _ready = Completer<void>();
 """,
         "log-reader readiness completer",
+    )
+
+    source = replace_once(
+        source,
+        """  final _logReaders = <IOSApp?, DeviceLogReader>{};
+""",
+        """  final _logReaders = <IOSApp?, _IOSSimulatorLogReader>{};
+""",
+        "iOS simulator log-reader cache type",
     )
 
     source = replace_once(
