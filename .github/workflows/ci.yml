@@ -294,10 +294,20 @@ jobs:
         shell: bash
         env:
           SIMULATOR_ID: ${{ steps.simulator.outputs.simulator-id }}
+          APP_BUNDLE_ID: com.accsystem.qayd
+          IOS_VM_SERVICE_WAIT_TIMEOUT_SECONDS: 480
         run: |
           set -euo pipefail
           flutter devices --device-timeout 30
-          # Let Flutter discover the simulator's actual VM Service port; iOS Simulator forwarding is identity-only.
-          flutter test --verbose --no-pub \
-            integration_test/e2ee_crypto_integration_test.dart \
-            --reporter expanded -d "$SIMULATOR_ID"
+          python3 tool/ci/run_ios_e2ee_integration_test.py
+
+      - name: Upload iOS simulator diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-e2ee-diagnostics-${{ github.run_id }}
+          path: |
+            artifacts/ios-e2ee-diagnostics.log
+            artifacts/ios-e2ee-integration.log
+          if-no-files-found: ignore
+          retention-days: 7
