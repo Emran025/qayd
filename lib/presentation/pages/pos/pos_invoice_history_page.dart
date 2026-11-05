@@ -445,19 +445,19 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
                             return;
                           }
                           setModalState(() => isSubmitting = true);
-                          final result = await InjectionContainer
-                              .completePosInvoicePaymentCollectionUseCase(
-                            CompletePosInvoicePaymentCollectionInput(
-                              invoiceId: invoice.id,
-                              amountMinorUnits: amount,
-                              currency: invoice.currency,
-                              paymentAccountId: AccountId(
-                                paymentAccountId!,
-                              ),
-                              paymentMethod: paymentMethod,
-                              occurredAt: occurredAt,
-                            ),
-                          );
+                          final result =
+                              await InjectionContainer.completePosInvoicePaymentCollectionUseCase(
+                                CompletePosInvoicePaymentCollectionInput(
+                                  invoiceId: invoice.id,
+                                  amountMinorUnits: amount,
+                                  currency: invoice.currency,
+                                  paymentAccountId: AccountId(
+                                    paymentAccountId!,
+                                  ),
+                                  paymentMethod: paymentMethod,
+                                  occurredAt: occurredAt,
+                                ),
+                              );
                           if (!modalContext.mounted) return;
                           setModalState(() => isSubmitting = false);
                           if (result.isFailure) {
@@ -490,16 +490,17 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
     amountController.dispose();
     if (succeeded != true || !mounted) return;
     widget.onInvoiceChanged();
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(AppStrings.posCollectSuccess)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(AppStrings.posCollectSuccess)));
   }
 
   String _paymentMethodLabel(PosPaymentMethod method) => switch (method) {
-        PosPaymentMethod.cash => AppStrings.posCheckoutCash,
-        PosPaymentMethod.bank => AppStrings.posCheckoutBank,
-        PosPaymentMethod.credit => AppStrings.posCheckoutCredit,
-        PosPaymentMethod.other => AppStrings.posCheckoutOther,
-      };
+    PosPaymentMethod.cash => AppStrings.posCheckoutCash,
+    PosPaymentMethod.bank => AppStrings.posCheckoutBank,
+    PosPaymentMethod.credit => AppStrings.posCheckoutCredit,
+    PosPaymentMethod.other => AppStrings.posCheckoutOther,
+  };
 
   Widget _paymentHistoryCard() {
     final payments = widget.details.payments;
@@ -510,10 +511,14 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
           if (payments.isEmpty)
             ListTile(title: Text(AppStrings.posCollectNoPayments)),
           ...payments.map((payment) {
-            final shortId =
-                payment.id.length > 8 ? payment.id.substring(0, 8) : payment.id;
-            final occurred =
-                payment.occurredAt.toLocal().toString().split('.').first;
+            final shortId = payment.id.length > 8
+                ? payment.id.substring(0, 8)
+                : payment.id;
+            final occurred = payment.occurredAt
+                .toLocal()
+                .toString()
+                .split('.')
+                .first;
             return ListTile(
               leading: const Icon(Icons.payments_outlined),
               title: Text(formatPosMoney(payment.amount)),
@@ -532,11 +537,13 @@ class _InvoiceDetailsBodyState extends State<_InvoiceDetailsBody> {
   Widget build(BuildContext context) {
     final invoice = widget.details.invoice;
     final isSale = invoice.type == PosInvoiceType.sale;
-    final canReturn = isSale &&
+    final canReturn =
+        isSale &&
         (invoice.status == PosDocumentStatus.paid ||
             invoice.status == PosDocumentStatus.partiallyReturned);
     final canVoid = isSale && invoice.status == PosDocumentStatus.paid;
-    final canCollect = isSale &&
+    final canCollect =
+        isSale &&
         invoice.due.minorUnits > 0 &&
         (invoice.status == PosDocumentStatus.posted ||
             invoice.status == PosDocumentStatus.partiallyPaid);

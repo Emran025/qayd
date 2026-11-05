@@ -1,4 +1,4 @@
-# POS thermal receipt printing status
+# POS thermal receipt demo status
 
 ## Current implementation boundary
 
@@ -7,6 +7,8 @@ Receipt content is formatted from the immutable posted invoice and its recorded 
 The print use case accepts only a posted sales invoice that is neither voided nor returned. It passes a printer-independent receipt layout to a single `PosReceiptPrinter` port. It does not depend on, call, or receive sale posting, payment posting, inventory movement, discount calculation, or accounting services. Reprinting is repeatable and does not mutate the invoice. Known platform failures are mapped to safe retry messages; unexpected exception text is not surfaced or logged.
 
 The content model preserves right-to-left text and tells adapters to rasterize Arabic when native glyph support is not verified. The 58 mm (nominal 384-dot) and 80 mm (nominal 576-dot) layouts are software test targets only; those dot counts are not a hardware compatibility claim. PDF export/share remains the supported printing fallback.
+
+**This is a software-only demo, not production thermal printing.** The default adapter is deliberately unavailable, so no data is sent to a physical printer. Merging the formatting/reprint demo does not enable or certify any hardware adapter.
 
 ## Physical hardware matrix — not yet tested
 
@@ -17,9 +19,9 @@ The content model preserves right-to-left text and tells adapters to rasterize A
 
 No Bluetooth, USB, network, Android, iOS, desktop, or web printer support is claimed. No vendor plugin or platform permission path has been enabled because there is no selected device profile or hardware available to validate it.
 
-## Required before enabling or merging hardware support
+## Before enabling real hardware support
 
-Select and test a concrete OS/device, transport, printer make/model and command language, and paper width. On that exact combination, verify permission granted/denied, successful connection, connection failure, timeout, disconnect during print, out-of-paper, retry, Arabic RTL and mixed digits, discounts/tax, partial payment and credit due, and safe reprint from invoice history. Confirm that a failed print never affects the saved sale, balances, stock or ledger, and that the repeat copy uses the saved invoice snapshot. Record the actual model and tested OS/transport here. Until that matrix is filled and CI passes, keep the default adapter unavailable and retain PDF/share as the only supported output.
+Select and test a concrete OS/device, transport, printer make/model and command language, and paper width. On that exact combination, verify permission granted/denied, successful connection, connection failure, timeout, disconnect during print, out-of-paper, retry, Arabic RTL and mixed digits, discounts/tax, partial payment and credit due, and safe reprint from invoice history. Confirm that a failed print never affects the saved sale, balances, stock or ledger, and that the repeat copy uses the saved invoice snapshot. Record the actual model and tested OS/transport here before enabling an adapter. This hardware validation gates enabling real printer support, not merging this software demo; until then keep the default adapter unavailable and retain PDF/share as the only supported output.
 
 ## Known snapshot limitation
 

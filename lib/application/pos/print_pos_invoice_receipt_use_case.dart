@@ -14,8 +14,8 @@ final class PrintPosInvoiceReceiptUseCase {
   const PrintPosInvoiceReceiptUseCase({
     required PosReceiptPrinter printer,
     required PosReceiptFormatter formatter,
-  })  : _printer = printer,
-        _formatter = formatter;
+  }) : _printer = printer,
+       _formatter = formatter;
 
   final PosReceiptPrinter _printer;
   final PosReceiptFormatter _formatter;
@@ -67,19 +67,19 @@ final class PrintPosInvoiceReceiptUseCase {
   }
 
   String _messageFor(PosReceiptPrinterFailureReason reason) => switch (reason) {
-        PosReceiptPrinterFailureReason.unavailable =>
-          AppStrings.posReceiptPrintUnavailable,
-        PosReceiptPrinterFailureReason.unsupported =>
-          AppStrings.posReceiptPrintUnsupported,
-        PosReceiptPrinterFailureReason.permissionDenied =>
-          AppStrings.posReceiptPrintPermissionDenied,
-        PosReceiptPrinterFailureReason.connectionFailed =>
-          AppStrings.posReceiptPrintConnectionFailed,
-        PosReceiptPrinterFailureReason.timedOut =>
-          AppStrings.posReceiptPrintTimedOut,
-        PosReceiptPrinterFailureReason.disconnected =>
-          AppStrings.posReceiptPrintDisconnected,
-        PosReceiptPrinterFailureReason.outOfPaper =>
-          AppStrings.posReceiptPrintOutOfPaper,
-      };
+    PosReceiptPrinterFailureReason.unavailable =>
+      AppStrings.posReceiptPrintUnavailable,
+    PosReceiptPrinterFailureReason.unsupported =>
+      AppStrings.posReceiptPrintUnsupported,
+    PosReceiptPrinterFailureReason.permissionDenied =>
+      AppStrings.posReceiptPrintPermissionDenied,
+    PosReceiptPrinterFailureReason.connectionFailed =>
+      AppStrings.posReceiptPrintConnectionFailed,
+    PosReceiptPrinterFailureReason.timedOut =>
+      AppStrings.posReceiptPrintTimedOut,
+    PosReceiptPrinterFailureReason.disconnected =>
+      AppStrings.posReceiptPrintDisconnected,
+    PosReceiptPrinterFailureReason.outOfPaper =>
+      AppStrings.posReceiptPrintOutOfPaper,
+  };
 }

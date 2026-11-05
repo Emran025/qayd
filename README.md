@@ -129,7 +129,7 @@ Qayd employs a strict Clean Architecture pattern (`Domain` → `Application` →
 
 ### POS thermal receipts
 
-Thermal receipt formatting and the isolated printer port are under review. No physical printer or platform has been tested, so thermal printing remains disabled and PDF/share is the supported fallback. See the [POS thermal printing status and hardware matrix](docs/pos-thermal-printing.md) before enabling a device adapter.
+Thermal receipt formatting and reprint are included as a software-only demo. No physical printer or platform has been tested, the default printer adapter remains unavailable, and PDF/share remains the supported output. Do not treat this demo as production thermal-print support; see the [POS thermal printing status and hardware matrix](docs/pos-thermal-printing.md) before enabling any device adapter.
 
 ---
 

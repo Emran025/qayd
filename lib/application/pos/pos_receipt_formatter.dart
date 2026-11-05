@@ -125,11 +125,11 @@ final class PosReceiptFormatter {
   }
 
   String _paymentMethodLabel(PosPaymentMethod method) => switch (method) {
-        PosPaymentMethod.cash => AppStrings.posReceiptCash,
-        PosPaymentMethod.bank => AppStrings.posReceiptBank,
-        PosPaymentMethod.credit => AppStrings.posReceiptCredit,
-        PosPaymentMethod.other => AppStrings.posReceiptOther,
-      };
+    PosPaymentMethod.cash => AppStrings.posReceiptCash,
+    PosPaymentMethod.bank => AppStrings.posReceiptBank,
+    PosPaymentMethod.credit => AppStrings.posReceiptCredit,
+    PosPaymentMethod.other => AppStrings.posReceiptOther,
+  };
 
   String _date(DateTime value) {
     final date = value.toLocal();

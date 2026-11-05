@@ -99,18 +99,20 @@ void main() {
     expect(printer.jobs, isEmpty);
   });
 
-  test('rejects a returned invoice instead of printing the original as current',
-      () async {
-    final printer = _FakePosReceiptPrinter();
-    final result = await _useCase(printer)(
-      details: buildDetails(returned: true),
-      paperWidth: PosReceiptPaperWidth.mm58,
-      isReprint: true,
-    );
+  test(
+    'rejects a returned invoice instead of printing the original as current',
+    () async {
+      final printer = _FakePosReceiptPrinter();
+      final result = await _useCase(printer)(
+        details: buildDetails(returned: true),
+        paperWidth: PosReceiptPaperWidth.mm58,
+        isReprint: true,
+      );
 
-    expect(result.isFailure, isTrue);
-    expect(printer.jobs, isEmpty);
-  });
+      expect(result.isFailure, isTrue);
+      expect(printer.jobs, isEmpty);
+    },
+  );
 
   test(
     'prints only a formatted snapshot and labels a history copy as reprint',

@@ -5604,24 +5604,24 @@ class AppStringsEn extends AppStringsBase {
   String get posStockMovementAllTypes => 'All movement types';
   @override
   String posStockMovementTypeLabel(String type) => switch (type) {
-        'opening' => 'Opening stock',
-        'purchase' => 'Purchase receipt',
-        'sale' => 'Sale',
-        'salesReturn' => 'Sales return',
-        'purchaseReturn' => 'Purchase return',
-        'adjustment' => 'Stock count adjustment',
-        'damage' => 'Damaged stock',
-        'expiry' => 'Expired stock',
-        _ => 'Inventory movement',
-      };
+    'opening' => 'Opening stock',
+    'purchase' => 'Purchase receipt',
+    'sale' => 'Sale',
+    'salesReturn' => 'Sales return',
+    'purchaseReturn' => 'Purchase return',
+    'adjustment' => 'Stock count adjustment',
+    'damage' => 'Damaged stock',
+    'expiry' => 'Expired stock',
+    _ => 'Inventory movement',
+  };
   @override
   String posStockDisposalReasonLabel(String code) => switch (code) {
-        'damage' => 'Damaged',
-        'expiry' => 'Expired',
-        'authorized_loss' => 'Authorized loss',
-        'other' => 'Other',
-        _ => 'Stock disposal',
-      };
+    'damage' => 'Damaged',
+    'expiry' => 'Expired',
+    'authorized_loss' => 'Authorized loss',
+    'other' => 'Other',
+    _ => 'Stock disposal',
+  };
   @override
   String get posStockDisposalTitle => 'Dispose damaged or expired stock';
   @override
