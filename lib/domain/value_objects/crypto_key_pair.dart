@@ -2,17 +2,17 @@ import 'dart:typed_data';
 
 /// Immutable Ed25519 asymmetric key pair for signing and verification.
 ///
-/// - [privateKey]: 32-byte seed (NEVER leaves the device or is transmitted).
+/// - [privateKey]: Ed25519 secret material (NEVER leaves the device or is
+///   transmitted). The current identity service stores the 64-byte
+///   `seed || public key` representation returned by ed25519_edwards; crypto
+///   consumers may also accept a 32-byte seed when explicitly documented.
 /// - [publicKey]: 32-byte public key (registered on server for discovery).
 ///
 /// Both are raw byte arrays. Hex encoding is handled at serialization boundaries.
 final class CryptoKeyPair {
-  const CryptoKeyPair({
-    required this.privateKey,
-    required this.publicKey,
-  });
+  const CryptoKeyPair({required this.privateKey, required this.publicKey});
 
-  /// 32-byte Ed25519 private key seed.
+  /// Ed25519 secret bytes (currently 64-byte `seed || public key`).
   final Uint8List privateKey;
 
   /// 32-byte Ed25519 public key.

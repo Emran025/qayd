@@ -91,7 +91,7 @@ class StatementChatCubit extends Cubit<StatementChatState> {
     // If provided initially, use it.
     // Otherwise, prioritize the "Fund" account (liquidAssets).
     if (_initialMyAccountId != null) {
-      _myAccountId = _initialMyAccountId!;
+      _myAccountId = _initialMyAccountId;
     } else {
       // Find the first liquidAssets account that isn't the counterparty
       final fundAccount = accounts.firstWhere(

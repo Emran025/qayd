@@ -102,7 +102,7 @@ class VoucherCreateCubit extends Cubit<VoucherCreateState> {
       return;
     }
     emit(const VoucherCreateSubmitting());
-    final result = await _createDual!(input);
+    final result = await _createDual(input);
     result.fold(
       (f) => emit(VoucherCreateFailure(f)),
       (out) => emit(VoucherCreateDualSuccess(

@@ -180,7 +180,7 @@ final class PosCatalogCubit extends Cubit<PosCatalogState> {
   Future<void> reactivate(String productId) async {
     if (isClosed || state.isBusy || _reactivateUseCase == null) return;
     emit(state.copyWith(status: PosCatalogStatus.saving, clearFailure: true));
-    final result = await _reactivateUseCase!(productId);
+    final result = await _reactivateUseCase(productId);
     if (isClosed) return;
     if (result.isFailure) {
       emit(state.copyWith(

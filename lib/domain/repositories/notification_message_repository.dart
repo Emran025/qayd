@@ -16,6 +16,14 @@ abstract class NotificationMessageRepository {
     int limit,
   });
 
+  /// Returns durable chat records for selected channels, including processed
+  /// rows, so reading an invoice notification never removes it from history.
+  Future<Result<List<NotificationMessage>>> listForCounterpartyChannels({
+    required String counterpartyAccountId,
+    required List<String> channels,
+    int limit,
+  });
+
   Future<Result<List<NotificationMessage>>> listAllUnprocessed({int limit});
 
   Future<Result<void>> markProcessed(String id);
@@ -33,6 +41,15 @@ abstract class NotificationMessageRepository {
   /// name could be resolved (e.g. offline at staging time).
   Future<Result<void>> updateBodyAndPayload({
     required String id,
+    required String bodyText,
+    required String rawPayloadJson,
+  });
+
+  /// Updates the record only if [expectedRawPayloadJson] is still current.
+  /// Returns `false` when another writer changed the protocol state first.
+  Future<Result<bool>> updateBodyAndPayloadIfUnchanged({
+    required String id,
+    required String expectedRawPayloadJson,
     required String bodyText,
     required String rawPayloadJson,
   });

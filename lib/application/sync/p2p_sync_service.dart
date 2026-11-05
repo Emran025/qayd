@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:qayd/core/result/result.dart';
 import 'package:flutter/foundation.dart';
 import 'package:qayd/data/repositories/outbox_dao.dart';
+import 'package:qayd/data/security/e2ee_envelope_format.dart';
 import 'package:qayd/data/repositories/sync_watermark_dao.dart';
 
 /// Transport-agnostic P2P Sync Service skeleton.
@@ -81,14 +82,27 @@ class P2PSyncService {
       final outboxResult = await outboxDao.listPendingForCounterparty(
         counterpartyAccountId,
       );
-      final pendingItems =
-          outboxResult.isSuccess ? outboxResult.valueOrNull! : <OutboxEntry>[];
+      final pendingItems = outboxResult.isSuccess
+          ? outboxResult.valueOrNull!
+          : <OutboxEntry>[];
+
+      final safeItems = <OutboxEntry>[];
+      for (final item in pendingItems) {
+        if (E2EEEnvelopeFormat.isSupported(item.encryptedPayload)) {
+          safeItems.add(item);
+        } else {
+          await outboxDao.markBlockedLegacy(item.id);
+        }
+      }
+      if (safeItems.isEmpty) {
+        return P2PSyncResult(success: true, sentCount: 0, receivedCount: 0);
+      }
 
       // 3. Connect to peer
       await transportAdapter!.connect(counterpartyAccountId, peerPublicKey);
 
       // 4. Send our delta
-      for (final item in pendingItems) {
+      for (final item in safeItems) {
         final envelope = jsonEncode({
           'type': 'delta',
           'event_type': item.eventType,
@@ -100,10 +114,12 @@ class P2PSyncService {
       }
 
       // 5. Send sync-complete marker
-      await transportAdapter!.send(jsonEncode({
-        'type': 'sync_complete',
-        'watermark': DateTime.now().toIso8601String(),
-      }));
+      await transportAdapter!.send(
+        jsonEncode({
+          'type': 'sync_complete',
+          'watermark': DateTime.now().toIso8601String(),
+        }),
+      );
 
       // 6. Listen for incoming delta from peer (with timeout)
       var receivedCount = 0;
@@ -120,8 +136,9 @@ class P2PSyncService {
 
         if (msgType == 'ack') {
           // Peer acknowledges receipt of our items
-          final ackedIds =
-              (msg['item_ids'] as List?)?.map((e) => e as String).toList();
+          final ackedIds = (msg['item_ids'] as List?)
+              ?.map((e) => e as String)
+              .toList();
           if (ackedIds != null) {
             deliveredIds.addAll(ackedIds);
           }
@@ -138,18 +155,20 @@ class P2PSyncService {
       }
 
       // 8. Update watermark
-      await watermarkDao.upsert(SyncWatermark(
-        counterpartyAccountId: counterpartyAccountId,
-        lastSyncedAt: DateTime.now(),
-        transport: 'p2p',
-      ));
+      await watermarkDao.upsert(
+        SyncWatermark(
+          counterpartyAccountId: counterpartyAccountId,
+          lastSyncedAt: DateTime.now(),
+          transport: 'p2p',
+        ),
+      );
 
       // 9. Disconnect
       await transportAdapter!.disconnect();
 
       return P2PSyncResult(
         success: true,
-        sentCount: pendingItems.length,
+        sentCount: safeItems.length,
         receivedCount: receivedCount,
       );
     } catch (e) {

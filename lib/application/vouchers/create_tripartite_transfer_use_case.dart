@@ -322,10 +322,10 @@ class CreateTripartiteTransferUseCase {
             );
           }
           if (_syncEventDispatcher != null) {
-            _syncEventDispatcher!
+            _syncEventDispatcher
                 .dispatchVoucherAcceptance(confirmedReceipt)
                 .ignore();
-            _syncEventDispatcher!
+            _syncEventDispatcher
                 .dispatchVoucherAcceptance(confirmedPayment)
                 .ignore();
           }

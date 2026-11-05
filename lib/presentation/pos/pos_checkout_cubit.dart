@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qayd/application/pos/build_pos_sale_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_sale_use_case.dart';
 import 'package:qayd/application/pos/list_pos_products_use_case.dart';
 import 'package:qayd/application/pos/resolve_pos_product_for_checkout_use_case.dart';
+import 'package:qayd/application/pos/send_pos_credit_invoice_to_chat_use_case.dart';
 import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/core/utils/id_generator.dart';
@@ -213,6 +216,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
     required ListPosProductsUseCase listProducts,
     this.currencyConverter,
     this.completeSale,
+    this.shareCreditInvoice,
     this.idGenerator,
     this.discountActorId = 'device:unknown',
     this.discountPolicyMaximumBasisPoints = PosDiscountRule.maximumBasisPoints,
@@ -224,6 +228,7 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
   final ListPosProductsUseCase _listProducts;
   final PosCurrencyConverter? currencyConverter;
   final CompletePosSaleUseCase? completeSale;
+  final SendPosCreditInvoiceToChatUseCase? shareCreditInvoice;
   final IdGenerator? idGenerator;
   final String discountActorId;
   final int discountPolicyMaximumBasisPoints;
@@ -238,6 +243,8 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
     required PosPaymentMethod paymentMethod,
     AccountId? customerAccountId,
     AccountId? paymentAccountId,
+    DateTime? creditDueDate,
+    String? creditTerms,
   }) async {
     if (isClosed ||
         state.isBusy ||
@@ -287,6 +294,8 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
       createdAt: now,
       customerAccountId: customerAccountId,
       cartDiscountRule: state.cartDiscountRule,
+      creditDueDate: creditDueDate,
+      creditTerms: creditTerms,
       settlement: PosSaleSettlementInput(
         advanceMinorUnits: advanceMinorUnits,
         paymentMethod: paymentMethod,
@@ -311,6 +320,14 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
     );
     if (state.status == PosCheckoutStatus.completed) {
       _clearPendingSale();
+      final invoice = result.valueOrNull;
+      final share = shareCreditInvoice;
+      if (invoice != null &&
+          invoice.due.minorUnits > 0 &&
+          invoice.counterpartyAccountId != null &&
+          share != null) {
+        unawaited(share(invoice).then<void>((_) {}, onError: (_) {}));
+      }
     }
   }
 

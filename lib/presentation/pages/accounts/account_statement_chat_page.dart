@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:intl/intl.dart' hide TextDirection;
+import 'package:qayd/application/pos/pos_credit_invoice_chat_protocol.dart';
 import 'package:qayd/application/accounts/dtos/account_statement_chat_message_dto.dart';
 import 'package:qayd/application/vouchers/dtos/confirm_voucher_input.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
@@ -9,6 +10,7 @@ import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/agreement_status.dart';
 import 'package:qayd/domain/value_objects/voucher_state.dart';
 import 'package:qayd/domain/value_objects/voucher_type.dart';
+import 'package:qayd/domain/entities/pos_credit_invoice_chat_snapshot.dart';
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/presentation/components/atomic/qayd_badge.dart';
 import 'package:qayd/presentation/components/atomic/qayd_dialog.dart';
@@ -37,6 +39,7 @@ import 'package:qayd/presentation/utils/statement_chat_export.dart';
 import 'package:qayd/application/accounts/dtos/statement_chat_filter_input.dart';
 import 'package:qayd/presentation/utils/whatsapp_flavor_picker.dart';
 import 'package:qayd/core/utils/currency_util.dart';
+import 'package:qayd/presentation/utils/share_pdf_bytes.dart';
 
 /// Chat-style "Statement of Account" between two parties (accounts).
 ///
@@ -211,11 +214,17 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
       setState(() => _mutating = false);
       if (!mounted) return;
       result.fold(
-        (f) => QaydSnackBar.show(context, f.messageAr,
-            type: QaydSnackBarType.error),
+        (f) => QaydSnackBar.show(
+          context,
+          f.messageAr,
+          type: QaydSnackBarType.error,
+        ),
         (_) {
-          QaydSnackBar.show(context, AppStrings.voucherCreatedDraft,
-              type: QaydSnackBarType.success);
+          QaydSnackBar.show(
+            context,
+            AppStrings.voucherCreatedDraft,
+            type: QaydSnackBarType.success,
+          );
           cubit.reload();
         },
       );
@@ -289,11 +298,17 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
       setState(() => _mutating = false);
 
       result.fold(
-        (f) => QaydSnackBar.show(context, f.messageAr,
-            type: QaydSnackBarType.error),
+        (f) => QaydSnackBar.show(
+          context,
+          f.messageAr,
+          type: QaydSnackBarType.error,
+        ),
         (_) {
-          QaydSnackBar.show(context, AppStrings.voucherWithdrawalSuccess,
-              type: QaydSnackBarType.success);
+          QaydSnackBar.show(
+            context,
+            AppStrings.voucherWithdrawalSuccess,
+            type: QaydSnackBarType.success,
+          );
           cubit.reload();
         },
       );
@@ -429,6 +444,116 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
     }
   }
 
+  Future<void> _respondToPosCreditInvoice(
+    String notificationId,
+    bool accepted,
+  ) async {
+    if (_mutating) return;
+    setState(() => _mutating = true);
+    try {
+      final result =
+          await InjectionContainer.respondToPosCreditInvoiceInChatUseCase(
+            notificationId: notificationId,
+            accepted: accepted,
+          );
+      if (!mounted) return;
+      if (result.isFailure) {
+        QaydSnackBar.show(
+          context,
+          result.failureOrNull!.messageAr,
+          type: QaydSnackBarType.error,
+        );
+      } else {
+        QaydSnackBar.show(
+          context,
+          AppStrings.posCreditInvoiceResponseSent,
+          type: QaydSnackBarType.success,
+        );
+      }
+      await context.read<StatementChatCubit>().reload();
+    } finally {
+      if (mounted) setState(() => _mutating = false);
+    }
+  }
+
+  Future<void> _retryPosCreditInvoice({
+    required String notificationId,
+    required bool retryAcknowledgment,
+    bool accepted = true,
+  }) async {
+    if (_mutating) return;
+    setState(() => _mutating = true);
+    try {
+      final result = retryAcknowledgment
+          ? await InjectionContainer.respondToPosCreditInvoiceInChatUseCase(
+              notificationId: notificationId,
+              accepted: accepted,
+            )
+          : await InjectionContainer.sendPosCreditInvoiceToChatUseCase.retry(
+              notificationId,
+            );
+      if (!mounted) return;
+      if (result.isFailure) {
+        QaydSnackBar.show(
+          context,
+          result.failureOrNull!.messageAr,
+          type: QaydSnackBarType.error,
+        );
+      } else {
+        QaydSnackBar.show(
+          context,
+          retryAcknowledgment
+              ? AppStrings.posCreditInvoiceResponseSent
+              : AppStrings.posCreditInvoiceAwaiting,
+          type: QaydSnackBarType.success,
+        );
+      }
+      await context.read<StatementChatCubit>().reload();
+    } finally {
+      if (mounted) setState(() => _mutating = false);
+    }
+  }
+
+  void _openPosCreditInvoiceDetails(AccountStatementChatMessageDto msg) {
+    try {
+      final notificationId = msg.posInvoiceMessageId;
+      if (notificationId == null) {
+        throw const FormatException('Missing invoice message id.');
+      }
+      final payload = PosCreditInvoiceChatProtocol.decodePayload(
+        msg.posInvoicePayloadJson,
+      );
+      final snapshot = PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
+        payload,
+        expectedNodeId: notificationId,
+      );
+      final pdfBytes = PosCreditInvoiceChatProtocol.pdfBytesFromEventPayload(
+        payload,
+        expectedInvoiceFingerprint: snapshot.fingerprint,
+      );
+      showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => _PosCreditInvoiceDetailsSheet(
+          snapshot: snapshot,
+          onExportPdf: () async {
+            await sharePdfBytes(
+              pdfBytes,
+              'pos-credit-invoice-${snapshot.fingerprint.substring(0, 12)}.pdf',
+            );
+          },
+        ),
+      );
+    } on FormatException {
+      QaydSnackBar.show(
+        context,
+        AppStrings.posInvoiceNotFound,
+        type: QaydSnackBarType.error,
+      );
+    }
+  }
+
   void _showVoucherActions(
     BuildContext context,
     AccountStatementChatMessageDto msg,
@@ -493,9 +618,9 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
                     _ActionButton(
                       icon: Icons.published_with_changes_rounded,
                       label: AppStrings.voucherCreateReversal,
-                      color: Theme.of(context)
-                          .extension<QaydCustomColors>()!
-                          .goldAccent,
+                      color: Theme.of(
+                        context,
+                      ).extension<QaydCustomColors>()!.goldAccent,
                       onTap: () {
                         Navigator.pop(ctx);
                         _createReversalVoucher(context, msg);
@@ -551,8 +676,9 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
     List<AccountStatementChatMessageDto> historyReversed,
     Map<String, int> initialBalances,
   ) {
-    final List<AccountStatementChatMessageDto> history =
-        historyReversed.reversed.toList();
+    final List<AccountStatementChatMessageDto> history = historyReversed
+        .reversed
+        .toList();
     final List<List<_BalanceSnapshot>> snapshotsList = [];
     final Map<String, _BalanceSnapshot> currentBalances = {};
 
@@ -577,7 +703,8 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
         snapshotsList.add(currentBalances.values.toList());
         continue;
       }
-      final current = currentBalances[m.currencyCode] ??
+      final current =
+          currentBalances[m.currencyCode] ??
           _BalanceSnapshot(
             code: m.currencyCode,
             symbol: CurrencyUtil.getLocalizedName(m.currencyCode),
@@ -663,8 +790,9 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
         final data = state as StatementChatReady;
         final cubit = context.read<StatementChatCubit>();
         final custom = Theme.of(context).extension<QaydCustomColors>()!;
-        final voucherCount =
-            data.messages.where((m) => !m.isSettlementMilestone).length;
+        final voucherCount = data.messages
+            .where((m) => !m.isSettlementMilestone && !m.isPosCreditInvoice)
+            .length;
 
         final int firstUnreadIndex = data.messages.lastIndexWhere(
           (m) =>
@@ -807,9 +935,11 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
                               data.messages,
                               data.broughtForwardByCurrency,
                             );
-                            final showBF = data.filter.includePreviousBalance &&
-                                data.broughtForwardByCurrency.values
-                                    .any((v) => v != 0);
+                            final showBF =
+                                data.filter.includePreviousBalance &&
+                                data.broughtForwardByCurrency.values.any(
+                                  (v) => v != 0,
+                                );
 
                             return ListView.builder(
                               controller: _scrollController,
@@ -836,7 +966,9 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
                                 final msgIdx = i;
                                 final msg = data.messages[msgIdx];
                                 final key = _messageKeys.putIfAbsent(
-                                    msg.voucherId, () => GlobalKey());
+                                  msg.voucherId,
+                                  () => GlobalKey(),
+                                );
                                 final balances = allSnapshots[msgIdx];
 
                                 // Find child reversal voucher (if any) for bidirectional navigation
@@ -854,86 +986,112 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
                                 final msgWidget = msg.isSettlementMilestone
                                     ? _SettlementMilestoneCard(msg: msg)
                                     : msg.isTransferRequest
-                                        ? _TransferRequestBubble(
-                                            msg: msg,
-                                            onTap: () {
-                                              if (!msg.isCreator) {
-                                                final uri = Uri.parse(
-                                                    '/tripartite/create?sourceAccountId=${msg.otherPartyId}&destAccountId=${msg.otherPartyId}&amount=${msg.amountMinorUnits}&currency=${msg.currencyCode}&notes=${Uri.encodeComponent(msg.description)}');
-                                                Navigator.of(context).push(
-                                                  QaydPageRoute.slideFromStart(
-                                                    builder: (ctx) =>
-                                                        MultiBlocProvider(
-                                                      providers: [
-                                                        BlocProvider<
-                                                            VoucherCreateCubit>(
-                                                          create: (_) =>
-                                                              VoucherCreateCubit(
-                                                            InjectionContainer
-                                                                .createVoucherUseCase,
-                                                            InjectionContainer
-                                                                .createTripartiteTransferUseCase,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                      child:
-                                                          TripartiteCreatePage(
-                                                        initialQrData: {
-                                                          'amountMinorUnits':
-                                                              int.tryParse(
-                                                                  uri.queryParameters[
-                                                                          'amount'] ??
-                                                                      '0'),
-                                                          'currencyCode':
-                                                              uri.queryParameters[
-                                                                  'currency'],
-                                                          'sourceAccountId': uri
-                                                                  .queryParameters[
-                                                              'sourceAccountId'],
-                                                          'destAccountId': uri
-                                                                  .queryParameters[
-                                                              'destAccountId'],
-                                                          'notes':
-                                                              uri.queryParameters[
-                                                                  'notes'],
-                                                        },
+                                    ? _TransferRequestBubble(
+                                        msg: msg,
+                                        onTap: () {
+                                          if (!msg.isCreator) {
+                                            final uri = Uri.parse(
+                                              '/tripartite/create?sourceAccountId=${msg.otherPartyId}&destAccountId=${msg.otherPartyId}&amount=${msg.amountMinorUnits}&currency=${msg.currencyCode}&notes=${Uri.encodeComponent(msg.description)}',
+                                            );
+                                            Navigator.of(context).push(
+                                              QaydPageRoute.slideFromStart(
+                                                builder: (ctx) => MultiBlocProvider(
+                                                  providers: [
+                                                    BlocProvider<
+                                                      VoucherCreateCubit
+                                                    >(
+                                                      create: (_) => VoucherCreateCubit(
+                                                        InjectionContainer
+                                                            .createVoucherUseCase,
+                                                        InjectionContainer
+                                                            .createTripartiteTransferUseCase,
                                                       ),
                                                     ),
+                                                  ],
+                                                  child: TripartiteCreatePage(
+                                                    initialQrData: {
+                                                      'amountMinorUnits':
+                                                          int.tryParse(
+                                                            uri.queryParameters['amount'] ??
+                                                                '0',
+                                                          ),
+                                                      'currencyCode': uri
+                                                          .queryParameters['currency'],
+                                                      'sourceAccountId': uri
+                                                          .queryParameters['sourceAccountId'],
+                                                      'destAccountId': uri
+                                                          .queryParameters['destAccountId'],
+                                                      'notes': uri
+                                                          .queryParameters['notes'],
+                                                    },
                                                   ),
-                                                );
-                                              }
-                                            },
-                                          )
-                                        : _MessageBubble(
-                                            msg: msg,
-                                            mutating: _mutating,
-                                            isUnified: data.isUnified,
-                                            onAccept: (id) =>
-                                                _acceptVoucher(context, id),
-                                            onReject: (id) =>
-                                                _rejectVoucher(context, id),
-                                            onWithdraw: (id) =>
-                                                _withdrawVoucher(context, id),
-                                            onResubmit: (id) =>
-                                                _resubmitVoucher(context, id),
-                                            onOriginTap: _scrollToMessage,
-                                            onReversalTap:
-                                                childReversalId != null
-                                                    ? () => _scrollToMessage(
-                                                        childReversalId!)
-                                                    : null,
-                                            onTap: () => data.isUnified
-                                                ? _navigateToCounterpartyChat(
-                                                    context,
-                                                    msg.otherPartyId,
-                                                    data.counterpartyAccountId,
-                                                  )
-                                                : VoucherDetailPage.show(
-                                                    context, msg.voucherId),
-                                            onLongPress: () =>
-                                                _showVoucherActions(
-                                                    context, msg),
-                                          );
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        },
+                                      )
+                                    : msg.isPosCreditInvoice
+                                    ? _PosCreditInvoiceBubble(
+                                        msg: msg,
+                                        mutating: _mutating,
+                                        onAccept: () =>
+                                            _respondToPosCreditInvoice(
+                                              msg.posInvoiceMessageId!,
+                                              true,
+                                            ),
+                                        onReject: () =>
+                                            _respondToPosCreditInvoice(
+                                              msg.posInvoiceMessageId!,
+                                              false,
+                                            ),
+                                        onRetrySend: () =>
+                                            _retryPosCreditInvoice(
+                                              notificationId:
+                                                  msg.posInvoiceMessageId!,
+                                              retryAcknowledgment: false,
+                                            ),
+                                        onRetryAcknowledgment: (accepted) =>
+                                            _retryPosCreditInvoice(
+                                              notificationId:
+                                                  msg.posInvoiceMessageId!,
+                                              retryAcknowledgment: true,
+                                              accepted: accepted,
+                                            ),
+                                        onTap: () =>
+                                            _openPosCreditInvoiceDetails(msg),
+                                      )
+                                    : _MessageBubble(
+                                        msg: msg,
+                                        mutating: _mutating,
+                                        isUnified: data.isUnified,
+                                        onAccept: (id) =>
+                                            _acceptVoucher(context, id),
+                                        onReject: (id) =>
+                                            _rejectVoucher(context, id),
+                                        onWithdraw: (id) =>
+                                            _withdrawVoucher(context, id),
+                                        onResubmit: (id) =>
+                                            _resubmitVoucher(context, id),
+                                        onOriginTap: _scrollToMessage,
+                                        onReversalTap: childReversalId != null
+                                            ? () => _scrollToMessage(
+                                                childReversalId!,
+                                              )
+                                            : null,
+                                        onTap: () => data.isUnified
+                                            ? _navigateToCounterpartyChat(
+                                                context,
+                                                msg.otherPartyId,
+                                                data.counterpartyAccountId,
+                                              )
+                                            : VoucherDetailPage.show(
+                                                context,
+                                                msg.voucherId,
+                                              ),
+                                        onLongPress: () =>
+                                            _showVoucherActions(context, msg),
+                                      );
 
                                 final itemWidget = Column(
                                   key: key,
@@ -948,7 +1106,8 @@ class _AccountStatementChatPageState extends State<AccountStatementChatPage> {
                                     if (msg.voucherStateCode == 'confirmed' ||
                                         msg.voucherStateCode == 'settled')
                                       _ChronologySummaryTable(
-                                          balances: balances),
+                                        balances: balances,
+                                      ),
 
                                     SizedBox(height: SpacingTokens.sm),
                                   ],
@@ -1061,9 +1220,7 @@ class _ChatHeader extends StatelessWidget {
                           children: [
                             Text(
                               counterpartyName,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
+                              style: Theme.of(context).textTheme.titleMedium
                                   ?.copyWith(fontWeight: FontWeight.w700),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -1072,9 +1229,7 @@ class _ChatHeader extends StatelessWidget {
                               isUnified
                                   ? AppStrings.statementUnifiedTitle
                                   : '$messageCount ${AppStrings.statementVoucherCount}',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
+                              style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(color: scheme.onSurfaceVariant),
                             ),
                           ],
@@ -1129,8 +1284,11 @@ class _ChatHeader extends StatelessWidget {
                       value: 'request_funds',
                       child: Row(
                         children: [
-                          Icon(Icons.send_rounded,
-                              size: 20, color: custom.goldAccent),
+                          Icon(
+                            Icons.send_rounded,
+                            size: 20,
+                            color: custom.goldAccent,
+                          ),
                           SizedBox(width: SpacingTokens.sm),
                           Text(AppStrings.tripartiteRequestFunds),
                         ],
@@ -1284,10 +1442,12 @@ class _ActiveFilterChips extends StatelessWidget {
 
     if (data.filter.fromDate != null || data.filter.toDate != null) {
       final df = DateFormat.yMd('en');
-      final from =
-          data.filter.fromDate != null ? df.format(data.filter.fromDate!) : '…';
-      final to =
-          data.filter.toDate != null ? df.format(data.filter.toDate!) : '…';
+      final from = data.filter.fromDate != null
+          ? df.format(data.filter.fromDate!)
+          : '…';
+      final to = data.filter.toDate != null
+          ? df.format(data.filter.toDate!)
+          : '…';
       chips.add(
         InputChip(
           label: Text('$from → $to'),
@@ -1303,7 +1463,8 @@ class _ActiveFilterChips extends StatelessWidget {
     }
 
     if (data.filter.costCenterId != null) {
-      final name = data.costCenterNamesById[data.filter.costCenterId] ??
+      final name =
+          data.costCenterNamesById[data.filter.costCenterId] ??
           data.filter.costCenterId;
       chips.add(
         InputChip(
@@ -1372,26 +1533,28 @@ class _BroughtForwardCard extends StatelessWidget {
       child: Column(
         children: [
           if (balances.isNotEmpty) ...[
-            ...balances.map((b) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    children: [
-                      Text(
-                        b.code,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: color,
-                              fontWeight: FontWeight.bold,
-                            ),
+            ...balances.map(
+              (b) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Text(
+                      b.code,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.bold,
                       ),
-                      const Spacer(),
-                      _BalanceAmountText(
-                        minorUnits: b.amount,
-                        currencySymbol: b.symbol,
-                        currencyDigits: b.digits,
-                      ),
-                    ],
-                  ),
-                )),
+                    ),
+                    const Spacer(),
+                    _BalanceAmountText(
+                      minorUnits: b.amount,
+                      currencySymbol: b.symbol,
+                      currencyDigits: b.digits,
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ],
       ),
@@ -1440,9 +1603,9 @@ class _UnreadSessionDivider extends StatelessWidget {
                 Text(
                   AppStrings.statementUnreadMessages,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: custom.goldAccent,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: custom.goldAccent,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -1503,17 +1666,17 @@ class _SummaryFooter extends StatelessWidget {
                 Text(
                   AppStrings.statementFinalBalance,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: scheme.onSurfaceVariant,
-                        letterSpacing: 0.5,
-                      ),
+                    fontWeight: FontWeight.w900,
+                    color: scheme.onSurfaceVariant,
+                    letterSpacing: 0.5,
+                  ),
                 ),
                 Text(
                   '$messageCount ${AppStrings.statementVoucherCount}',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
-                        fontSize: 9,
-                      ),
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
+                    fontSize: 9,
+                  ),
                 ),
               ],
             ),
@@ -1549,18 +1712,18 @@ class _SummaryFooter extends StatelessWidget {
                 final statusLabel = isPositive
                     ? AppStrings.statementBalanceAgainstYou
                     : isNegative
-                        ? AppStrings.statementBalanceForYou
-                        : AppStrings.statementBalanceSettled;
+                    ? AppStrings.statementBalanceForYou
+                    : AppStrings.statementBalanceSettled;
                 final statusColor = isPositive
                     ? ColorTokens.goldAccent
                     : isNegative
-                        ? custom.credit
-                        : custom.confirmedState;
+                    ? custom.credit
+                    : custom.confirmedState;
                 final statusIcon = isPositive
                     ? Icons.trending_up_rounded
                     : isNegative
-                        ? Icons.trending_down_rounded
-                        : Icons.check_circle_outline_rounded;
+                    ? Icons.trending_down_rounded
+                    : Icons.check_circle_outline_rounded;
 
                 return TableRow(
                   children: [
@@ -1694,9 +1857,9 @@ class _ActionButton extends StatelessWidget {
               label,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurface,
-                    fontWeight: FontWeight.w600,
-                  ),
+                color: scheme.onSurface,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ],
         ),
@@ -1729,14 +1892,14 @@ class _ChronologySummaryTable extends StatelessWidget {
               final color = isPositive
                   ? ColorTokens.goldAccent
                   : isNegative
-                      ? custom.credit
-                      : custom.confirmedState;
+                  ? custom.credit
+                  : custom.confirmedState;
 
               final label = isPositive
                   ? AppStrings.creditorToYou
                   : isNegative
-                      ? AppStrings.oweToYou
-                      : AppStrings.neutral;
+                  ? AppStrings.oweToYou
+                  : AppStrings.neutral;
 
               return Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -1822,9 +1985,9 @@ class _SettlementMilestoneCard extends StatelessWidget {
               msg.settlementLabel ?? AppStrings.statementSettlementMilestone,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: scheme.onSurface,
-                    fontWeight: FontWeight.w700,
-                  ),
+                color: scheme.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: SpacingTokens.xs),
             QaydMoneyDisplay(
@@ -1840,10 +2003,7 @@ class _SettlementMilestoneCard extends StatelessWidget {
 }
 
 class _TransferRequestBubble extends StatelessWidget {
-  const _TransferRequestBubble({
-    required this.msg,
-    required this.onTap,
-  });
+  const _TransferRequestBubble({required this.msg, required this.onTap});
 
   final AccountStatementChatMessageDto msg;
   final VoidCallback onTap;
@@ -1870,10 +2030,12 @@ class _TransferRequestBubble extends StatelessWidget {
             borderRadius: BorderRadius.only(
               topLeft: const Radius.circular(RadiusTokens.lg),
               topRight: const Radius.circular(RadiusTokens.lg),
-              bottomLeft:
-                  isMe ? const Radius.circular(RadiusTokens.lg) : Radius.zero,
-              bottomRight:
-                  isMe ? Radius.zero : const Radius.circular(RadiusTokens.lg),
+              bottomLeft: isMe
+                  ? const Radius.circular(RadiusTokens.lg)
+                  : Radius.zero,
+              bottomRight: isMe
+                  ? Radius.zero
+                  : const Radius.circular(RadiusTokens.lg),
             ),
             border: Border.all(
               color: isMe
@@ -1890,8 +2052,9 @@ class _TransferRequestBubble extends StatelessWidget {
                   Icon(
                     Icons.call_split_rounded,
                     size: 16,
-                    color:
-                        isMe ? custom.goldAccent : scheme.onSecondaryContainer,
+                    color: isMe
+                        ? custom.goldAccent
+                        : scheme.onSecondaryContainer,
                   ),
                   const SizedBox(width: SpacingTokens.sm),
                   Expanded(
@@ -1900,11 +2063,11 @@ class _TransferRequestBubble extends StatelessWidget {
                           ? AppStrings.requestToMakeA
                           : AppStrings.transferRequestReceivedTitle,
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: isMe
-                                ? custom.goldAccent
-                                : scheme.onSecondaryContainer,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        color: isMe
+                            ? custom.goldAccent
+                            : scheme.onSecondaryContainer,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -1928,8 +2091,8 @@ class _TransferRequestBubble extends StatelessWidget {
                 Text(
                   msg.description,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
               if (!isMe) ...[
@@ -2134,12 +2297,16 @@ class _MessageBubble extends StatelessWidget {
                             child: InkWell(
                               onTap: () =>
                                   onOriginTap?.call(msg.originVoucherId!),
-                              borderRadius:
-                                  BorderRadius.circular(RadiusTokens.sm),
+                              borderRadius: BorderRadius.circular(
+                                RadiusTokens.sm,
+                              ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.reply_rounded,
-                                      size: 14, color: statusColor),
+                                  Icon(
+                                    Icons.reply_rounded,
+                                    size: 14,
+                                    color: statusColor,
+                                  ),
                                   SizedBox(width: SpacingTokens.xs),
                                   Expanded(
                                     child: Text(
@@ -2266,10 +2433,9 @@ class _MessageBubble extends StatelessWidget {
                                 ),
                                 child: Text(
                                   CurrencyUtil.getLocalizedName(
-                                      msg.currencyCode),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelSmall
+                                    msg.currencyCode,
+                                  ),
+                                  style: Theme.of(context).textTheme.labelSmall
                                       ?.copyWith(
                                         color: statusColor,
                                         fontWeight: FontWeight.w700,
@@ -2293,9 +2459,7 @@ class _MessageBubble extends StatelessWidget {
                               msg.description,
                               maxLines: 3,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
+                              style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
                                     color: scheme.onSurfaceVariant,
                                     height: 1.4,
@@ -2318,10 +2482,12 @@ class _MessageBubble extends StatelessWidget {
                                 vertical: 6,
                               ),
                               decoration: BoxDecoration(
-                                color: scheme.tertiaryContainer
-                                    .withValues(alpha: 0.3),
-                                borderRadius:
-                                    BorderRadius.circular(RadiusTokens.sm),
+                                color: scheme.tertiaryContainer.withValues(
+                                  alpha: 0.3,
+                                ),
+                                borderRadius: BorderRadius.circular(
+                                  RadiusTokens.sm,
+                                ),
                                 border: Border.all(
                                   color: scheme.tertiary.withValues(alpha: 0.2),
                                 ),
@@ -2351,10 +2517,12 @@ class _MessageBubble extends StatelessWidget {
                                     Container(
                                       width: 1,
                                       height: 12,
-                                      color: scheme.tertiary
-                                          .withValues(alpha: 0.3),
+                                      color: scheme.tertiary.withValues(
+                                        alpha: 0.3,
+                                      ),
                                       margin: const EdgeInsets.symmetric(
-                                          horizontal: SpacingTokens.xs),
+                                        horizontal: SpacingTokens.xs,
+                                      ),
                                     ),
                                     Text(
                                       AppStrings.statementFeePrefix,
@@ -2368,7 +2536,9 @@ class _MessageBubble extends StatelessWidget {
                                     ),
                                     QaydMoneyDisplay(
                                       money: Money.fromMinorUnits(
-                                          msg.feeAmountMinorUnits!, currency),
+                                        msg.feeAmountMinorUnits!,
+                                        currency,
+                                      ),
                                       size: QaydMoneyDisplaySize.small,
                                     ),
                                   ],
@@ -2388,21 +2558,25 @@ class _MessageBubble extends StatelessWidget {
                             ),
                             child: InkWell(
                               onTap: onReversalTap,
-                              borderRadius:
-                                  BorderRadius.circular(RadiusTokens.sm),
+                              borderRadius: BorderRadius.circular(
+                                RadiusTokens.sm,
+                              ),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: SpacingTokens.sm,
                                   vertical: 5,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: ColorTokens.errorDeep
-                                      .withValues(alpha: 0.06),
-                                  borderRadius:
-                                      BorderRadius.circular(RadiusTokens.sm),
+                                  color: ColorTokens.errorDeep.withValues(
+                                    alpha: 0.06,
+                                  ),
+                                  borderRadius: BorderRadius.circular(
+                                    RadiusTokens.sm,
+                                  ),
                                   border: Border.all(
-                                    color: ColorTokens.errorDeep
-                                        .withValues(alpha: 0.22),
+                                    color: ColorTokens.errorDeep.withValues(
+                                      alpha: 0.22,
+                                    ),
                                   ),
                                 ),
                                 child: Row(
@@ -2428,12 +2602,15 @@ class _MessageBubble extends StatelessWidget {
                                       SizedBox(width: 4),
                                       Container(
                                         padding: const EdgeInsets.symmetric(
-                                            horizontal: 5, vertical: 1),
+                                          horizontal: 5,
+                                          vertical: 1,
+                                        ),
                                         decoration: BoxDecoration(
                                           color: ColorTokens.errorDeep
                                               .withValues(alpha: 0.15),
                                           borderRadius: BorderRadius.circular(
-                                              RadiusTokens.pill),
+                                            RadiusTokens.pill,
+                                          ),
                                         ),
                                         child: Text(
                                           '×${msg.reversalCount}',
@@ -2485,9 +2662,7 @@ class _MessageBubble extends StatelessWidget {
                               SizedBox(width: 4),
                               Text(
                                 dateStr,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
+                                style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(
                                       color: scheme.onSurfaceVariant.withValues(
                                         alpha: 0.6,
@@ -2507,9 +2682,7 @@ class _MessageBubble extends StatelessWidget {
                               SizedBox(width: 4),
                               Text(
                                 '${AppStrings.statementRunningBalance}: ',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
+                                style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(
                                       color: scheme.onSurfaceVariant.withValues(
                                         alpha: 0.5,
@@ -2520,7 +2693,8 @@ class _MessageBubble extends StatelessWidget {
                               _BalanceAmountText(
                                 minorUnits: msg.runningBalanceMinorUnits,
                                 currencySymbol: CurrencyUtil.getLocalizedName(
-                                    msg.currencyCode),
+                                  msg.currencyCode,
+                                ),
                                 currencyDigits: msg.currencyDigits,
                                 fontSize: 10,
                               ),
@@ -2583,8 +2757,9 @@ class _MessageBubble extends StatelessWidget {
           children: [
             Expanded(
               child: FilledButton.icon(
-                onPressed:
-                    mutating ? null : () async => onAccept(msg.voucherId),
+                onPressed: mutating
+                    ? null
+                    : () async => onAccept(msg.voucherId),
                 icon: Icon(Icons.check_rounded, size: 16),
                 label: Text(AppStrings.statementChatAccept),
                 style: FilledButton.styleFrom(
@@ -2600,8 +2775,9 @@ class _MessageBubble extends StatelessWidget {
             SizedBox(width: SpacingTokens.sm),
             Expanded(
               child: OutlinedButton.icon(
-                onPressed:
-                    mutating ? null : () async => onReject(msg.voucherId),
+                onPressed: mutating
+                    ? null
+                    : () async => onReject(msg.voucherId),
                 icon: Icon(Icons.close_rounded, size: 16),
                 label: Text(AppStrings.statementChatReject),
                 style: OutlinedButton.styleFrom(
@@ -2638,8 +2814,9 @@ class _MessageBubble extends StatelessWidget {
           if (showResubmit)
             Expanded(
               child: OutlinedButton.icon(
-                onPressed:
-                    mutating ? null : () async => onResubmit(msg.voucherId),
+                onPressed: mutating
+                    ? null
+                    : () async => onResubmit(msg.voucherId),
                 icon: Icon(Icons.refresh_rounded, size: 16),
                 label: Text(AppStrings.statementChatResubmit),
                 style: OutlinedButton.styleFrom(
@@ -2659,8 +2836,9 @@ class _MessageBubble extends StatelessWidget {
           if (showWithdraw)
             Expanded(
               child: OutlinedButton.icon(
-                onPressed:
-                    mutating ? null : () async => onWithdraw(msg.voucherId),
+                onPressed: mutating
+                    ? null
+                    : () async => onWithdraw(msg.voucherId),
                 icon: Icon(Icons.u_turn_right_rounded, size: 16),
                 label: Text(AppStrings.statementChatWithdraw),
                 style: OutlinedButton.styleFrom(
@@ -2679,6 +2857,326 @@ class _MessageBubble extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _PosCreditInvoiceBubble extends StatelessWidget {
+  const _PosCreditInvoiceBubble({
+    required this.msg,
+    required this.mutating,
+    required this.onAccept,
+    required this.onReject,
+    required this.onRetrySend,
+    required this.onRetryAcknowledgment,
+    required this.onTap,
+  });
+
+  final AccountStatementChatMessageDto msg;
+  final bool mutating;
+  final Future<void> Function() onAccept;
+  final Future<void> Function() onReject;
+  final Future<void> Function() onRetrySend;
+  final Future<void> Function(bool accepted) onRetryAcknowledgment;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isIncoming = msg.direction == 'incoming';
+    final acknowledgement = msg.posInvoiceAcknowledgmentStatus ?? 'pending';
+    final delivery = msg.posInvoiceDeliveryStatus ?? 'queued';
+    final isPending = acknowledgement == 'pending';
+    final isPendingSync = acknowledgement.endsWith('_pending_sync');
+    final scheme = Theme.of(context).colorScheme;
+    final custom = Theme.of(context).extension<QaydCustomColors>()!;
+    final statusColor = acknowledgement == 'rejected'
+        ? ColorTokens.errorDeep
+        : acknowledgement == 'accepted'
+        ? custom.confirmedState
+        : delivery == 'failed'
+        ? ColorTokens.errorDeep
+        : custom.draftState;
+    final statusText = switch (acknowledgement) {
+      'accepted' => AppStrings.posCreditInvoiceAccepted,
+      'rejected' => AppStrings.posCreditInvoiceRejected,
+      _ when isPendingSync => AppStrings.posCreditInvoiceResponsePendingSync,
+      _ when !isIncoming && delivery == 'failed' =>
+        AppStrings.posCreditInvoiceDeliveryFailed,
+      _ when isIncoming => AppStrings.posCreditInvoiceNeedsResponse,
+      _ => AppStrings.posCreditInvoiceAwaiting,
+    };
+
+    Widget? actions;
+    if (isIncoming && isPending) {
+      actions = Row(
+        children: [
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: mutating ? null : onAccept,
+              icon: const Icon(Icons.check_rounded, size: 16),
+              label: Text(AppStrings.statementChatAccept),
+            ),
+          ),
+          const SizedBox(width: SpacingTokens.sm),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: mutating ? null : onReject,
+              icon: const Icon(Icons.close_rounded, size: 16),
+              label: Text(AppStrings.statementChatReject),
+            ),
+          ),
+        ],
+      );
+    } else if (isIncoming && isPendingSync) {
+      final accepted = acknowledgement.startsWith('accepted_');
+      actions = OutlinedButton.icon(
+        onPressed: mutating ? null : () => onRetryAcknowledgment(accepted),
+        icon: const Icon(Icons.sync_rounded),
+        label: Text(AppStrings.posCreditInvoiceRetryAck),
+      );
+    } else if (!isIncoming &&
+        isPending &&
+        (delivery == 'failed' || delivery == 'pending')) {
+      actions = OutlinedButton.icon(
+        onPressed: mutating ? null : onRetrySend,
+        icon: const Icon(Icons.refresh_rounded),
+        label: Text(AppStrings.posCreditInvoiceRetrySend),
+      );
+    }
+
+    return Align(
+      alignment: isIncoming
+          ? AlignmentDirectional.centerStart
+          : AlignmentDirectional.centerEnd,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.84,
+        ),
+        child: Card(
+          clipBehavior: Clip.antiAlias,
+          color: scheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(RadiusTokens.lg),
+            side: BorderSide(color: statusColor.withValues(alpha: 0.35)),
+          ),
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(SpacingTokens.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.receipt_long_rounded, color: statusColor),
+                      const SizedBox(width: SpacingTokens.sm),
+                      Expanded(
+                        child: Text(
+                          AppStrings.posCreditInvoiceChatTitle,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      Text(
+                        '#${msg.posInvoiceNumber ?? ''}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: SpacingTokens.sm),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          AppStrings.posInvoiceDueLabel,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ),
+                      _BalanceAmountText(
+                        minorUnits: msg.posInvoiceDueMinorUnits ?? 0,
+                        currencySymbol: msg.currencySymbol,
+                        currencyDigits: msg.currencyDigits,
+                        fontSize: 14,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: SpacingTokens.xs),
+                  Text(
+                    statusText,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: statusColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (actions != null) ...[
+                    const SizedBox(height: SpacingTokens.sm),
+                    actions,
+                  ],
+                  const SizedBox(height: SpacingTokens.xs),
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: Text(
+                      AppStrings.posCreditInvoiceOpenDetails,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(color: scheme.primary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PosCreditInvoiceDetailsSheet extends StatelessWidget {
+  const _PosCreditInvoiceDetailsSheet({
+    required this.snapshot,
+    required this.onExportPdf,
+  });
+
+  final PosCreditInvoiceChatSnapshot snapshot;
+  final Future<void> Function() onExportPdf;
+
+  @override
+  Widget build(BuildContext context) {
+    final currency = snapshot.currency;
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+      ),
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.all(SpacingTokens.lg),
+        children: [
+          Text(
+            AppStrings.posCreditInvoiceChatTitle,
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: SpacingTokens.xs),
+          Text('#${snapshot.invoiceNumber}'),
+          Text(DateFormat.yMMMd('en').format(snapshot.invoiceDate)),
+          Text(
+            '${AppStrings.posCreditInvoiceDueDate}: '
+            '${snapshot.creditDueDate == null ? AppStrings.posCreditInvoiceUnspecified : DateFormat.yMMMd('en').format(snapshot.creditDueDate!)}',
+          ),
+          Text(
+            '${AppStrings.posCreditInvoiceTerms}: '
+            '${snapshot.creditTerms ?? AppStrings.posCreditInvoiceUnspecified}',
+          ),
+          const SizedBox(height: SpacingTokens.sm),
+          Container(
+            padding: const EdgeInsets.all(SpacingTokens.sm),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(RadiusTokens.md),
+            ),
+            child: Text(AppStrings.posCreditInvoiceAcknowledgmentOnly),
+          ),
+          const SizedBox(height: SpacingTokens.md),
+          for (final line in snapshot.lines)
+            Card(
+              child: ListTile(
+                title: Text(line.productName),
+                subtitle: Text(
+                  '${line.quantity.toExactString()} × '
+                  '${_displayMinor(line.unitPriceMinorUnits, currency)}',
+                ),
+                trailing: _BalanceAmountText(
+                  minorUnits: line.lineTotalMinorUnits,
+                  currencySymbol: currency.symbol,
+                  currencyDigits: currency.fractionalDigits,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          const Divider(),
+          _invoiceAmountRow(
+            context,
+            AppStrings.posCheckoutSubtotal,
+            snapshot.subtotalMinorUnits,
+          ),
+          _invoiceAmountRow(
+            context,
+            AppStrings.posCheckoutDiscountTotal,
+            snapshot.discountMinorUnits,
+          ),
+          _invoiceAmountRow(
+            context,
+            AppStrings.posCreditInvoiceTaxLabel,
+            snapshot.taxMinorUnits,
+          ),
+          _invoiceAmountRow(
+            context,
+            AppStrings.posCheckoutFinalTotal,
+            snapshot.totalMinorUnits,
+            strong: true,
+          ),
+          _invoiceAmountRow(
+            context,
+            AppStrings.posCreditInvoicePaidLabel,
+            snapshot.paidMinorUnits,
+          ),
+          _invoiceAmountRow(
+            context,
+            AppStrings.posInvoiceDueLabel,
+            snapshot.dueMinorUnits,
+            strong: true,
+          ),
+          const SizedBox(height: SpacingTokens.md),
+          FilledButton.icon(
+            onPressed: onExportPdf,
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            label: Text(AppStrings.posInvoiceExportPdf),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _invoiceAmountRow(
+    BuildContext context,
+    String label,
+    int amount, {
+    bool strong = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: SpacingTokens.xs),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: strong
+                  ? Theme.of(context).textTheme.titleSmall
+                  : Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+          _BalanceAmountText(
+            minorUnits: amount,
+            currencySymbol: snapshot.currency.symbol,
+            currencyDigits: snapshot.currency.fractionalDigits,
+            fontSize: strong ? 14 : 12,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _displayMinor(int amount, CurrencyCode currency) {
+    final digits = currency.fractionalDigits;
+    final divisor = _powerOfTen(digits);
+    return '${(amount / divisor).toStringAsFixed(digits)} ${currency.symbol}';
+  }
+
+  int _powerOfTen(int digits) {
+    var value = 1;
+    for (var index = 0; index < digits; index++) {
+      value *= 10;
+    }
+    return value;
   }
 }
 
@@ -2711,8 +3209,8 @@ class _BalanceAmountText extends StatelessWidget {
     final color = isPositive
         ? ColorTokens.goldAccent
         : isNegative
-            ? custom.credit
-            : custom.confirmedState;
+        ? custom.credit
+        : custom.confirmedState;
 
     num divisor = 1;
     for (var i = 0; i < currencyDigits; i++) {

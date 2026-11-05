@@ -221,6 +221,8 @@ final class PosInvoice {
     required this.total,
     required this.paid,
     required this.due,
+    this.creditDueDate,
+    this.creditTerms,
     required this.idempotencyKey,
     required this.invoiceDate,
     required this.createdAt,
@@ -244,6 +246,8 @@ final class PosInvoice {
     Money? discount,
     PosDiscountRule? cartDiscountRule,
     Money? tax,
+    DateTime? creditDueDate,
+    String? creditTerms,
   }) {
     if (id.trim().isEmpty ||
         invoiceNumber.trim().isEmpty ||
@@ -252,6 +256,9 @@ final class PosInvoice {
     }
     if (lines.isEmpty) throw InvalidPosInvoiceException.linesRequired();
     if (idempotencyKey.trim().isEmpty) {
+      throw InvalidPosInvoiceException.requiredField();
+    }
+    if ((creditTerms?.trim().length ?? 0) > 240) {
       throw InvalidPosInvoiceException.requiredField();
     }
     final immutableLines = List<PosInvoiceLine>.unmodifiable(lines);
@@ -318,6 +325,8 @@ final class PosInvoice {
       total: Money.fromMinorUnits(totalMinor, currency),
       paid: zero,
       due: Money.fromMinorUnits(totalMinor, currency),
+      creditDueDate: _creditDateOnly(creditDueDate),
+      creditTerms: _creditTerms(creditTerms),
       idempotencyKey: idempotencyKey.trim(),
       invoiceDate: invoiceDate.toUtc(),
       createdAt: timestamp,
@@ -346,12 +355,26 @@ final class PosInvoice {
   final Money total;
   final Money paid;
   final Money due;
+  final DateTime? creditDueDate;
+  final String? creditTerms;
   final String idempotencyKey;
   final DateTime invoiceDate;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? postedAt;
   final PosInvoiceSignature? signature;
+
+  static DateTime? _creditDateOnly(DateTime? value) =>
+      value == null ? null : DateTime.utc(value.year, value.month, value.day);
+
+  static String? _creditTerms(String? value) {
+    final normalized = value?.trim();
+    if (normalized == null || normalized.isEmpty) return null;
+    if (normalized.length > 240) {
+      throw InvalidPosInvoiceException.requiredField();
+    }
+    return normalized;
+  }
 
   factory PosInvoice.fromPersistence({
     required String id,
@@ -371,6 +394,8 @@ final class PosInvoice {
     required Money total,
     required Money paid,
     required Money due,
+    DateTime? creditDueDate,
+    String? creditTerms,
     required String idempotencyKey,
     required DateTime invoiceDate,
     required DateTime createdAt,
@@ -390,10 +415,18 @@ final class PosInvoice {
         paid.minorUnits + due.minorUnits != total.minorUnits) {
       throw InvalidPosInvoiceException.invalidTotals();
     }
+    var computedSubtotalMinor = 0;
     for (final line in lines) {
       if (line.invoiceId != id || line.unitPrice.currency != currency) {
         throw InvalidPosInvoiceException.invalidLine();
       }
+      computedSubtotalMinor += PosMoneyMath.multiply(
+        line.quantity,
+        line.unitPrice,
+      ).minorUnits;
+    }
+    if (subtotal.minorUnits != computedSubtotalMinor) {
+      throw InvalidPosInvoiceException.invalidTotals();
     }
     final lineDiscountMinor = lines.fold<int>(
       0,
@@ -414,6 +447,13 @@ final class PosInvoice {
                 restoredCartDiscount.minorUnits)) {
       throw InvalidPosInvoiceException.invalidTotals();
     }
+    // Persisted invoice-level tax is aggregated with line tax; only the total
+    // formula is reconstructible without adding a new persistence column.
+    final expectedTotalMinor =
+        subtotal.minorUnits - discount.minorUnits + tax.minorUnits;
+    if (total.minorUnits != expectedTotalMinor) {
+      throw InvalidPosInvoiceException.invalidTotals();
+    }
     return PosInvoice._(
       id: id,
       invoiceNumber: invoiceNumber,
@@ -432,6 +472,8 @@ final class PosInvoice {
       total: total,
       paid: paid,
       due: due,
+      creditDueDate: _creditDateOnly(creditDueDate),
+      creditTerms: _creditTerms(creditTerms),
       idempotencyKey: idempotencyKey,
       invoiceDate: invoiceDate.toUtc(),
       createdAt: createdAt.toUtc(),
@@ -505,6 +547,8 @@ final class PosInvoice {
     total: total,
     paid: paid ?? this.paid,
     due: due ?? this.due,
+    creditDueDate: creditDueDate,
+    creditTerms: creditTerms,
     idempotencyKey: idempotencyKey,
     invoiceDate: invoiceDate,
     createdAt: createdAt,

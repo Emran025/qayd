@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:qayd/di/injection_container.dart';
 import 'package:qayd/domain/repositories/notification_message_repository.dart';
 import 'package:qayd/domain/services/notification_filter_service.dart';
@@ -21,6 +22,7 @@ import 'package:qayd/domain/value_objects/voucher_type.dart';
 import 'package:qayd/domain/value_objects/voucher_state.dart';
 import 'package:qayd/domain/value_objects/agreement_status.dart';
 import 'package:qayd/domain/value_objects/signable_receipt.dart';
+import 'package:qayd/domain/value_objects/digital_signature.dart';
 import 'package:qayd/domain/repositories/attachment_repository.dart';
 import 'package:qayd/domain/repositories/collateral_repository.dart';
 import 'package:qayd/data/encryption/voucher_key_service.dart';
@@ -36,6 +38,8 @@ import 'package:qayd/domain/entities/collateral_revaluation.dart';
 import 'package:qayd/domain/value_objects/tripartite_meta.dart';
 import 'package:qayd/domain/value_objects/tripartite_role.dart';
 import 'package:uuid/uuid.dart';
+import 'package:qayd/application/pos/pos_credit_invoice_audit.dart';
+import 'package:qayd/application/pos/pos_credit_invoice_chat_protocol.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/application/governance/audit_log_service.dart';
 import 'package:qayd/application/sync/audit_sync_processor.dart';
@@ -46,17 +50,24 @@ List<String> _orderedDecryptPublicKeys({
   required SyncNode node,
   required PartyDetails party,
 }) {
+  final authorizedKeys = <String>{
+    for (final key in party.allAuthorizedKeys)
+      if (key.trim().isNotEmpty) key.trim().toLowerCase(),
+  };
   final out = <String>[];
 
   void add(String? hex) {
     final v = (hex ?? '').trim();
     if (v.isEmpty) return;
     final normalized = v.toLowerCase();
+    if (!authorizedKeys.contains(normalized)) return;
     if (!out.contains(normalized)) {
       out.add(normalized);
     }
   }
 
+  // Sender metadata is not an authorization source. On phone/WhatsApp
+  // fallback, only keys already attached to this party may authenticate data.
   add(node.senderPublicKey);
   for (final k in party.allAuthorizedKeys) {
     add(k);
@@ -108,20 +119,23 @@ class SyncPayloadProcessor {
 
     final envPk = node.senderPublicKey?.trim().toLowerCase() ?? '';
     if (envPk.isNotEmpty) {
-      accountId =
-          (await accountRepository.findAccountByPublicKey(envPk)).valueOrNull;
+      accountId = (await accountRepository.findAccountByPublicKey(
+        envPk,
+      )).valueOrNull;
     }
 
     final envPhone = node.senderPhone?.trim() ?? '';
     if (accountId == null && envPhone.isNotEmpty) {
-      accountId =
-          (await accountRepository.findAccountByPhone(envPhone)).valueOrNull;
+      accountId = (await accountRepository.findAccountByPhone(
+        envPhone,
+      )).valueOrNull;
     }
 
     final envWa = node.senderWhatsapp?.trim() ?? '';
     if (accountId == null && envWa.isNotEmpty) {
-      accountId =
-          (await accountRepository.findAccountByWhatsApp(envWa)).valueOrNull;
+      accountId = (await accountRepository.findAccountByWhatsApp(
+        envWa,
+      )).valueOrNull;
     }
 
     if (accountId == null) {
@@ -136,47 +150,52 @@ class SyncPayloadProcessor {
         // The server keeps returning unacknowledged nodes on every pull.
         // Check whether this node is already staged so we never make a
         // redundant network call or overwrite a previously-resolved name.
-        final existing =
-            await notificationMessageRepository.findById(node.id);
+        final existing = await notificationMessageRepository.findById(node.id);
 
         if (existing != null) {
           // Node is already staged. Check if the name was already resolved.
           final existingRaw = existing.rawPayloadJson != null
               ? (jsonDecode(existing.rawPayloadJson!) as Map<String, dynamic>?)
               : null;
-          final alreadyHasName =
-              existingRaw?['sender_name'] as String?;
+          final alreadyHasName = existingRaw?['sender_name'] as String?;
 
           if (alreadyHasName != null && alreadyHasName.isNotEmpty) {
             // Name already known — nothing to do.
             debugPrint(
-                'Sync: Node [${node.id}] already staged with name [$alreadyHasName], skipping.');
+              'Sync: Node [${node.id}] already staged with name [$alreadyHasName], skipping.',
+            );
             return null;
           }
 
           // Staged without a name (e.g. was offline at first staging).
           // Resolve the name now and backfill the existing record.
           debugPrint(
-              'Sync: Node [${node.id}] staged but missing name — backfilling from server.');
+            'Sync: Node [${node.id}] staged but missing name — backfilling from server.',
+          );
           try {
-            final result = await identityRepository
-                .lookupSyncNodeSender(nodeId: node.id);
+            final result = await identityRepository.lookupSyncNodeSender(
+              nodeId: node.id,
+            );
             if (result != null && result.name.isNotEmpty) {
-              final updatedPayload = jsonDecode(existing.rawPayloadJson ?? '{}')
-                  as Map<String, dynamic>;
+              final updatedPayload =
+                  jsonDecode(existing.rawPayloadJson ?? '{}')
+                      as Map<String, dynamic>;
               updatedPayload['sender_name'] = result.name;
-              updatedPayload['sender_phone'] ??=
-                  result.phone.isNotEmpty ? result.phone : null;
+              updatedPayload['sender_phone'] ??= result.phone.isNotEmpty
+                  ? result.phone
+                  : null;
               updatedPayload['sender_whatsapp'] ??= result.whatsappNumber;
               updatedPayload['sender_pk'] ??= result.publicKeyHex;
               await notificationMessageRepository.updateBodyAndPayload(
                 id: node.id,
-                bodyText:
-                    AppStrings.counterpartyOnboardingRequestFrom(result.name),
+                bodyText: AppStrings.counterpartyOnboardingRequestFrom(
+                  result.name,
+                ),
                 rawPayloadJson: jsonEncode(updatedPayload),
               );
               debugPrint(
-                  'Sync: Backfilled name [${result.name}] for node [${node.id}].');
+                'Sync: Backfilled name [${result.name}] for node [${node.id}].',
+              );
             }
           } catch (e) {
             debugPrint('Sync: Backfill name lookup failed (non-fatal): $e');
@@ -186,7 +205,8 @@ class SyncPayloadProcessor {
 
         // Node not yet staged — run the full staging flow.
         debugPrint(
-            'Sync: Unknown sender [Phone: $envPhone / PK: ${envPk.isNotEmpty ? envPk.substring(0, 8) : '—'}] — staging consent-based onboarding request.');
+          'Sync: Unknown sender [Phone: $envPhone / PK: ${envPk.isNotEmpty ? envPk.substring(0, 8) : '—'}] — staging consent-based onboarding request.',
+        );
         await stagePendingCounterpartyRequest(
           nodeId: node.id,
           node: node,
@@ -239,6 +259,8 @@ class SyncPayloadProcessor {
               encryptedPayload: node.encryptedPayload,
               receiverKeyPair: myKeyPair,
               senderPublicKeyHex: pk,
+              nodeId: node.id,
+              eventType: node.eventType.name,
             );
             decryptionKeyHexUsed = pk;
             break;
@@ -336,9 +358,26 @@ class SyncPayloadProcessor {
               node.id,
             );
             break;
+          case SyncEventType.posCreditInvoice:
+            final applied = await _inboundPosCreditInvoice(
+              decryptedRawPayload,
+              node.id,
+              localSenderAccountIdStr,
+            );
+            if (!applied) continue;
+            break;
+          case SyncEventType.posCreditInvoiceAcknowledgment:
+            final applied = await _inboundPosCreditInvoiceAcknowledgment(
+              decryptedRawPayload,
+              node.id,
+              localSenderAccountIdStr,
+              decryptionKeyHexUsed ?? decryptKeys.first,
+            );
+            if (!applied) continue;
+            break;
           case SyncEventType.unknown:
             debugPrint('Warning: Unknown event type in SyncNode [${node.id}]');
-            break;
+            continue;
         }
         appliedIds.add(node.id);
       } catch (e) {
@@ -346,6 +385,225 @@ class SyncPayloadProcessor {
       }
     }
     return appliedIds;
+  }
+
+  Future<bool> _inboundPosCreditInvoice(
+    Map<String, dynamic> payload,
+    String nodeId,
+    String senderAccountId,
+  ) async {
+    try {
+      final snapshot = PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
+        payload,
+        expectedNodeId: nodeId,
+      );
+      final existing = await notificationMessageRepository.findById(nodeId);
+      if (existing != null) {
+        if (existing.channel != PosCreditInvoiceChatProtocol.incomingChannel ||
+            existing.counterpartyAccountId != senderAccountId) {
+          return false;
+        }
+        final prior = PosCreditInvoiceChatProtocol.decodePayload(
+          existing.rawPayloadJson,
+        );
+        final priorSnapshot =
+            PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
+              prior,
+              expectedNodeId: nodeId,
+            );
+        final priorPdfSha256 =
+            PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+              prior,
+              expectedInvoiceFingerprint: priorSnapshot.fingerprint,
+            );
+        final incomingPdfSha256 =
+            PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+              payload,
+              expectedInvoiceFingerprint: snapshot.fingerprint,
+            );
+        final matchesPrior =
+            priorSnapshot.invoiceId == snapshot.invoiceId &&
+            priorSnapshot.fingerprint == snapshot.fingerprint &&
+            priorPdfSha256 == incomingPdfSha256;
+        if (!matchesPrior) return false;
+        await recordPosCreditInvoiceAudit(
+          auditLogService: auditLogService,
+          action: AuditAction.update,
+          requestNodeId: nodeId,
+          eventId: nodeId,
+          invoiceId: snapshot.invoiceId,
+          partyAccountId: senderAccountId,
+          fingerprint: snapshot.fingerprint,
+          pdfSha256: incomingPdfSha256,
+          event: 'invoice_received',
+          result: 'duplicate_verified',
+        );
+        return true;
+      }
+
+      final localPayload = PosCreditInvoiceChatProtocol.localInvoicePayload(
+        eventPayload: payload,
+        acknowledgementStatus: 'pending',
+        deliveryStatus: 'received',
+      );
+      final inserted = await notificationMessageRepository.insert(
+        id: nodeId,
+        bodyText:
+            '${AppStrings.posCreditInvoiceChatTitle} #${snapshot.invoiceNumber}',
+        channel: PosCreditInvoiceChatProtocol.incomingChannel,
+        counterpartyAccountId: senderAccountId,
+        createdAtIso: snapshot.postedAt.toUtc().toIso8601String(),
+        rawPayloadJson: jsonEncode(localPayload),
+      );
+      if (!inserted.isSuccess) return false;
+      await recordPosCreditInvoiceAudit(
+        auditLogService: auditLogService,
+        action: AuditAction.create,
+        requestNodeId: nodeId,
+        eventId: nodeId,
+        invoiceId: snapshot.invoiceId,
+        partyAccountId: senderAccountId,
+        fingerprint: snapshot.fingerprint,
+        pdfSha256: PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+          payload,
+          expectedInvoiceFingerprint: snapshot.fingerprint,
+        ),
+        event: 'invoice_received',
+        result: 'stored',
+      );
+      return true;
+    } catch (error) {
+      debugPrint('Rejected invalid POS credit invoice event [$nodeId]: $error');
+      return false;
+    }
+  }
+
+  Future<bool> _inboundPosCreditInvoiceAcknowledgment(
+    Map<String, dynamic> payload,
+    String acknowledgementNodeId,
+    String senderAccountId,
+    String senderPublicKeyHex,
+  ) async {
+    try {
+      final invoiceNodeIdValue = payload['invoice_node_id'];
+      if (invoiceNodeIdValue is! String ||
+          !PosCreditInvoiceChatProtocol.isValidAcknowledgmentEventPayload(
+            payload,
+            expectedNodeId: invoiceNodeIdValue,
+          )) {
+        return false;
+      }
+      final invoiceNodeId = invoiceNodeIdValue;
+      final invoiceId = payload['invoice_id'] as String;
+      final fingerprint = payload['fingerprint'] as String;
+      final pdfSha256 = payload['pdf_sha256'] as String;
+      final status = payload['status'] as String;
+      final respondedAt = payload['responded_at'] as String;
+      final signature = DigitalSignature.fromHex(
+        signatureHex: payload['signature_hex'] as String,
+        signerPublicKeyHex: payload['signer_public_key_hex'] as String,
+        payloadHashHex: payload['payload_hash_hex'] as String,
+      );
+      if (signature.signerPublicKeyHex != senderPublicKeyHex.toLowerCase() ||
+          !signingService.verifyRaw(
+            signatureBytes: signature.signatureBytes,
+            payloadHash: signature.payloadHash,
+            publicKey: signature.signerPublicKey,
+          )) {
+        return false;
+      }
+      if (PosCreditInvoiceChatProtocol.acknowledgementNodeId(
+            invoiceNodeId,
+            fingerprint,
+          ) !=
+          acknowledgementNodeId) {
+        return false;
+      }
+
+      final outgoing = await notificationMessageRepository.findById(
+        invoiceNodeId,
+      );
+      if (outgoing == null ||
+          outgoing.channel != PosCreditInvoiceChatProtocol.outgoingChannel ||
+          outgoing.counterpartyAccountId != senderAccountId) {
+        return false;
+      }
+      var latest = outgoing;
+      for (var attempt = 0; attempt < 3; attempt++) {
+        final localPayload = PosCreditInvoiceChatProtocol.decodePayload(
+          latest.rawPayloadJson,
+        );
+        final snapshot = PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
+          localPayload,
+          expectedNodeId: invoiceNodeId,
+        );
+        if (snapshot.invoiceId != invoiceId ||
+            snapshot.fingerprint != fingerprint ||
+            PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+                  localPayload,
+                  expectedInvoiceFingerprint: fingerprint,
+                ) !=
+                pdfSha256) {
+          return false;
+        }
+        final currentStatus =
+            localPayload['acknowledgment_status'] as String? ?? 'pending';
+        if (currentStatus == status) {
+          return localPayload['acknowledgment_node_id'] ==
+              acknowledgementNodeId;
+        }
+        if (currentStatus != 'pending') return false;
+
+        localPayload['acknowledgment_status'] = status;
+        localPayload['acknowledgment_received_at'] = DateTime.parse(
+          respondedAt,
+        ).toUtc().toIso8601String();
+        localPayload['acknowledgment_node_id'] = acknowledgementNodeId;
+        final updated = await notificationMessageRepository
+            .updateBodyAndPayloadIfUnchanged(
+              id: latest.id,
+              expectedRawPayloadJson: latest.rawPayloadJson!,
+              bodyText: status == 'accepted'
+                  ? AppStrings.posCreditInvoiceAccepted
+                  : AppStrings.posCreditInvoiceRejected,
+              rawPayloadJson: jsonEncode(localPayload),
+            );
+        if (!updated.isSuccess) return false;
+        if (updated.valueOrNull == true) {
+          await recordPosCreditInvoiceAudit(
+            auditLogService: auditLogService,
+            action: AuditAction.update,
+            requestNodeId: invoiceNodeId,
+            eventId: acknowledgementNodeId,
+            invoiceId: invoiceId,
+            partyAccountId: senderAccountId,
+            fingerprint: fingerprint,
+            pdfSha256: pdfSha256,
+            signerPublicKeyHex: signature.signerPublicKeyHex,
+            event: 'acknowledgment_received',
+            result: status,
+            occurredAt: DateTime.parse(respondedAt),
+          );
+          return true;
+        }
+        final refreshed = await notificationMessageRepository.findById(
+          invoiceNodeId,
+        );
+        if (refreshed == null ||
+            refreshed.channel != PosCreditInvoiceChatProtocol.outgoingChannel ||
+            refreshed.counterpartyAccountId != senderAccountId) {
+          return false;
+        }
+        latest = refreshed;
+      }
+      return false;
+    } catch (error) {
+      debugPrint(
+        'Rejected invalid POS credit invoice acknowledgment '
+        '[$acknowledgementNodeId]: $error',
+      );
+      return false;
+    }
   }
 
   /// Returns `true` when at least one audit entry was ingested locally.
@@ -375,14 +633,17 @@ class SyncPayloadProcessor {
     final batchIndex = payload['batch_index'] as int?;
     final totalBatches = payload['total_batches'] as int?;
     if (batchIndex != null && totalBatches != null) {
-      await InjectionContainer.licenseVault
-          .writeInitialSyncProgress(batchIndex, totalBatches);
+      await InjectionContainer.licenseVault.writeInitialSyncProgress(
+        batchIndex,
+        totalBatches,
+      );
     }
 
     final isLastBatch = payload['is_last_batch'] == true;
     if (isLastBatch) {
       debugPrint(
-          'SyncPayloadProcessor: Received last batch of initial snapshot.');
+        'SyncPayloadProcessor: Received last batch of initial snapshot.',
+      );
       await InjectionContainer.licenseVault.markInitialSyncComplete();
     }
     return true;
@@ -398,15 +659,17 @@ class SyncPayloadProcessor {
     if (voucherIdStr == null) return;
 
     // 1. Idempotency Guard
-    final existingResult =
-        await voucherRepository.getById(VoucherId(voucherIdStr));
+    final existingResult = await voucherRepository.getById(
+      VoucherId(voucherIdStr),
+    );
     if (existingResult.isSuccess && existingResult.valueOrNull != null) return;
 
     // 2. Flip Logic: From their perspective to ours.
     final typeStr = payload['type'] as String? ?? 'receipt';
     // If they sent a Receipt (they got money), for us it is a Payment (we gave money).
-    final myType =
-        typeStr == 'receipt' ? VoucherType.payment : VoucherType.receipt;
+    final myType = typeStr == 'receipt'
+        ? VoucherType.payment
+        : VoucherType.receipt;
 
     final amountMinor = payload['amount_minor'] as int? ?? 0;
     final currencyCode = payload['currency_code'] as String? ?? 'YER';
@@ -418,8 +681,9 @@ class SyncPayloadProcessor {
     // For now, we rely on the payload's counterparty mapping if available,
     // but better to resolve from the Node's sender.
     // In our system, the sender of the claim IS the counterparty.
-    final senderParty = await accountRepository
-        .findAccountByPhone(payload['signer_phone'] ?? '');
+    final senderParty = await accountRepository.findAccountByPhone(
+      payload['signer_phone'] ?? '',
+    );
     final counterpartyId =
         senderParty.valueOrNull ?? AccountId(payload['counterparty_id'] ?? '');
 
@@ -443,9 +707,10 @@ class SyncPayloadProcessor {
         transferGroupId: tripartiteData['transfer_group_id'] as String? ?? '',
         role:
             TripartiteRole.fromColumnValue(tripartiteData['role'] as String?) ??
-                TripartiteRole.intermediaryReceipt,
-        linkedPartyId:
-            AccountId(tripartiteData['linked_party_id'] as String? ?? ''),
+            TripartiteRole.intermediaryReceipt,
+        linkedPartyId: AccountId(
+          tripartiteData['linked_party_id'] as String? ?? '',
+        ),
         mediatorAccountId: tripartiteData['mediator_account_id'] != null
             ? AccountId(tripartiteData['mediator_account_id'] as String)
             : null,
@@ -472,7 +737,8 @@ class SyncPayloadProcessor {
       senderPublicKeyHex: payload['sender_public_key_hex'],
       signerPhone: payload['signer_phone'],
       // v2.1: record canonical phones when available from sync payload.
-      canonicalSenderPhone: payload['canonical_sender_phone'] as String? ??
+      canonicalSenderPhone:
+          payload['canonical_sender_phone'] as String? ??
           payload['signer_phone'] as String?,
       canonicalReceiverPhone: payload['canonical_receiver_phone'] as String?,
       originVoucherId: payload['origin_voucher_id'] != null
@@ -547,7 +813,9 @@ class SyncPayloadProcessor {
     );
 
     String bodyText = AppStrings.newVoucherClaim(
-        (amountMinor / 100).toString(), currencyCode);
+      (amountMinor / 100).toString(),
+      currencyCode,
+    );
     String channel = 'voucher_event';
 
     if (reciprocalResult.isSuccess && reciprocalResult.valueOrNull != null) {
@@ -722,11 +990,11 @@ class SyncPayloadProcessor {
         severity: AuditSeverity.info,
         oldData: {
           'id': draft.id.value,
-          'receiver_status': draft.receiverStatus.name
+          'receiver_status': draft.receiverStatus.name,
         },
         newData: {
           'id': signedVoucher.id.value,
-          'receiver_status': signedVoucher.receiverStatus.name
+          'receiver_status': signedVoucher.receiverStatus.name,
         },
       );
       debugPrint(
@@ -765,11 +1033,11 @@ class SyncPayloadProcessor {
         severity: AuditSeverity.warning,
         oldData: {
           'id': draft.id.value,
-          'receiver_status': draft.receiverStatus.name
+          'receiver_status': draft.receiverStatus.name,
         },
         newData: {
           'id': suspendedVoucher.id.value,
-          'receiver_status': suspendedVoucher.receiverStatus.name
+          'receiver_status': suspendedVoucher.receiverStatus.name,
         },
       );
       debugPrint(
@@ -803,7 +1071,7 @@ class SyncPayloadProcessor {
       severity: AuditSeverity.warning,
       newData: {
         'id': rejectedVoucher.id.value,
-        'receiver_status': rejectedVoucher.receiverStatus.name
+        'receiver_status': rejectedVoucher.receiverStatus.name,
       },
     );
 
@@ -812,7 +1080,8 @@ class SyncPayloadProcessor {
       await notificationMessageRepository.insert(
         id: nodeId,
         bodyText: AppStrings.voucherRejectedWithReason(
-            payload['rejection_reason'] ?? ''),
+          payload['rejection_reason'] ?? '',
+        ),
         counterpartyAccountId: senderId,
         createdAtIso: DateTime.now().toIso8601String(),
         channel: 'voucher_event',
@@ -852,7 +1121,8 @@ class SyncPayloadProcessor {
         voucherId: voucherId,
         fileName: map['file_name'] as String? ?? 'attachment.jpg',
         storagePath: '', // populated after blob download
-        encryptedBlobHash: map['encrypted_blob_hash'] as String? ??
+        encryptedBlobHash:
+            map['encrypted_blob_hash'] as String? ??
             map['blob_hash'] as String? ??
             '',
         mimeType: map['mime_type'] as String? ?? 'image/jpeg',
@@ -1033,11 +1303,12 @@ class SyncPayloadProcessor {
     final updated = existing.revaluate(
       newValue: newMinor != null
           ? (newMinor > 0
-              ? Money.positiveAmount(newMinor, existing.currency)
-              : Money.zero(existing.currency))
+                ? Money.positiveAmount(newMinor, existing.currency)
+                : Money.zero(existing.currency))
           : null,
-      newExpiryDate:
-          newExpiryStr != null ? DateTime.tryParse(newExpiryStr) : null,
+      newExpiryDate: newExpiryStr != null
+          ? DateTime.tryParse(newExpiryStr)
+          : null,
     );
 
     await collateralRepository.update(updated);
@@ -1238,8 +1509,9 @@ class SyncPayloadProcessor {
       // This bypasses the bidirectional privacy gate on identity/lookup, which
       // can withhold the name even after a successful push. Since the push-time
       // §6 check already passed, the sender has consented to contacting us.
-      final nodeResult =
-          await identityRepository.lookupSyncNodeSender(nodeId: nodeId);
+      final nodeResult = await identityRepository.lookupSyncNodeSender(
+        nodeId: nodeId,
+      );
       if (nodeResult != null && nodeResult.name.isNotEmpty) {
         resolvedName = nodeResult.name;
         resolvedPhone ??= nodeResult.phone.isNotEmpty ? nodeResult.phone : null;
@@ -1276,7 +1548,8 @@ class SyncPayloadProcessor {
     }
 
     // ── Step 2: Derive the best display identifier ───────────────────────────
-    final displayId = resolvedName ??
+    final displayId =
+        resolvedName ??
         resolvedPhone ??
         resolvedWhatsapp ??
         (resolvedPk?.isNotEmpty == true
@@ -1304,7 +1577,8 @@ class SyncPayloadProcessor {
     );
 
     debugPrint(
-        'Sync: Staged counterparty onboarding request for [$displayId] (name: ${resolvedName ?? '—'}), node [$nodeId]');
+      'Sync: Staged counterparty onboarding request for [$displayId] (name: ${resolvedName ?? '—'}), node [$nodeId]',
+    );
   }
 
   /// Called after the user successfully creates a new counterparty account.
@@ -1317,10 +1591,12 @@ class SyncPayloadProcessor {
     String? publicKey,
     String? whatsapp,
   }) async {
-    final pendingResult =
-        await notificationMessageRepository.listPendingCounterpartyRequests();
+    final pendingResult = await notificationMessageRepository
+        .listPendingCounterpartyRequests();
     if (pendingResult.isFailure) {
-      debugPrint('SyncPayloadProcessor: Failed to load pending counterparty requests.');
+      debugPrint(
+        'SyncPayloadProcessor: Failed to load pending counterparty requests.',
+      );
       return;
     }
 
@@ -1346,13 +1622,16 @@ class SyncPayloadProcessor {
         nodes.add(SyncNode.fromJson(nodeJson));
         await notificationMessageRepository.markProcessed(msg.id);
       } catch (e) {
-        debugPrint('SyncPayloadProcessor: Failed to parse staged node ${msg.id}: $e');
+        debugPrint(
+          'SyncPayloadProcessor: Failed to parse staged node ${msg.id}: $e',
+        );
       }
     }
 
     if (nodes.isNotEmpty) {
       debugPrint(
-          'SyncPayloadProcessor: Replaying ${nodes.length} staged node(s) for newly onboarded counterparty.');
+        'SyncPayloadProcessor: Replaying ${nodes.length} staged node(s) for newly onboarded counterparty.',
+      );
       await processIncomingNodes(nodes);
     }
   }

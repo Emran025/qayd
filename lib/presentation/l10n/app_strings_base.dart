@@ -2969,6 +2969,30 @@ abstract class AppStringsBase {
   String get posCollectSuccess => 'تم تسجيل التحصيل والقيد المحاسبي.';
   String get posInvoiceExportPdf => 'تصدير ومشاركة PDF';
   String get posInvoicePdfFailed => 'تعذر إنشاء PDF الفاتورة.';
+  String get posCreditInvoiceChatTitle => 'فاتورة آجل';
+  String get posCreditInvoiceDueDate => 'تاريخ استحقاق الائتمان';
+  String get posCreditInvoiceTerms => 'شروط الائتمان';
+  String get posCreditInvoiceTermsOptionalHelp =>
+      'اختياري؛ إذا تُرك فارغاً فسيظهر للطرف الآخر أن الشروط غير محددة.';
+  String get posCreditInvoiceUnspecified => 'غير محدد';
+  String get posCreditInvoiceAwaiting => 'بانتظار إقرار العميل';
+  String get posCreditInvoiceAccepted => 'وافق العميل على الفاتورة';
+  String get posCreditInvoiceRejected => 'رفض العميل الفاتورة';
+  String get posCreditInvoiceDeliveryFailed =>
+      'تعذر إرسال الفاتورة؛ أعد المحاولة.';
+  String get posCreditInvoiceResponsePendingSync =>
+      'تم اختيار الإقرار، وسيُرسل عند توفر الاتصال.';
+  String get posCreditInvoiceResponseSent => 'تم إرسال إقرارك بالفاتورة.';
+  String get posCreditInvoiceOpenDetails => 'عرض تفاصيل الفاتورة';
+  String get posCreditInvoiceRetrySend => 'إعادة إرسال الفاتورة';
+  String get posCreditInvoiceRetryAck => 'إعادة إرسال الإقرار';
+  String get posCreditInvoiceNeedsResponse => 'راجع الفاتورة وأقرّها أو ارفضها';
+  String get posCreditInvoiceAcknowledgmentOnly =>
+      'الفاتورة مرحّلة مسبقاً؛ إقرارك لا ينشئ عملية بيع جديدة.';
+  String get posCreditInvoiceTaxLabel => 'الضريبة';
+  String get posCreditInvoicePaidLabel => 'المدفوع';
+  String get syncIdentityUnavailable =>
+      'تعذر الإرسال قبل تهيئة الهوية الرقمية.';
   String get posSalesReturnAction => 'إرجاع أصناف';
   String get posSalesReturnTitle => 'مرتجع مبيعات';
   String get posSalesReturnDescription =>

@@ -73,7 +73,11 @@ Future<void> _createSchema(Database db) async {
   ''');
   await Migration040PosFoundation().up(db);
   await Migration041PosInvoiceMetadata().up(db);
-  await MigrationRegistry.applyFromTo(db, fromVersion: 41, toVersion: 48);
+  await MigrationRegistry.applyFromTo(
+    db,
+    fromVersion: 41,
+    toVersion: MigrationRegistry.ordered.last.version,
+  );
 }
 
 PosInvoice _invoice() {

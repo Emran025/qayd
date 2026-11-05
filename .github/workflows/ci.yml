@@ -6,6 +6,8 @@ on:
     paths:
       - "lib/**"
       - "test/**"
+      - "integration_test/**"
+      - "tool/ci/**"
       - "android/**"
       - "ios/**"
       - "macos/**"
@@ -23,6 +25,8 @@ on:
     paths:
       - "lib/**"
       - "test/**"
+      - "integration_test/**"
+      - "tool/ci/**"
       - "android/**"
       - "ios/**"
       - "macos/**"
@@ -71,3 +75,239 @@ jobs:
 
       - name: Unit and widget tests
         run: flutter test --no-pub --reporter expanded
+
+  native_crypto:
+    name: E2EE native crypto (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: qayd-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Run real libsodium encryption and signature tests
+        run: flutter test --no-pub test/data/security/e2ee_encryption_service_impl_test.dart --reporter expanded
+
+  web_crypto:
+    name: E2EE in real Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: qayd-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Build the libsodium.js Sumo smoke target
+        run: flutter build web --release --target=test/data/security/e2ee_web_smoke.dart
+
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v2
+        id: chrome
+
+      - name: Run encryption, decryption, and tamper rejection in Chrome
+        shell: bash
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          port="$(python3 - <<'PY'
+          import socket
+
+          with socket.socket() as sock:
+              sock.bind(('127.0.0.1', 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          python3 -m http.server "$port" --bind 127.0.0.1 --directory build/web >/tmp/qayd-web-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          server_ready=false
+          for attempt in $(seq 1 30); do
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat /tmp/qayd-web-server.log >&2
+              exit 1
+            fi
+            if curl -fsS "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
+              server_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$server_ready" != true ]]; then
+            cat /tmp/qayd-web-server.log >&2
+            echo 'Web smoke server did not become ready.' >&2
+            exit 1
+          fi
+          "$CHROME_PATH" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=30000 --dump-dom "http://127.0.0.1:${port}/" >/tmp/qayd-web-smoke.html
+          grep -q 'E2EE_WEB_SMOKE_PASS' /tmp/qayd-web-smoke.html
+
+  android_crypto:
+    name: E2EE on Android emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect KVM; fall back to software acceleration if unavailable
+        id: kvm
+        run: |
+          if [ -c /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules || true
+            sudo udevadm trigger --name-match=kvm || true
+            sudo chmod 666 /dev/kvm || true
+          fi
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            echo "disable_linux_hw_accel=false" >> "$GITHUB_OUTPUT"
+            echo "KVM available; using hardware acceleration."
+          else
+            echo "disable_linux_hw_accel=true" >> "$GITHUB_OUTPUT"
+            echo "KVM unavailable; using software acceleration."
+          fi
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: qayd-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Run libsodium integration test on Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          ndk: 28.2.13676358
+          cmake: 3.22.1
+          emulator-boot-timeout: 900
+          disable-linux-hw-accel: ${{ steps.kvm.outputs.disable_linux_hw_accel }}
+          disable-animations: true
+          script: flutter test --no-pub integration_test/e2ee_crypto_integration_test.dart --reporter expanded
+
+  ios_crypto:
+    name: E2EE on iOS simulator
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 16.4 for iOS 15 compatibility
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.4'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: qayd-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Build iOS app and verify the iOS 15 deployment target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          project = Path('ios/Runner.xcodeproj/project.pbxproj').read_text()
+          targets = re.findall(r'IPHONEOS_DEPLOYMENT_TARGET\s*=\s*([0-9.]+);', project)
+          if not targets or any(float(target) != 15.0 for target in targets):
+              raise SystemExit(f'Runner project must target iOS 15.0 in every configuration: {targets}')
+          PY
+          flutter build ios --debug --no-codesign
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          info = Path('build/ios/iphoneos/Runner.app/Info.plist')
+          if not info.is_file():
+              raise SystemExit(f'Missing built app Info.plist: {info}')
+          minimum = plistlib.loads(info.read_bytes()).get('MinimumOSVersion')
+          if str(minimum) != '15.0':
+              raise SystemExit(f'Built iOS MinimumOSVersion is {minimum!r}, expected 15.0')
+          print(f'Built app MinimumOSVersion={minimum}')
+          PY
+
+      - name: Boot an available iPhone simulator
+        id: simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun simctl list runtimes
+          xcrun simctl list devices available
+          simulator_id="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); runtime="com.apple.CoreSimulator.SimRuntime.iOS-18-5"; devices=[d for d in data["devices"].get(runtime,[]) if d.get("isAvailable") and d["name"].startswith("iPhone")]; devices.sort(key=lambda d:(d["name"]!="iPhone 16",d["name"])); print(devices[0]["udid"] if devices else "")')"
+          if [[ -z "$simulator_id" ]]; then
+            echo 'No available iPhone simulator for the pinned iOS 18.5 runtime.' >&2
+            exit 1
+          fi
+          simulator_state="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next((d["state"] for group in data["devices"].values() for d in group if d["udid"]==sys.argv[1]), "Unknown"))' "$simulator_id")"
+          if [[ "$simulator_state" != "Booted" ]]; then
+            xcrun simctl boot "$simulator_id"
+          fi
+          xcrun simctl bootstatus "$simulator_id" -b
+          echo "simulator-id=$simulator_id" >> "$GITHUB_OUTPUT"
+
+      - name: Backport iOS simulator VM-service log-reader race fix
+        shell: bash
+        run: python3 tool/ci/patch_flutter_ios_simulator_log_reader.py
+
+      - name: Run libsodium integration test on iOS
+        timeout-minutes: 30
+        shell: bash
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.simulator-id }}
+          APP_BUNDLE_ID: com.accsystem.qayd
+          IOS_VM_SERVICE_WAIT_TIMEOUT_SECONDS: 480
+        run: |
+          set -euo pipefail
+          flutter devices --device-timeout 30
+          python3 tool/ci/run_ios_e2ee_integration_test.py
+
+      - name: Upload iOS simulator diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-e2ee-diagnostics-${{ github.run_id }}
+          path: |
+            artifacts/ios-e2ee-diagnostics.log
+            artifacts/ios-e2ee-integration.log
+          if-no-files-found: ignore
+          retention-days: 7

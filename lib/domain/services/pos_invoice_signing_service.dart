@@ -20,6 +20,8 @@ final class PosInvoiceSigningService {
     final includesDiscountAudit =
         invoice.cartDiscountRule != null ||
         invoice.lines.any((line) => line.discountRule != null);
+    final includesCreditTerms =
+        invoice.creditDueDate != null || invoice.creditTerms != null;
     final lines = invoice.lines
         .map(
           (line) => <Object?>[
@@ -52,7 +54,11 @@ final class PosInvoiceSigningService {
         )
         .join(';');
     return [
-      includesDiscountAudit ? 'QAYD_POS_INVOICE_V2' : 'QAYD_POS_INVOICE_V1',
+      includesCreditTerms
+          ? 'QAYD_POS_INVOICE_V3'
+          : includesDiscountAudit
+          ? 'QAYD_POS_INVOICE_V2'
+          : 'QAYD_POS_INVOICE_V1',
       invoice.id,
       invoice.invoiceNumber,
       invoice.type.name,
@@ -67,6 +73,9 @@ final class PosInvoiceSigningService {
       invoice.total.minorUnits,
       invoice.paid.minorUnits,
       invoice.due.minorUnits,
+      if (includesCreditTerms)
+        invoice.creditDueDate?.toUtc().toIso8601String() ?? '',
+      if (includesCreditTerms) invoice.creditTerms ?? '',
       invoice.status.name,
       if (includesDiscountAudit)
         '${invoice.cartDiscount.minorUnits}:${_discountRulePayload(invoice.cartDiscountRule)}',

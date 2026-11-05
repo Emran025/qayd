@@ -92,8 +92,9 @@ void main() {
       )
     ''');
     currencies = _Currencies();
-    when(() => currencies.getByCode('YER'))
-        .thenAnswer((_) async => const Success(currency));
+    when(
+      () => currencies.getByCode('YER'),
+    ).thenAnswer((_) async => const Success(currency));
     const date = '2026-01-01T10:00:00.000Z';
     await db.insert('pos_invoices', {
       'id': 'invoice-1',
@@ -222,4 +223,84 @@ void main() {
     expect(invoice.lines.single.discountRule?.actorId, 'device-1');
     expect(invoice.total.minorUnits, 405);
   });
+
+  test(
+    'rejects a stored subtotal that differs from invoice line gross',
+    () async {
+      await db.update(
+        'pos_invoices',
+        {'subtotal_minor': 501},
+        where: 'id = ?',
+        whereArgs: ['invoice-1'],
+      );
+      final before = await db.query(
+        'pos_invoices',
+        where: 'id = ?',
+        whereArgs: ['invoice-1'],
+      );
+      final repository = SqlitePosInvoiceReadRepository(db, currencies);
+
+      expect((await repository.getById('invoice-1')).isFailure, isTrue);
+      expect((await repository.list()).isFailure, isTrue);
+      expect(
+        await db.query(
+          'pos_invoices',
+          where: 'id = ?',
+          whereArgs: ['invoice-1'],
+        ),
+        equals(before),
+      );
+    },
+  );
+
+  test('rejects tax not reflected in the persisted total', () async {
+    await db.update(
+      'pos_invoices',
+      {'tax_minor': 1},
+      where: 'id = ?',
+      whereArgs: ['invoice-1'],
+    );
+    final before = await db.query(
+      'pos_invoices',
+      where: 'id = ?',
+      whereArgs: ['invoice-1'],
+    );
+    final repository = SqlitePosInvoiceReadRepository(db, currencies);
+
+    expect((await repository.getById('invoice-1')).isFailure, isTrue);
+    expect((await repository.list()).isFailure, isTrue);
+    expect(
+      await db.query('pos_invoices', where: 'id = ?', whereArgs: ['invoice-1']),
+      equals(before),
+    );
+  });
+
+  test(
+    'rejects a stored total that differs from the invoice formula',
+    () async {
+      await db.update(
+        'pos_invoices',
+        {'total_minor': 501, 'due_minor': 301},
+        where: 'id = ?',
+        whereArgs: ['invoice-1'],
+      );
+      final before = await db.query(
+        'pos_invoices',
+        where: 'id = ?',
+        whereArgs: ['invoice-1'],
+      );
+      final repository = SqlitePosInvoiceReadRepository(db, currencies);
+
+      expect((await repository.getById('invoice-1')).isFailure, isTrue);
+      expect((await repository.list()).isFailure, isTrue);
+      expect(
+        await db.query(
+          'pos_invoices',
+          where: 'id = ?',
+          whereArgs: ['invoice-1'],
+        ),
+        equals(before),
+      );
+    },
+  );
 }
