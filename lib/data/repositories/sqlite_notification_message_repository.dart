@@ -91,6 +91,28 @@ final class SqliteNotificationMessageRepository
   }
 
   @override
+  Future<Result<bool>> updateBodyAndPayloadIfUnchanged({
+    required String id,
+    required String expectedRawPayloadJson,
+    required String bodyText,
+    required String rawPayloadJson,
+  }) async {
+    try {
+      final updated = await _db.update(
+        _table,
+        {'body_text': bodyText, 'raw_payload_json': rawPayloadJson},
+        where: 'id = ? AND raw_payload_json IS ?',
+        whereArgs: [id, expectedRawPayloadJson],
+      );
+      return Success(updated == 1);
+    } catch (_) {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.unableToUpdateNotification),
+      );
+    }
+  }
+
+  @override
   Future<Result<List<NotificationMessage>>> listUnprocessedForCounterparty({
     required String counterpartyAccountId,
     int limit = 50,

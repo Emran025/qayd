@@ -243,6 +243,8 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
     required PosPaymentMethod paymentMethod,
     AccountId? customerAccountId,
     AccountId? paymentAccountId,
+    DateTime? creditDueDate,
+    String? creditTerms,
   }) async {
     if (isClosed ||
         state.isBusy ||
@@ -292,6 +294,8 @@ final class PosCheckoutCubit extends Cubit<PosCheckoutState> {
       createdAt: now,
       customerAccountId: customerAccountId,
       cartDiscountRule: state.cartDiscountRule,
+      creditDueDate: creditDueDate,
+      creditTerms: creditTerms,
       settlement: PosSaleSettlementInput(
         advanceMinorUnits: advanceMinorUnits,
         paymentMethod: paymentMethod,

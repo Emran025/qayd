@@ -47,6 +47,8 @@ final class BuildPosSalePostingInput {
     this.settlement,
     this.businessDate,
     this.cartDiscountRule,
+    this.creditDueDate,
+    this.creditTerms,
   });
 
   final String invoiceId;
@@ -60,6 +62,8 @@ final class BuildPosSalePostingInput {
   final AccountId? customerAccountId;
   final PosDate? businessDate;
   final PosDiscountRule? cartDiscountRule;
+  final DateTime? creditDueDate;
+  final String? creditTerms;
 
   /// When present, this is the explicit final settlement chosen by checkout.
   /// [advanceMinorUnits] is exact minor currency units and may be zero for credit.
@@ -336,6 +340,8 @@ final class BuildPosSalePostingUseCase {
         counterpartyAccountId: input.customerAccountId,
         discount: cartDiscount,
         cartDiscountRule: input.cartDiscountRule,
+        creditDueDate: input.creditDueDate,
+        creditTerms: input.creditTerms,
       ).post(input.createdAt);
       final payments = <PosInvoicePayment>[];
       final commercialPostings = <PosAccountingPosting>[];

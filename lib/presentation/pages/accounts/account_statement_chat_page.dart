@@ -3058,6 +3058,14 @@ class _PosCreditInvoiceDetailsSheet extends StatelessWidget {
           const SizedBox(height: SpacingTokens.xs),
           Text('#${snapshot.invoiceNumber}'),
           Text(DateFormat.yMMMd('en').format(snapshot.invoiceDate)),
+          Text(
+            '${AppStrings.posCreditInvoiceDueDate}: '
+            '${snapshot.creditDueDate == null ? AppStrings.posCreditInvoiceUnspecified : DateFormat.yMMMd('en').format(snapshot.creditDueDate!)}',
+          ),
+          Text(
+            '${AppStrings.posCreditInvoiceTerms}: '
+            '${snapshot.creditTerms ?? AppStrings.posCreditInvoiceUnspecified}',
+          ),
           const SizedBox(height: SpacingTokens.sm),
           Container(
             padding: const EdgeInsets.all(SpacingTokens.sm),

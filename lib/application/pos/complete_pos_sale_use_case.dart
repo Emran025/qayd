@@ -38,6 +38,8 @@ final class CompletePosSaleUseCase {
     AccountId? customerAccountId,
     PosSaleSettlementInput? settlement,
     PosDiscountRule? cartDiscountRule,
+    DateTime? creditDueDate,
+    String? creditTerms,
     bool cashSale = true,
   }) async {
     final buildResult = await _buildPosting(
@@ -53,6 +55,8 @@ final class CompletePosSaleUseCase {
         customerAccountId: customerAccountId,
         settlement: settlement,
         cartDiscountRule: cartDiscountRule,
+        creditDueDate: creditDueDate,
+        creditTerms: creditTerms,
         cashSale: cashSale,
       ),
     );

@@ -77,6 +77,10 @@ final class CairoPosInvoicePdfGenerator implements PosInvoicePdfGenerator {
       _brandHeader(font, title: _documentTitle(invoice)),
       pw.SizedBox(height: 16),
       _metaCard(invoice, font),
+      if (invoice.due.minorUnits > 0) ...[
+        pw.SizedBox(height: 10),
+        _creditTermsCard(invoice, font),
+      ],
       pw.SizedBox(height: 16),
       pw.TableHelper.fromTextArray(
         headers: const [
@@ -210,6 +214,35 @@ final class CairoPosInvoicePdfGenerator implements PosInvoicePdfGenerator {
           _labelValue(font, 'التاريخ', _date(invoice.invoiceDate)),
           _labelValue(font, 'العملة', invoice.currency.code),
           _labelValue(font, 'الحالة', invoice.status.name),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _creditTermsCard(PosInvoice invoice, pw.Font font) {
+    final dueDate = invoice.creditDueDate == null
+        ? AppStrings.posCreditInvoiceUnspecified
+        : _date(invoice.creditDueDate!);
+    final terms = invoice.creditTerms ?? AppStrings.posCreditInvoiceUnspecified;
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.all(10),
+      decoration: pw.BoxDecoration(
+        color: const PdfColor.fromInt(0xFFFFFBEB),
+        border: pw.Border.all(color: _border),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.end,
+        children: [
+          pw.Text(
+            '${AppStrings.posCreditInvoiceDueDate}: $dueDate',
+            style: pw.TextStyle(font: font, fontSize: 10),
+          ),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            '${AppStrings.posCreditInvoiceTerms}: $terms',
+            style: pw.TextStyle(font: font, fontSize: 10),
+          ),
         ],
       ),
     );

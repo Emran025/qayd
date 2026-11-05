@@ -25,6 +25,7 @@ import 'package:qayd/domain/value_objects/voucher_type.dart';
 import 'package:qayd/domain/value_objects/voucher_state.dart';
 import 'package:qayd/domain/value_objects/agreement_status.dart';
 import 'package:qayd/domain/value_objects/signable_receipt.dart';
+import 'package:qayd/domain/value_objects/digital_signature.dart';
 import 'package:qayd/domain/repositories/attachment_repository.dart';
 import 'package:qayd/domain/repositories/collateral_repository.dart';
 import 'package:qayd/data/encryption/voucher_key_service.dart';
@@ -40,6 +41,7 @@ import 'package:qayd/domain/entities/collateral_revaluation.dart';
 import 'package:qayd/domain/value_objects/tripartite_meta.dart';
 import 'package:qayd/domain/value_objects/tripartite_role.dart';
 import 'package:uuid/uuid.dart';
+import 'package:qayd/application/pos/pos_credit_invoice_audit.dart';
 import 'package:qayd/application/pos/pos_credit_invoice_chat_protocol.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 import 'package:qayd/application/governance/audit_log_service.dart';
@@ -148,20 +150,23 @@ class SyncPayloadProcessor {
 
     final envPk = node.senderPublicKey?.trim().toLowerCase() ?? '';
     if (envPk.isNotEmpty) {
-      accountId = (await accountRepository.findAccountByPublicKey(envPk))
-          .valueOrNull;
+      accountId = (await accountRepository.findAccountByPublicKey(
+        envPk,
+      )).valueOrNull;
     }
 
     final envPhone = node.senderPhone?.trim() ?? '';
     if (accountId == null && envPhone.isNotEmpty) {
-      accountId = (await accountRepository.findAccountByPhone(envPhone))
-          .valueOrNull;
+      accountId = (await accountRepository.findAccountByPhone(
+        envPhone,
+      )).valueOrNull;
     }
 
     final envWa = node.senderWhatsapp?.trim() ?? '';
     if (accountId == null && envWa.isNotEmpty) {
-      accountId = (await accountRepository.findAccountByWhatsApp(envWa))
-          .valueOrNull;
+      accountId = (await accountRepository.findAccountByWhatsApp(
+        envWa,
+      )).valueOrNull;
     }
 
     if (accountId == null) {
@@ -199,9 +204,9 @@ class SyncPayloadProcessor {
               nodeId: node.id,
             );
             if (result != null && result.name.isNotEmpty) {
-              final updatedPayload = jsonDecode(
-                existing.rawPayloadJson ?? '{}',
-              ) as Map<String, dynamic>;
+              final updatedPayload =
+                  jsonDecode(existing.rawPayloadJson ?? '{}')
+                      as Map<String, dynamic>;
               updatedPayload['sender_name'] = result.name;
               updatedPayload['sender_phone'] ??= result.phone.isNotEmpty
                   ? result.phone
@@ -429,6 +434,7 @@ class SyncPayloadProcessor {
               decryptedRawPayload,
               node.id,
               localSenderAccountIdStr,
+              decryptionKeyHexUsed ?? decryptKeys.first,
             );
             if (!applied) {
               await _quarantine(
@@ -505,8 +511,34 @@ class SyncPayloadProcessor {
               prior,
               expectedNodeId: nodeId,
             );
-        return priorSnapshot.invoiceId == snapshot.invoiceId &&
-            priorSnapshot.fingerprint == snapshot.fingerprint;
+        final priorPdfSha256 =
+            PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+              prior,
+              expectedInvoiceFingerprint: priorSnapshot.fingerprint,
+            );
+        final incomingPdfSha256 =
+            PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+              payload,
+              expectedInvoiceFingerprint: snapshot.fingerprint,
+            );
+        final matchesPrior =
+            priorSnapshot.invoiceId == snapshot.invoiceId &&
+            priorSnapshot.fingerprint == snapshot.fingerprint &&
+            priorPdfSha256 == incomingPdfSha256;
+        if (!matchesPrior) return false;
+        await recordPosCreditInvoiceAudit(
+          auditLogService: auditLogService,
+          action: AuditAction.update,
+          requestNodeId: nodeId,
+          eventId: nodeId,
+          invoiceId: snapshot.invoiceId,
+          partyAccountId: senderAccountId,
+          fingerprint: snapshot.fingerprint,
+          pdfSha256: incomingPdfSha256,
+          event: 'invoice_received',
+          result: 'duplicate_verified',
+        );
+        return true;
       }
 
       final localPayload = PosCreditInvoiceChatProtocol.localInvoicePayload(
@@ -523,7 +555,23 @@ class SyncPayloadProcessor {
         createdAtIso: snapshot.postedAt.toUtc().toIso8601String(),
         rawPayloadJson: jsonEncode(localPayload),
       );
-      return inserted.isSuccess;
+      if (!inserted.isSuccess) return false;
+      await recordPosCreditInvoiceAudit(
+        auditLogService: auditLogService,
+        action: AuditAction.create,
+        requestNodeId: nodeId,
+        eventId: nodeId,
+        invoiceId: snapshot.invoiceId,
+        partyAccountId: senderAccountId,
+        fingerprint: snapshot.fingerprint,
+        pdfSha256: PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+          payload,
+          expectedInvoiceFingerprint: snapshot.fingerprint,
+        ),
+        event: 'invoice_received',
+        result: 'stored',
+      );
+      return true;
     } catch (error) {
       debugPrint('Rejected invalid POS credit invoice event [$nodeId]: $error');
       return false;
@@ -534,6 +582,7 @@ class SyncPayloadProcessor {
     Map<String, dynamic> payload,
     String acknowledgementNodeId,
     String senderAccountId,
+    String senderPublicKeyHex,
   ) async {
     try {
       final invoiceNodeIdValue = payload['invoice_node_id'];
@@ -547,8 +596,22 @@ class SyncPayloadProcessor {
       final invoiceNodeId = invoiceNodeIdValue;
       final invoiceId = payload['invoice_id'] as String;
       final fingerprint = payload['fingerprint'] as String;
+      final pdfSha256 = payload['pdf_sha256'] as String;
       final status = payload['status'] as String;
       final respondedAt = payload['responded_at'] as String;
+      final signature = DigitalSignature.fromHex(
+        signatureHex: payload['signature_hex'] as String,
+        signerPublicKeyHex: payload['signer_public_key_hex'] as String,
+        payloadHashHex: payload['payload_hash_hex'] as String,
+      );
+      if (signature.signerPublicKeyHex != senderPublicKeyHex.toLowerCase() ||
+          !signingService.verifyRaw(
+            signatureBytes: signature.signatureBytes,
+            payloadHash: signature.payloadHash,
+            publicKey: signature.signerPublicKey,
+          )) {
+        return false;
+      }
       if (PosCreditInvoiceChatProtocol.acknowledgementNodeId(
             invoiceNodeId,
             fingerprint,
@@ -565,34 +628,75 @@ class SyncPayloadProcessor {
           outgoing.counterpartyAccountId != senderAccountId) {
         return false;
       }
-      final localPayload = PosCreditInvoiceChatProtocol.decodePayload(
-        outgoing.rawPayloadJson,
-      );
-      final snapshot = PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
-        localPayload,
-        expectedNodeId: invoiceNodeId,
-      );
-      if (snapshot.invoiceId != invoiceId ||
-          snapshot.fingerprint != fingerprint) {
-        return false;
-      }
-      final currentStatus =
-          localPayload['acknowledgment_status'] as String? ?? 'pending';
-      if (currentStatus != 'pending' && currentStatus != status) return false;
+      var latest = outgoing;
+      for (var attempt = 0; attempt < 3; attempt++) {
+        final localPayload = PosCreditInvoiceChatProtocol.decodePayload(
+          latest.rawPayloadJson,
+        );
+        final snapshot = PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
+          localPayload,
+          expectedNodeId: invoiceNodeId,
+        );
+        if (snapshot.invoiceId != invoiceId ||
+            snapshot.fingerprint != fingerprint ||
+            PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+                  localPayload,
+                  expectedInvoiceFingerprint: fingerprint,
+                ) !=
+                pdfSha256) {
+          return false;
+        }
+        final currentStatus =
+            localPayload['acknowledgment_status'] as String? ?? 'pending';
+        if (currentStatus == status) {
+          return localPayload['acknowledgment_node_id'] ==
+              acknowledgementNodeId;
+        }
+        if (currentStatus != 'pending') return false;
 
-      localPayload['acknowledgment_status'] = status;
-      localPayload['acknowledgment_received_at'] = DateTime.parse(respondedAt)
-          .toUtc()
-          .toIso8601String();
-      localPayload['acknowledgment_node_id'] = acknowledgementNodeId;
-      final updated = await notificationMessageRepository.updateBodyAndPayload(
-        id: outgoing.id,
-        bodyText: status == 'accepted'
-            ? AppStrings.posCreditInvoiceAccepted
-            : AppStrings.posCreditInvoiceRejected,
-        rawPayloadJson: jsonEncode(localPayload),
-      );
-      return updated.isSuccess;
+        localPayload['acknowledgment_status'] = status;
+        localPayload['acknowledgment_received_at'] = DateTime.parse(
+          respondedAt,
+        ).toUtc().toIso8601String();
+        localPayload['acknowledgment_node_id'] = acknowledgementNodeId;
+        final updated = await notificationMessageRepository
+            .updateBodyAndPayloadIfUnchanged(
+              id: latest.id,
+              expectedRawPayloadJson: latest.rawPayloadJson!,
+              bodyText: status == 'accepted'
+                  ? AppStrings.posCreditInvoiceAccepted
+                  : AppStrings.posCreditInvoiceRejected,
+              rawPayloadJson: jsonEncode(localPayload),
+            );
+        if (!updated.isSuccess) return false;
+        if (updated.valueOrNull == true) {
+          await recordPosCreditInvoiceAudit(
+            auditLogService: auditLogService,
+            action: AuditAction.update,
+            requestNodeId: invoiceNodeId,
+            eventId: acknowledgementNodeId,
+            invoiceId: invoiceId,
+            partyAccountId: senderAccountId,
+            fingerprint: fingerprint,
+            pdfSha256: pdfSha256,
+            signerPublicKeyHex: signature.signerPublicKeyHex,
+            event: 'acknowledgment_received',
+            result: status,
+            occurredAt: DateTime.parse(respondedAt),
+          );
+          return true;
+        }
+        final refreshed = await notificationMessageRepository.findById(
+          invoiceNodeId,
+        );
+        if (refreshed == null ||
+            refreshed.channel != PosCreditInvoiceChatProtocol.outgoingChannel ||
+            refreshed.counterpartyAccountId != senderAccountId) {
+          return false;
+        }
+        latest = refreshed;
+      }
+      return false;
     } catch (error) {
       debugPrint(
         'Rejected invalid POS credit invoice acknowledgment '

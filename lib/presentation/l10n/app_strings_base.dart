@@ -2970,6 +2970,11 @@ abstract class AppStringsBase {
   String get posInvoiceExportPdf => 'تصدير ومشاركة PDF';
   String get posInvoicePdfFailed => 'تعذر إنشاء PDF الفاتورة.';
   String get posCreditInvoiceChatTitle => 'فاتورة آجل';
+  String get posCreditInvoiceDueDate => 'تاريخ استحقاق الائتمان';
+  String get posCreditInvoiceTerms => 'شروط الائتمان';
+  String get posCreditInvoiceTermsOptionalHelp =>
+      'اختياري؛ إذا تُرك فارغاً فسيظهر للطرف الآخر أن الشروط غير محددة.';
+  String get posCreditInvoiceUnspecified => 'غير محدد';
   String get posCreditInvoiceAwaiting => 'بانتظار إقرار العميل';
   String get posCreditInvoiceAccepted => 'وافق العميل على الفاتورة';
   String get posCreditInvoiceRejected => 'رفض العميل الفاتورة';
