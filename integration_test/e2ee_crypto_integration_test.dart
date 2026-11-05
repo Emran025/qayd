@@ -65,8 +65,8 @@ void main() {
         ],
         'signature': null,
       });
-      final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(
-        snapshot.invoiceId,
+      final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+        snapshot,
       );
       final payload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
         invoiceNodeId: nodeId,
