@@ -31,6 +31,8 @@ enum SyncInboundQuarantineReason {
 }
 
 /// Ciphertext-only record available to future local review/recovery flows.
+/// [encryptedPayload] can be absent for an ambiguous v49 row created before
+/// the journal began persisting the envelope at claim time.
 final class SyncInboundQuarantinedEvent {
   const SyncInboundQuarantinedEvent({
     required this.nodeId,
@@ -47,7 +49,7 @@ final class SyncInboundQuarantinedEvent {
   final String nodeId;
   final String eventType;
   final String payloadFingerprint;
-  final String encryptedPayload;
+  final String? encryptedPayload;
   final SyncInboundQuarantineReason reason;
   final DateTime createdAt;
   final String? conflictingPayloadFingerprint;

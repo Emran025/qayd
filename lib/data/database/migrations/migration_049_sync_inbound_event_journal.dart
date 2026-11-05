@@ -3,10 +3,9 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 
 /// Schema v49: retain encrypted inbound events and their processing state.
 ///
-/// The journal deliberately stores no decrypted/business payload. Its only
-/// payload column is the original E2EE envelope, protected by the local
-/// SQLCipher database, so unsupported events remain available for review and
-/// future compatible processing without being acknowledged as applied.
+/// The journal deliberately stores no decrypted/business payload. Its payload
+/// column is the original E2EE envelope, protected by SQLCipher, so unsupported
+/// events remain available for review without being acknowledged as applied.
 final class Migration049SyncInboundEventJournal implements SchemaMigration {
   @override
   int get version => 49;
@@ -19,10 +18,7 @@ final class Migration049SyncInboundEventJournal implements SchemaMigration {
         sender_public_key TEXT,
         event_type TEXT NOT NULL,
         payload_fingerprint TEXT NOT NULL,
-        encrypted_payload TEXT NOT NULL,
-        conflicting_payload_fingerprint TEXT,
-        conflicting_encrypted_payload TEXT,
-        conflict_count INTEGER NOT NULL DEFAULT 0,
+        encrypted_payload TEXT,
         state TEXT NOT NULL CHECK (
           state IN ('processing', 'pending', 'applied', 'quarantined')
         ),

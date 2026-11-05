@@ -189,9 +189,6 @@ final class SqliteSyncInboundEventJournalRepository
       orElse: () => SyncInboundQuarantineReason.invalidPayload,
     );
     final encryptedPayload = row['encrypted_payload'] as String?;
-    if (encryptedPayload == null) {
-      throw StateError('Quarantined event is missing its encrypted envelope.');
-    }
     return SyncInboundQuarantinedEvent(
       nodeId: row['node_id'] as String,
       eventType: row['event_type'] as String,

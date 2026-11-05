@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/data/database/migrations/migration_049_sync_inbound_event_journal.dart';
+import 'package:qayd/data/database/migrations/migration_050_sync_inbound_event_journal_safety.dart';
 import 'package:qayd/data/repositories/sqlite_sync_inbound_event_journal_repository.dart';
 import 'package:qayd/domain/repositories/sync_inbound_event_journal_repository.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -15,6 +16,7 @@ void main() {
   setUp(() async {
     db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
     await Migration049SyncInboundEventJournal().up(db);
+    await Migration050SyncInboundEventJournalSafety().up(db);
     journal = SqliteSyncInboundEventJournalRepository(db);
   });
 
@@ -24,6 +26,7 @@ void main() {
     'migration is idempotent and creates the encrypted-event journal',
     () async {
       await Migration049SyncInboundEventJournal().up(db);
+      await Migration050SyncInboundEventJournalSafety().up(db);
       final tables = await db.rawQuery(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
         ['sync_inbound_event_journal'],
