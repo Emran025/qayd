@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -10,14 +11,18 @@ import 'package:qayd/application/pos/send_pos_credit_invoice_to_chat_use_case.da
 import 'package:qayd/application/sync/sync_event_dispatcher.dart';
 import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
+import 'package:qayd/data/security/ed25519_identity_service.dart';
 import 'package:qayd/domain/entities/notification_message.dart';
 import 'package:qayd/domain/entities/pos_credit_invoice_chat_snapshot.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_sales_report.dart';
 import 'package:qayd/domain/repositories/notification_message_repository.dart';
+import 'package:qayd/domain/services/receipt_signing_service.dart';
 import 'package:qayd/domain/services/pos_invoice_pdf_generator.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
+import 'package:qayd/domain/value_objects/crypto_key_pair.dart';
+import 'package:qayd/domain/value_objects/digital_signature.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_document_status.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
@@ -44,6 +49,34 @@ class _FixedPdfGenerator implements PosInvoicePdfGenerator {
 final _testPdfBytes = Uint8List.fromList(
   utf8.encode('%PDF-1.4\n% test credit invoice\n%%EOF\n'),
 );
+
+final _testIdentityService = const Ed25519IdentityService();
+final _testKeyPair = _testIdentityService.deriveKeyPair(
+  _testIdentityService.generateMnemonic(),
+);
+final _testReceiptSigningService = ReceiptSigningService(
+  cryptoService: _testIdentityService,
+);
+
+DigitalSignature _signAcknowledgment({
+  required String invoiceNodeId,
+  required String invoiceId,
+  required String fingerprint,
+  required String status,
+  required DateTime respondedAt,
+  CryptoKeyPair? keyPair,
+}) {
+  final signer = keyPair ?? _testKeyPair;
+  final canonical = PosCreditInvoiceChatProtocol.acknowledgmentSigningPayload(
+    invoiceNodeId: invoiceNodeId,
+    invoiceId: invoiceId,
+    fingerprint: fingerprint,
+    status: status,
+    respondedAt: respondedAt.toUtc().toIso8601String(),
+    signerPublicKeyHex: signer.publicKeyHex,
+  );
+  return _testReceiptSigningService.signCanonicalString(canonical, signer);
+}
 
 Map<String, dynamic> _snapshotJson() => <String, dynamic>{
   'schema': PosCreditInvoiceChatSnapshot.schema,
@@ -317,6 +350,13 @@ void main() {
             fingerprint: List<String>.filled(64, 'a').join(),
             status: 'accepted',
             respondedAt: DateTime.utc(2026, 11, 3),
+            signature: _signAcknowledgment(
+              invoiceNodeId: invoiceNodeId,
+              invoiceId: invoiceId,
+              fingerprint: List<String>.filled(64, 'a').join(),
+              status: 'accepted',
+              respondedAt: DateTime.utc(2026, 11, 3),
+            ),
           );
       expect(
         PosCreditInvoiceChatProtocol.isValidAcknowledgmentEventPayload(
@@ -347,9 +387,64 @@ void main() {
           fingerprint: List<String>.filled(64, 'a').join(),
           status: 'accepted',
           respondedAt: DateTime.utc(2026, 11, 3),
+          signature: _signAcknowledgment(
+            invoiceNodeId: oversizedNodeId,
+            invoiceId: oversizedInvoiceId,
+            fingerprint: List<String>.filled(64, 'a').join(),
+            status: 'accepted',
+            respondedAt: DateTime.utc(2026, 11, 3),
+          ),
         ),
         throwsFormatException,
       );
+    });
+
+    test('binds signature to invoice, decision, time and signer key', () {
+      final invoiceId = 'pos-invoice-bound';
+      final invoiceNodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(
+        invoiceId,
+      );
+      final respondedAt = DateTime.utc(2026, 11, 3, 12, 30);
+      final payload = PosCreditInvoiceChatProtocol.acknowledgementEventPayload(
+        invoiceNodeId: invoiceNodeId,
+        invoiceId: invoiceId,
+        fingerprint: List<String>.filled(64, 'b').join(),
+        status: 'rejected',
+        respondedAt: respondedAt,
+        signature: _signAcknowledgment(
+          invoiceNodeId: invoiceNodeId,
+          invoiceId: invoiceId,
+          fingerprint: List<String>.filled(64, 'b').join(),
+          status: 'rejected',
+          respondedAt: respondedAt,
+        ),
+      );
+      expect(
+        PosCreditInvoiceChatProtocol.isValidAcknowledgmentEventPayload(
+          payload,
+          expectedNodeId: invoiceNodeId,
+        ),
+        isTrue,
+      );
+
+      for (final tamper in <(String, Object)>[
+        ('invoice_id', 'pos-invoice-other'),
+        ('fingerprint', List<String>.filled(64, 'c').join()),
+        ('status', 'accepted'),
+        ('responded_at', DateTime.utc(2026, 11, 3, 12, 31).toIso8601String()),
+        ('signer_public_key_hex', List<String>.filled(64, '0').join()),
+      ]) {
+        final modified = Map<String, dynamic>.from(payload)
+          ..[tamper.$1] = tamper.$2;
+        expect(
+          PosCreditInvoiceChatProtocol.isValidAcknowledgmentEventPayload(
+            modified,
+            expectedNodeId: invoiceNodeId,
+          ),
+          isFalse,
+          reason: '${tamper.$1} is signed and must not be mutable',
+        );
+      }
     });
   });
 
@@ -551,6 +646,8 @@ void main() {
       useCase = RespondToPosCreditInvoiceInChatUseCase(
         notificationMessageRepository: notifications,
         syncEventDispatcher: sync,
+        signingService: _testReceiptSigningService,
+        getCurrentUserKeyPair: () async => _testKeyPair,
       );
 
       final snapshot = PosCreditInvoiceChatSnapshot.fromJson(_snapshotJson());
@@ -637,8 +734,122 @@ void main() {
         dispatchVerification.called(1);
         expect(sentPayload['status'], 'accepted');
         expect(sentPayload['invoice_node_id'], invoiceNodeId);
+        expect(sentPayload['signer_public_key_hex'], _testKeyPair.publicKeyHex);
+        final signature = DigitalSignature.fromHex(
+          signatureHex: sentPayload['signature_hex'] as String,
+          signerPublicKeyHex: sentPayload['signer_public_key_hex'] as String,
+          payloadHashHex: sentPayload['payload_hash_hex'] as String,
+        );
+        expect(
+          _testReceiptSigningService.verifyRaw(
+            signatureBytes: signature.signatureBytes,
+            payloadHash: signature.payloadHash,
+            publicKey: signature.signerPublicKey,
+          ),
+          isTrue,
+        );
       },
     );
+
+    test(
+      'retries the identical signed decision after dispatch failure',
+      () async {
+        var attempts = 0;
+        final dispatchedPayloads = <Map<String, dynamic>>[];
+        when(
+          () => sync.dispatchGenericEvent(
+            counterpartyAccountId: 'seller-account',
+            eventType: PosCreditInvoiceChatProtocol.acknowledgementEventType,
+            payload: any(named: 'payload'),
+            nodeId: any(named: 'nodeId'),
+          ),
+        ).thenAnswer((invocation) async {
+          attempts++;
+          dispatchedPayloads.add(
+            Map<String, dynamic>.from(
+              invocation.namedArguments[#payload] as Map,
+            ),
+          );
+          if (attempts == 1) {
+            return const FailureResult(ValidationFailure(messageAr: 'offline'));
+          }
+          return const Success(null);
+        });
+
+        final first = await useCase.call(
+          notificationId: invoiceNodeId,
+          accepted: false,
+        );
+        final retry = await useCase.call(
+          notificationId: invoiceNodeId,
+          accepted: false,
+        );
+
+        expect(first.isFailure, isTrue);
+        expect(retry.isSuccess, isTrue);
+        expect(dispatchedPayloads, hasLength(2));
+        expect(dispatchedPayloads[0], dispatchedPayloads[1]);
+        expect(dispatchedPayloads.first['status'], 'rejected');
+        expect(
+          dispatchedPayloads.first['signer_public_key_hex'],
+          _testKeyPair.publicKeyHex,
+        );
+        final stored =
+            jsonDecode(storedMessage.rawPayloadJson!) as Map<String, dynamic>;
+        expect(stored['acknowledgment_status'], 'rejected');
+        expect(
+          stored['acknowledgment_event_payload'],
+          dispatchedPayloads.first,
+        );
+      },
+    );
+
+    test('serializes concurrent accept and reject decisions', () async {
+      final dispatchStarted = Completer<void>();
+      final dispatchResult = Completer<Result<void>>();
+      when(
+        () => sync.dispatchGenericEvent(
+          counterpartyAccountId: 'seller-account',
+          eventType: PosCreditInvoiceChatProtocol.acknowledgementEventType,
+          payload: any(named: 'payload'),
+          nodeId: any(named: 'nodeId'),
+        ),
+      ).thenAnswer((_) {
+        if (!dispatchStarted.isCompleted) dispatchStarted.complete();
+        return dispatchResult.future;
+      });
+
+      final accept = useCase.call(
+        notificationId: invoiceNodeId,
+        accepted: true,
+      );
+      final reject = useCase.call(
+        notificationId: invoiceNodeId,
+        accepted: false,
+      );
+      await dispatchStarted.future;
+      dispatchResult.complete(const Success(null));
+      final results = await Future.wait([accept, reject]);
+
+      expect(results[0].isSuccess, isTrue);
+      expect(results[1].isFailure, isTrue);
+      final saved =
+          jsonDecode(storedMessage.rawPayloadJson!) as Map<String, dynamic>;
+      expect(saved['acknowledgment_status'], 'accepted');
+      expect(
+        (saved['acknowledgment_event_payload']
+            as Map<String, dynamic>)['status'],
+        'accepted',
+      );
+      verify(
+        () => sync.dispatchGenericEvent(
+          counterpartyAccountId: 'seller-account',
+          eventType: PosCreditInvoiceChatProtocol.acknowledgementEventType,
+          payload: any(named: 'payload'),
+          nodeId: any(named: 'nodeId'),
+        ),
+      ).called(1);
+    });
 
     test('does not dispatch a response for an untrusted payload', () async {
       storedMessage = _message(

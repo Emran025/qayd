@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:qayd/application/pos/pos_credit_invoice_chat_protocol.dart';
@@ -5,21 +6,60 @@ import 'package:qayd/application/sync/sync_event_dispatcher.dart';
 import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/repositories/notification_message_repository.dart';
+import 'package:qayd/domain/services/receipt_signing_service.dart';
+import 'package:qayd/domain/value_objects/crypto_key_pair.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 
 final class RespondToPosCreditInvoiceInChatUseCase {
-  const RespondToPosCreditInvoiceInChatUseCase({
+  RespondToPosCreditInvoiceInChatUseCase({
     required NotificationMessageRepository notificationMessageRepository,
     required SyncEventDispatcher syncEventDispatcher,
+    required ReceiptSigningService signingService,
+    required Future<CryptoKeyPair> Function() getCurrentUserKeyPair,
   }) : _notifications = notificationMessageRepository,
-       _sync = syncEventDispatcher;
+       _sync = syncEventDispatcher,
+       _signingService = signingService,
+       _getCurrentUserKeyPair = getCurrentUserKeyPair;
 
   final NotificationMessageRepository _notifications;
   final SyncEventDispatcher _sync;
+  final ReceiptSigningService _signingService;
+  final Future<CryptoKeyPair> Function() _getCurrentUserKeyPair;
+  final Map<String, Future<void>> _notificationTails = {};
 
   /// Acknowledges the already-posted invoice. This use case has no POS,
   /// accounting, payment, inventory, or ledger repository dependencies.
   Future<Result<void>> call({
+    required String notificationId,
+    required bool accepted,
+  }) => _withNotificationLock(
+    notificationId,
+    () => _respond(notificationId: notificationId, accepted: accepted),
+  );
+
+  Future<Result<void>> _withNotificationLock(
+    String notificationId,
+    Future<Result<void>> Function() action,
+  ) {
+    final previous = _notificationTails[notificationId] ?? Future<void>.value();
+    final release = Completer<void>();
+    final tail = previous.then((_) => release.future);
+    _notificationTails[notificationId] = tail;
+
+    return () async {
+      await previous;
+      try {
+        return await action();
+      } finally {
+        release.complete();
+        if (identical(_notificationTails[notificationId], tail)) {
+          _notificationTails.remove(notificationId);
+        }
+      }
+    }();
+  }
+
+  Future<Result<void>> _respond({
     required String notificationId,
     required bool accepted,
   }) async {
@@ -54,11 +94,40 @@ final class RespondToPosCreditInvoiceInChatUseCase {
     final pendingDecision = '${decision}_pending_sync';
     final currentStatus =
         payload['acknowledgment_status'] as String? ?? 'pending';
-    DateTime respondedAt;
+    late final Map<String, dynamic> eventPayload;
     if (currentStatus == 'pending') {
-      respondedAt = DateTime.now().toUtc();
+      final respondedAt = DateTime.now().toUtc();
+      try {
+        final keyPair = await _getCurrentUserKeyPair();
+        final canonical =
+            PosCreditInvoiceChatProtocol.acknowledgmentSigningPayload(
+              invoiceNodeId: notification.id,
+              invoiceId: invoiceId,
+              fingerprint: fingerprint,
+              status: decision,
+              respondedAt: respondedAt.toIso8601String(),
+              signerPublicKeyHex: keyPair.publicKeyHex,
+            );
+        final signature = _signingService.signCanonicalString(
+          canonical,
+          keyPair,
+        );
+        eventPayload = PosCreditInvoiceChatProtocol.acknowledgementEventPayload(
+          invoiceNodeId: notification.id,
+          invoiceId: invoiceId,
+          fingerprint: fingerprint,
+          status: decision,
+          respondedAt: respondedAt,
+          signature: signature,
+        );
+      } on Object {
+        return const FailureResult(
+          ValidationFailure(messageAr: 'تعذر توقيع إقرار الفاتورة بأمان.'),
+        );
+      }
       payload['acknowledgment_status'] = pendingDecision;
       payload['acknowledgment_responded_at'] = respondedAt.toIso8601String();
+      payload['acknowledgment_event_payload'] = eventPayload;
       final savedDecision = await _notifications.updateBodyAndPayload(
         id: notification.id,
         bodyText: AppStrings.posCreditInvoiceResponsePendingSync,
@@ -66,10 +135,28 @@ final class RespondToPosCreditInvoiceInChatUseCase {
       );
       if (savedDecision.isFailure) return savedDecision;
     } else if (currentStatus == pendingDecision) {
-      final rawDate = payload['acknowledgment_responded_at'];
-      respondedAt = rawDate is String
-          ? DateTime.tryParse(rawDate)?.toUtc() ?? DateTime.now().toUtc()
-          : DateTime.now().toUtc();
+      final persistedEvent = payload['acknowledgment_event_payload'];
+      if (persistedEvent is! Map) {
+        return const FailureResult(
+          ValidationFailure(
+            messageAr: 'إقرار الفاتورة المعلّق لا يحمل توقيعًا صالحًا.',
+          ),
+        );
+      }
+      eventPayload = Map<String, dynamic>.from(persistedEvent);
+      if (!PosCreditInvoiceChatProtocol.isValidAcknowledgmentEventPayload(
+            eventPayload,
+            expectedNodeId: notification.id,
+          ) ||
+          eventPayload['invoice_id'] != invoiceId ||
+          eventPayload['fingerprint'] != fingerprint ||
+          eventPayload['status'] != decision) {
+        return const FailureResult(
+          ValidationFailure(
+            messageAr: 'تعذر استعادة توقيع إقرار الفاتورة لإعادة الإرسال.',
+          ),
+        );
+      }
     } else if (currentStatus == decision) {
       return const Success(null);
     } else {
@@ -84,14 +171,6 @@ final class RespondToPosCreditInvoiceInChatUseCase {
       notification.id,
       fingerprint,
     );
-    final eventPayload =
-        PosCreditInvoiceChatProtocol.acknowledgementEventPayload(
-          invoiceNodeId: notification.id,
-          invoiceId: invoiceId,
-          fingerprint: fingerprint,
-          status: decision,
-          respondedAt: respondedAt,
-        );
     final dispatched = await _sync.dispatchGenericEvent(
       counterpartyAccountId: notification.counterpartyAccountId,
       eventType: PosCreditInvoiceChatProtocol.acknowledgementEventType,

@@ -1117,6 +1117,9 @@ abstract final class InjectionContainer {
         RespondToPosCreditInvoiceInChatUseCase(
           notificationMessageRepository: notificationMessageRepository,
           syncEventDispatcher: syncEventDispatcher,
+          signingService: receiptSigningService,
+          getCurrentUserKeyPair: () =>
+              setupIdentityUseCase.getKeyPair().then((v) => v!),
         );
     voucherKeyService = const VoucherKeyService();
     const balanceCalculator = BalanceCalculator();

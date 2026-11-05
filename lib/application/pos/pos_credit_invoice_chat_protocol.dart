@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:qayd/domain/entities/pos_credit_invoice_chat_snapshot.dart';
+import 'package:qayd/domain/value_objects/digital_signature.dart';
 import 'package:uuid/uuid.dart';
 
 abstract final class PosCreditInvoiceChatProtocol {
@@ -11,7 +12,7 @@ abstract final class PosCreditInvoiceChatProtocol {
   static const invoiceEventType = 'posCreditInvoice';
   static const acknowledgementEventType = 'posCreditInvoiceAcknowledgment';
   static const invoiceEventSchema = 'qayd_pos_credit_invoice_event_v1';
-  static const acknowledgementSchema = 'qayd_pos_credit_ack_v1';
+  static const acknowledgementSchema = 'qayd_pos_credit_ack_v2';
   static const pdfAttachmentSchema = 'qayd_pos_credit_invoice_pdf_v1';
   static const pdfAttachmentFileName = 'pos-credit-invoice.pdf';
   static const maxPdfAttachmentBytes = 128 * 1024;
@@ -37,6 +38,7 @@ abstract final class PosCreditInvoiceChatProtocol {
     'acknowledgment_delivery_status',
     'acknowledgment_received_at',
     'acknowledgment_node_id',
+    'acknowledgment_event_payload',
   };
   static const _pdfAttachmentFields = <String>{
     'schema',
@@ -54,6 +56,9 @@ abstract final class PosCreditInvoiceChatProtocol {
     'fingerprint',
     'status',
     'responded_at',
+    'signature_hex',
+    'signer_public_key_hex',
+    'payload_hash_hex',
   };
 
   static String invoiceNodeId(String invoiceId) => const Uuid().v5(
@@ -66,7 +71,7 @@ abstract final class PosCreditInvoiceChatProtocol {
     String fingerprint,
   ) => const Uuid().v5(
     Namespace.url.value,
-    'qayd:pos-credit-ack:$invoiceNodeId:$fingerprint',
+    'qayd:pos-credit-ack:$acknowledgementSchema:$invoiceNodeId:$fingerprint',
   );
 
   /// The PDF bytes are part of the payload passed to the existing E2EE sync
@@ -169,11 +174,28 @@ abstract final class PosCreditInvoiceChatProtocol {
     required String fingerprint,
     required String status,
     required DateTime respondedAt,
+    required DigitalSignature signature,
   }) {
+    final normalizedRespondedAt = respondedAt.toUtc().toIso8601String();
     if (invoiceNodeId != invoiceNodeIdFor(invoiceId) ||
         !RegExp(r'^[0-9a-f]{64}$').hasMatch(fingerprint) ||
-        (status != 'accepted' && status != 'rejected')) {
+        (status != 'accepted' && status != 'rejected') ||
+        signature.signatureBytes.length != 64 ||
+        signature.signerPublicKey.length != 32 ||
+        signature.payloadHash.length != 32) {
       throw const FormatException('Invalid POS credit invoice acknowledgment.');
+    }
+    final signingPayload = acknowledgmentSigningPayload(
+      invoiceNodeId: invoiceNodeId,
+      invoiceId: invoiceId,
+      fingerprint: fingerprint,
+      status: status,
+      respondedAt: normalizedRespondedAt,
+      signerPublicKeyHex: signature.signerPublicKeyHex,
+    );
+    if (signature.payloadHashHex !=
+        crypto.sha256.convert(utf8.encode(signingPayload)).toString()) {
+      throw const FormatException('Invalid POS credit invoice signature hash.');
     }
     final payload = <String, dynamic>{
       'schema': acknowledgementSchema,
@@ -181,7 +203,10 @@ abstract final class PosCreditInvoiceChatProtocol {
       'invoice_id': invoiceId,
       'fingerprint': fingerprint,
       'status': status,
-      'responded_at': respondedAt.toUtc().toIso8601String(),
+      'responded_at': normalizedRespondedAt,
+      'signature_hex': signature.signatureHex,
+      'signer_public_key_hex': signature.signerPublicKeyHex,
+      'payload_hash_hex': signature.payloadHashHex,
     };
     if (!isValidAcknowledgmentEventPayload(
       payload,
@@ -191,6 +216,24 @@ abstract final class PosCreditInvoiceChatProtocol {
     }
     return payload;
   }
+
+  /// Stable signing representation; array order is part of protocol v2.
+  static String acknowledgmentSigningPayload({
+    required String invoiceNodeId,
+    required String invoiceId,
+    required String fingerprint,
+    required String status,
+    required String respondedAt,
+    required String signerPublicKeyHex,
+  }) => jsonEncode(<String>[
+    acknowledgementSchema,
+    invoiceNodeId,
+    invoiceId,
+    fingerprint,
+    status,
+    respondedAt,
+    signerPublicKeyHex.toLowerCase(),
+  ]);
 
   static bool isValidAcknowledgmentEventPayload(
     Map<String, dynamic> payload, {
@@ -209,6 +252,12 @@ abstract final class PosCreditInvoiceChatProtocol {
     final fingerprint = payload['fingerprint'];
     final status = payload['status'];
     final respondedAt = payload['responded_at'];
+    final signatureHex = payload['signature_hex'];
+    final signerPublicKeyHex = payload['signer_public_key_hex'];
+    final payloadHashHex = payload['payload_hash_hex'];
+    final parsedRespondedAt = respondedAt is String
+        ? DateTime.tryParse(respondedAt)
+        : null;
     if (payload['schema'] != acknowledgementSchema ||
         eventInvoiceNodeId is! String ||
         eventInvoiceNodeId.length != 36 ||
@@ -221,12 +270,28 @@ abstract final class PosCreditInvoiceChatProtocol {
         (status != 'accepted' && status != 'rejected') ||
         respondedAt is! String ||
         respondedAt.length > 64 ||
-        DateTime.tryParse(respondedAt) == null ||
+        parsedRespondedAt == null ||
+        parsedRespondedAt.toUtc().toIso8601String() != respondedAt ||
+        signatureHex is! String ||
+        !RegExp(r'^[0-9a-f]{128}$').hasMatch(signatureHex) ||
+        signerPublicKeyHex is! String ||
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(signerPublicKeyHex) ||
+        payloadHashHex is! String ||
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(payloadHashHex) ||
         eventInvoiceNodeId != expectedNodeId ||
         eventInvoiceNodeId != invoiceNodeIdFor(invoiceId)) {
       return false;
     }
-    return true;
+    final signingPayload = acknowledgmentSigningPayload(
+      invoiceNodeId: eventInvoiceNodeId,
+      invoiceId: invoiceId,
+      fingerprint: fingerprint,
+      status: status as String,
+      respondedAt: respondedAt,
+      signerPublicKeyHex: signerPublicKeyHex,
+    );
+    return crypto.sha256.convert(utf8.encode(signingPayload)).toString() ==
+        payloadHashHex;
   }
 
   static Map<String, dynamic> decodePayload(String? rawJson) {
@@ -247,7 +312,8 @@ abstract final class PosCreditInvoiceChatProtocol {
     Map<String, dynamic> payload, {
     required String expectedNodeId,
   }) {
-    if (utf8.encode(jsonEncode(payload)).length > maxEventPayloadBytes ||
+    if (utf8.encode(jsonEncode(payload)).length >
+            maxEventPayloadBytes + maxAcknowledgmentPayloadBytes ||
         payload.length < _eventFields.length ||
         payload.length > _eventFields.length + _localInvoiceFields.length ||
         payload.keys.any(

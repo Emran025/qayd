@@ -22,6 +22,7 @@ import 'package:qayd/domain/value_objects/voucher_type.dart';
 import 'package:qayd/domain/value_objects/voucher_state.dart';
 import 'package:qayd/domain/value_objects/agreement_status.dart';
 import 'package:qayd/domain/value_objects/signable_receipt.dart';
+import 'package:qayd/domain/value_objects/digital_signature.dart';
 import 'package:qayd/domain/repositories/attachment_repository.dart';
 import 'package:qayd/domain/repositories/collateral_repository.dart';
 import 'package:qayd/data/encryption/voucher_key_service.dart';
@@ -369,6 +370,7 @@ class SyncPayloadProcessor {
               decryptedRawPayload,
               node.id,
               localSenderAccountIdStr,
+              decryptionKeyHexUsed ?? decryptKeys.first,
             );
             if (!applied) continue;
             break;
@@ -437,6 +439,7 @@ class SyncPayloadProcessor {
     Map<String, dynamic> payload,
     String acknowledgementNodeId,
     String senderAccountId,
+    String senderPublicKeyHex,
   ) async {
     try {
       final invoiceNodeIdValue = payload['invoice_node_id'];
@@ -452,6 +455,19 @@ class SyncPayloadProcessor {
       final fingerprint = payload['fingerprint'] as String;
       final status = payload['status'] as String;
       final respondedAt = payload['responded_at'] as String;
+      final signature = DigitalSignature.fromHex(
+        signatureHex: payload['signature_hex'] as String,
+        signerPublicKeyHex: payload['signer_public_key_hex'] as String,
+        payloadHashHex: payload['payload_hash_hex'] as String,
+      );
+      if (signature.signerPublicKeyHex != senderPublicKeyHex.toLowerCase() ||
+          !signingService.verifyRaw(
+            signatureBytes: signature.signatureBytes,
+            payloadHash: signature.payloadHash,
+            publicKey: signature.signerPublicKey,
+          )) {
+        return false;
+      }
       if (PosCreditInvoiceChatProtocol.acknowledgementNodeId(
             invoiceNodeId,
             fingerprint,

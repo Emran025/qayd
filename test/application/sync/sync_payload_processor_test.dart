@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/application/sync/sync_payload_processor.dart';
 import 'package:qayd/application/pos/pos_credit_invoice_chat_protocol.dart';
 import 'package:qayd/core/result/result.dart';
+import 'package:qayd/data/security/ed25519_identity_service.dart';
 import 'package:qayd/domain/entities/sync_node.dart';
 import 'package:qayd/domain/entities/notification_message.dart';
 import 'package:qayd/domain/entities/pos_credit_invoice_chat_snapshot.dart';
@@ -15,6 +16,7 @@ import 'package:qayd/domain/repositories/identity_repository.dart';
 import 'package:qayd/domain/services/e2ee_encryption_service.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/crypto_key_pair.dart';
+import 'package:qayd/domain/value_objects/digital_signature.dart';
 import 'package:qayd/domain/repositories/voucher_repository.dart';
 import 'package:qayd/domain/repositories/ledger_repository.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
@@ -56,6 +58,35 @@ class MockNotificationFilterService extends Mock
 final _testPosCreditInvoicePdf = Uint8List.fromList(
   utf8.encode('%PDF-1.4\n% processor test\n%%EOF\n'),
 );
+
+final _testIdentityService = const Ed25519IdentityService();
+final _testKeyPair = _testIdentityService.deriveKeyPair(
+  _testIdentityService.generateMnemonic(),
+);
+final _testReceiptSigningService = ReceiptSigningService(
+  cryptoService: _testIdentityService,
+);
+
+DigitalSignature _signAcknowledgment({
+  required String invoiceNodeId,
+  required String invoiceId,
+  required String fingerprint,
+  required String status,
+  required DateTime respondedAt,
+}) {
+  final canonical = PosCreditInvoiceChatProtocol.acknowledgmentSigningPayload(
+    invoiceNodeId: invoiceNodeId,
+    invoiceId: invoiceId,
+    fingerprint: fingerprint,
+    status: status,
+    respondedAt: respondedAt.toUtc().toIso8601String(),
+    signerPublicKeyHex: _testKeyPair.publicKeyHex,
+  );
+  return _testReceiptSigningService.signCanonicalString(
+    canonical,
+    _testKeyPair,
+  );
+}
 
 Map<String, dynamic> _creditInvoiceSnapshotJson() => <String, dynamic>{
   'schema': PosCreditInvoiceChatSnapshot.schema,
@@ -133,7 +164,7 @@ void main() {
       notificationMessageRepository: mockNotificationRepo,
       notificationFilterService: mockFilterRepo,
       e2eeService: mockE2ee,
-      signingService: MockReceiptSigningService(),
+      signingService: _testReceiptSigningService,
       getCurrentUserKeyPair: () async => CryptoKeyPair.fromHex(
         publicKeyHex:
             '0000000000000000000000000000000000000000000000000000000000000000',
@@ -464,10 +495,10 @@ void main() {
       senderParty = PartyDetails(
         accountId: AccountId(localSenderAccountUuid),
         phoneNumber: '0500000000',
-        currentPublicKeyHex: 'sender-public',
+        currentPublicKeyHex: _testKeyPair.publicKeyHex,
       );
       when(
-        () => mockAccountRepo.findAccountByPublicKey('sender-public'),
+        () => mockAccountRepo.findAccountByPublicKey(_testKeyPair.publicKeyHex),
       ).thenAnswer((_) async => Success(AccountId(localSenderAccountUuid)));
       when(
         () =>
@@ -495,7 +526,7 @@ void main() {
         encryptedPayload: 'authenticated-envelope',
         syncState: 'pending',
         clientTimestamp: DateTime.utc(2026, 11, 3, 10),
-        senderPublicKey: 'sender-public',
+        senderPublicKey: _testKeyPair.publicKeyHex,
       );
       when(
         () => mockE2ee.decryptPayload(
@@ -579,6 +610,13 @@ void main() {
             fingerprint: snapshot.fingerprint,
             status: 'accepted',
             respondedAt: DateTime.utc(2026, 11, 3, 10, 5),
+            signature: _signAcknowledgment(
+              invoiceNodeId: invoiceNodeId,
+              invoiceId: snapshot.invoiceId,
+              fingerprint: snapshot.fingerprint,
+              status: 'accepted',
+              respondedAt: DateTime.utc(2026, 11, 3, 10, 5),
+            ),
           );
       final node = SyncNode(
         id: ackNodeId,
@@ -588,7 +626,7 @@ void main() {
         encryptedPayload: 'authenticated-envelope',
         syncState: 'pending',
         clientTimestamp: DateTime.utc(2026, 11, 3, 10, 5),
-        senderPublicKey: 'sender-public',
+        senderPublicKey: _testKeyPair.publicKeyHex,
       );
       when(
         () => mockE2ee.decryptPayload(
@@ -626,6 +664,28 @@ void main() {
         (jsonDecode(updatedPayload)
             as Map<String, dynamic>)['acknowledgment_status'],
         'accepted',
+      );
+      final validSignatureHex = ackPayload['signature_hex'] as String;
+      final tampered = Map<String, dynamic>.from(ackPayload)
+        ..['signature_hex'] =
+            '${validSignatureHex[0] == 'f' ? 'e' : 'f'}${validSignatureHex.substring(1)}';
+      when(
+        () => mockE2ee.decryptPayload(
+          encryptedPayload: any(named: 'encryptedPayload'),
+          receiverKeyPair: any(named: 'receiverKeyPair'),
+          senderPublicKeyHex: any(named: 'senderPublicKeyHex'),
+          nodeId: any(named: 'nodeId'),
+          eventType: any(named: 'eventType'),
+        ),
+      ).thenAnswer((_) async => tampered);
+      final rejected = await processor.processIncomingNodes([node]);
+      expect(rejected, isNot(contains(ackNodeId)));
+      verifyNever(
+        () => mockNotificationRepo.updateBodyAndPayload(
+          id: invoiceNodeId,
+          bodyText: any(named: 'bodyText'),
+          rawPayloadJson: any(named: 'rawPayloadJson'),
+        ),
       );
       verifyNoMoreInteractions(mockVoucherRepo);
       verifyNoMoreInteractions(mockLedgerRepo);
