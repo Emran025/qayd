@@ -57,6 +57,49 @@ final class PosSalesReturnSyncSnapshotCodec {
   static Map<String, Object?> toJsonSafeMap(PosSalesReturnPosting posting) =>
       encode(posting);
 
+  /// Shared strict decoders used by other versioned POS return snapshots.
+  static PosInvoice decodeInvoiceSnapshot(
+    Map<String, Object?> invoiceRow,
+    List<Map<String, Object?>> lineRows,
+  ) => _invoice(invoiceRow, lineRows);
+
+  static PosStockMovement decodeMovementSnapshot(Map<String, Object?> row) =>
+      _movement(row);
+
+  static Map<String, Object?> encodeMovementSnapshot(
+    PosStockMovement movement,
+  ) => _movementToRow(movement);
+
+  static PosAccountingPosting decodeAccountingPostingSnapshot(
+    Map<String, Object?> row,
+  ) {
+    _keys(row, const {'source_id', 'voucher', 'entries'}, 'posting');
+    final model = VoucherModel.fromMap(_map(row['voucher'], 'posting.voucher'));
+    final voucher = VoucherMapper.toEntity(
+      model,
+      _currency(model.currencyCode),
+    );
+    final entries = _listOfMaps(row['entries'], 'posting.entries').map((entry) {
+      final mapped = LedgerEntryModel.fromMap(entry);
+      return LedgerEntryMapper.toEntity(mapped, _currency(mapped.currencyCode));
+    }).toList();
+    return PosAccountingPosting(
+      sourceId: _string(row['source_id'], 'posting.source_id'),
+      voucher: voucher,
+      entries: entries,
+    );
+  }
+
+  static Map<String, Object?> encodeAccountingPostingSnapshot(
+    PosAccountingPosting posting,
+  ) => <String, Object?>{
+    'source_id': posting.sourceId,
+    'voucher': VoucherMapper.toModel(posting.voucher).toMap(),
+    'entries': posting.entries
+        .map((entry) => LedgerEntryMapper.toModel(entry).toMap())
+        .toList(),
+  };
+
   static PosSalesReturnPosting decode(Map<String, Object?> raw) {
     try {
       return _decode(raw);

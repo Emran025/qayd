@@ -2,6 +2,7 @@ import 'package:qayd/domain/entities/pos_financial_apply_result.dart';
 import 'package:qayd/domain/entities/pos_financial_sync_event.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment_collection_posting.dart';
 import 'package:qayd/domain/entities/pos_purchase_posting.dart';
+import 'package:qayd/domain/entities/pos_purchase_return_posting.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
 import 'package:qayd/domain/entities/pos_sales_return_posting.dart';
 
@@ -28,6 +29,13 @@ abstract interface class PosFinancialInboundApplicationRepository {
   Future<PosFinancialApplyResult> applySalesReturnAtomically({
     required PosFinancialSyncEvent event,
     required PosSalesReturnPosting posting,
+    required String transportNodeId,
+    required String encryptedPayload,
+  });
+
+  Future<PosFinancialApplyResult> applyPurchaseReturnAtomically({
+    required PosFinancialSyncEvent event,
+    required PosPurchaseReturnPosting posting,
     required String transportNodeId,
     required String encryptedPayload,
   });

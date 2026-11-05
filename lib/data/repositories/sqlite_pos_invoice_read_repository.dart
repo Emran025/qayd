@@ -45,8 +45,8 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
     try {
       final rows = await _db.query(
         'pos_invoices',
-        where: 'source_invoice_id = ? AND document_type = ?',
-        whereArgs: [sourceInvoiceId, 'sales_return'],
+        where: 'source_invoice_id = ? AND document_type IN (?, ?)',
+        whereArgs: [sourceInvoiceId, 'sales_return', 'purchase_return'],
         orderBy: 'invoice_date ASC, created_at ASC',
       );
       final result = <PosInvoiceDetails>[];

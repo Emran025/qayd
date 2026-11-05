@@ -2,6 +2,7 @@ import 'package:qayd/data/mappers/pos_invoice_payment_collection_sync_snapshot_c
 import 'package:qayd/data/mappers/pos_purchase_sync_snapshot_codec.dart';
 import 'package:qayd/data/mappers/pos_sale_sync_snapshot_codec.dart';
 import 'package:qayd/data/mappers/pos_sales_return_sync_snapshot_codec.dart';
+import 'package:qayd/data/mappers/pos_purchase_return_sync_snapshot_codec.dart';
 import 'package:qayd/domain/entities/device_session.dart';
 import 'package:qayd/domain/entities/pos_financial_apply_result.dart';
 import 'package:qayd/domain/entities/pos_financial_sync_event.dart';
@@ -145,8 +146,15 @@ final class ApplyInboundPosFinancialEventUseCase {
           encryptedPayload: node.encryptedPayload,
         );
       case PosFinancialEventKind.purchaseReturn:
-        throw UnsupportedError(
-          'Purchase-return posting is not yet represented by an atomic POS aggregate.',
+        final posting = PosPurchaseReturnSyncSnapshotCodec.decode(
+          event.snapshot,
+        );
+        _validateInvoiceEvent(event, posting.invoice);
+        return _applicationRepository.applyPurchaseReturnAtomically(
+          event: event,
+          posting: posting,
+          transportNodeId: node.id,
+          encryptedPayload: node.encryptedPayload,
         );
     }
   }

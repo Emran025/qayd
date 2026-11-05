@@ -5,6 +5,7 @@ import 'package:qayd/data/mappers/pos_invoice_payment_collection_sync_snapshot_c
 import 'package:qayd/data/mappers/pos_purchase_sync_snapshot_codec.dart';
 import 'package:qayd/data/mappers/pos_sale_sync_snapshot_codec.dart';
 import 'package:qayd/data/mappers/pos_sales_return_sync_snapshot_codec.dart';
+import 'package:qayd/data/mappers/pos_purchase_return_sync_snapshot_codec.dart';
 import 'package:qayd/domain/entities/pos_financial_outbound_bundle.dart';
 import 'package:qayd/domain/entities/pos_financial_sync_event.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment_collection_posting.dart';
@@ -12,6 +13,7 @@ import 'package:qayd/domain/entities/pos_invoice.dart';
 import 'package:qayd/domain/entities/pos_purchase_posting.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
 import 'package:qayd/domain/entities/pos_sales_return_posting.dart';
+import 'package:qayd/domain/entities/pos_purchase_return_posting.dart';
 import 'package:qayd/domain/repositories/device_session_repository.dart';
 import 'package:qayd/domain/services/e2ee_encryption_service.dart';
 import 'package:qayd/domain/value_objects/crypto_key_pair.dart';
@@ -59,6 +61,14 @@ final class PosFinancialOutboundEventPreparer {
     kind: PosFinancialEventKind.salesReturn,
     invoice: posting.invoice,
     snapshot: PosSalesReturnSyncSnapshotCodec.encode(posting),
+  );
+
+  Future<PosFinancialOutboundBundle?> preparePurchaseReturn(
+    PosPurchaseReturnPosting posting,
+  ) => _prepareInvoice(
+    kind: PosFinancialEventKind.purchaseReturn,
+    invoice: posting.invoice,
+    snapshot: PosPurchaseReturnSyncSnapshotCodec.encode(posting),
   );
 
   Future<PosFinancialOutboundBundle?> prepareCollection(
