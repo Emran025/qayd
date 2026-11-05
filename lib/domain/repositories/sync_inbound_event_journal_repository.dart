@@ -31,7 +31,7 @@ enum SyncInboundQuarantineReason {
 }
 
 /// Ciphertext-only record available to future local review/recovery flows.
-/// [encryptedPayload] can be absent for an ambiguous v49 row created before
+/// [encryptedPayload] can be absent for an ambiguous v50 row created before
 /// the journal began persisting the envelope at claim time.
 final class SyncInboundQuarantinedEvent {
   const SyncInboundQuarantinedEvent({
@@ -80,7 +80,5 @@ abstract interface class SyncInboundEventJournalRepository {
     required String encryptedPayload,
   });
 
-  Future<List<SyncInboundQuarantinedEvent>> listQuarantined({
-    int limit = 100,
-  });
+  Future<List<SyncInboundQuarantinedEvent>> listQuarantined({int limit = 100});
 }

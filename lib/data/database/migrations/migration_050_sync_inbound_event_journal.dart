@@ -1,14 +1,14 @@
 import 'package:qayd/data/database/migrations/schema_migration.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
-/// Schema v49: retain encrypted inbound events and their processing state.
+/// Schema v50: retain encrypted inbound events and their processing state.
 ///
 /// The journal deliberately stores no decrypted/business payload. Its payload
 /// column is the original E2EE envelope, protected by SQLCipher, so unsupported
 /// events remain available for review without being acknowledged as applied.
-final class Migration049SyncInboundEventJournal implements SchemaMigration {
+final class Migration050SyncInboundEventJournal implements SchemaMigration {
   @override
-  int get version => 49;
+  int get version => 50;
 
   @override
   Future<void> up(Database db) async {

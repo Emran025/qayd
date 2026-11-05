@@ -46,8 +46,8 @@ import 'package:qayd/data/database/migrations/migration_045_pos_currency_snapsho
 import 'package:qayd/data/database/migrations/migration_046_pos_stock_lots_fefo.dart';
 import 'package:qayd/data/database/migrations/migration_047_pos_stock_disposal.dart';
 import 'package:qayd/data/database/migrations/migration_048_pos_discount_snapshots.dart';
-import 'package:qayd/data/database/migrations/migration_049_sync_inbound_event_journal.dart';
-import 'package:qayd/data/database/migrations/migration_050_sync_inbound_event_journal_safety.dart';
+import 'package:qayd/data/database/migrations/migration_050_sync_inbound_event_journal.dart';
+import 'package:qayd/data/database/migrations/migration_051_sync_inbound_event_journal_safety.dart';
 import 'package:qayd/data/database/migrations/schema_migration.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
@@ -104,8 +104,8 @@ final class MigrationRegistry {
     Migration046PosStockLotsFefo(),
     Migration047PosStockDisposal(),
     Migration048PosDiscountSnapshots(),
-    Migration049SyncInboundEventJournal(),
-    Migration050SyncInboundEventJournalSafety(),
+    Migration050SyncInboundEventJournal(),
+    Migration051SyncInboundEventJournalSafety(),
   ];
 
   static List<SchemaMigration> get ordered {

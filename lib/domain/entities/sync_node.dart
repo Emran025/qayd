@@ -16,6 +16,11 @@ enum SyncEventType {
   tripartiteRequest, // Sender -> Mediator Request (A -> B)
   posCreditInvoice, // Encrypted snapshot of an already-posted credit sale
   posCreditInvoiceAcknowledgment, // Non-financial accept/reject acknowledgment
+  posSale,
+  posPurchase,
+  posSalesReturn,
+  posPurchaseReturn,
+  posCollection,
   unknown;
 
   static SyncEventType fromString(String val) {

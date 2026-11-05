@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qayd/data/database/migrations/migration_049_sync_inbound_event_journal.dart';
-import 'package:qayd/data/database/migrations/migration_050_sync_inbound_event_journal_safety.dart';
+import 'package:qayd/data/database/migrations/migration_050_sync_inbound_event_journal.dart';
+import 'package:qayd/data/database/migrations/migration_051_sync_inbound_event_journal_safety.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -10,12 +10,12 @@ void main() {
 
   setUp(() async {
     db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
-    await Migration049SyncInboundEventJournal().up(db);
+    await Migration050SyncInboundEventJournal().up(db);
   });
 
   tearDown(() async => db.close());
 
-  test('v50 adds conflict fields and quarantines ambiguous v49 rows', () async {
+  test('v51 adds conflict fields and quarantines ambiguous v50 rows', () async {
     const createdAt = '2026-11-05T00:00:00.000Z';
     for (final row in <Map<String, Object?>>[
       {
@@ -55,7 +55,7 @@ void main() {
       });
     }
 
-    final migration = Migration050SyncInboundEventJournalSafety();
+    final migration = Migration051SyncInboundEventJournalSafety();
     await migration.up(db);
     await migration.up(db);
 
@@ -82,6 +82,17 @@ void main() {
         'conflicting_payload_fingerprint',
         'conflicting_encrypted_payload',
         'conflict_count',
+      ]),
+    );
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'pos_%'",
+    );
+    expect(
+      tables.map((row) => row['name']),
+      containsAll(<String>[
+        'pos_financial_event_outbox',
+        'pos_financial_event_inbox',
+        'pos_inventory_conflicts',
       ]),
     );
   });

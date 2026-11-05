@@ -8,6 +8,7 @@ import 'package:qayd/domain/services/notification_filter_service.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:flutter/foundation.dart';
 import 'package:qayd/domain/entities/sync_node.dart';
+import 'package:qayd/domain/entities/pos_financial_sync_event.dart';
 import 'package:qayd/domain/repositories/identity_repository.dart';
 import 'package:qayd/domain/repositories/sync_inbound_event_journal_repository.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
@@ -147,23 +148,20 @@ class SyncPayloadProcessor {
 
     final envPk = node.senderPublicKey?.trim().toLowerCase() ?? '';
     if (envPk.isNotEmpty) {
-      accountId = (await accountRepository.findAccountByPublicKey(
-        envPk,
-      )).valueOrNull;
+      accountId = (await accountRepository.findAccountByPublicKey(envPk))
+          .valueOrNull;
     }
 
     final envPhone = node.senderPhone?.trim() ?? '';
     if (accountId == null && envPhone.isNotEmpty) {
-      accountId = (await accountRepository.findAccountByPhone(
-        envPhone,
-      )).valueOrNull;
+      accountId = (await accountRepository.findAccountByPhone(envPhone))
+          .valueOrNull;
     }
 
     final envWa = node.senderWhatsapp?.trim() ?? '';
     if (accountId == null && envWa.isNotEmpty) {
-      accountId = (await accountRepository.findAccountByWhatsApp(
-        envWa,
-      )).valueOrNull;
+      accountId = (await accountRepository.findAccountByWhatsApp(envWa))
+          .valueOrNull;
     }
 
     if (accountId == null) {
@@ -201,9 +199,9 @@ class SyncPayloadProcessor {
               nodeId: node.id,
             );
             if (result != null && result.name.isNotEmpty) {
-              final updatedPayload =
-                  jsonDecode(existing.rawPayloadJson ?? '{}')
-                      as Map<String, dynamic>;
+              final updatedPayload = jsonDecode(
+                existing.rawPayloadJson ?? '{}',
+              ) as Map<String, dynamic>;
               updatedPayload['sender_name'] = result.name;
               updatedPayload['sender_phone'] ??= result.phone.isNotEmpty
                   ? result.phone
@@ -226,7 +224,9 @@ class SyncPayloadProcessor {
         }
 
         // Node not yet staged — run the full staging flow.
-        debugPrint('Sync: Staging an onboarding request for an unknown sender.');
+        debugPrint(
+          'Sync: Staging an onboarding request for an unknown sender.',
+        );
         await stagePendingCounterpartyRequest(
           nodeId: node.id,
           node: node,
@@ -278,14 +278,18 @@ class SyncPayloadProcessor {
         final party = await _resolveInboundSenderParty(node);
 
         if (party == null) {
-          debugPrint('Sync: Sender is not paired; retaining the event pending.');
+          debugPrint(
+            'Sync: Sender is not paired; retaining the event pending.',
+          );
           await inboundEventJournal?.returnToPending(node.id);
           continue;
         }
 
         final decryptKeys = _orderedDecryptPublicKeys(node: node, party: party);
         if (decryptKeys.isEmpty) {
-          debugPrint('Sync: No authorized sender key; retaining encrypted event.');
+          debugPrint(
+            'Sync: No authorized sender key; retaining encrypted event.',
+          );
           await _quarantine(
             node,
             SyncInboundQuarantineReason.unauthorizedSenderKey,
@@ -312,12 +316,11 @@ class SyncPayloadProcessor {
         }
 
         if (decryptedRawPayload == null) {
-          debugPrint('Sync: Encrypted event failed authentication or decryption.');
-          onDecryptionFailure?.call(node.id);
-          await _quarantine(
-            node,
-            SyncInboundQuarantineReason.decryptionFailed,
+          debugPrint(
+            'Sync: Encrypted event failed authentication or decryption.',
           );
+          onDecryptionFailure?.call(node.id);
+          await _quarantine(node, SyncInboundQuarantineReason.decryptionFailed);
           continue;
         }
 
@@ -393,18 +396,12 @@ class SyncPayloadProcessor {
           case SyncEventType.credentialBootstrap:
             // This node belongs to the pre-auth companion processor. Never
             // acknowledge it as applied from the general sync pipeline.
-            await _quarantine(
-              node,
-              SyncInboundQuarantineReason.delegatedEvent,
-            );
+            await _quarantine(node, SyncInboundQuarantineReason.delegatedEvent);
             continue;
           case SyncEventType.p2pHandshake:
             // Handshake nodes are consumed by the P2P transport, not this
             // processor; do not acknowledge them as applied here.
-            await _quarantine(
-              node,
-              SyncInboundQuarantineReason.delegatedEvent,
-            );
+            await _quarantine(node, SyncInboundQuarantineReason.delegatedEvent);
             continue;
           case SyncEventType.tripartiteRequest:
             await _inboundTripartiteRequest(
@@ -441,6 +438,21 @@ class SyncPayloadProcessor {
               continue;
             }
             break;
+          case SyncEventType.posSale:
+          case SyncEventType.posPurchase:
+          case SyncEventType.posSalesReturn:
+          case SyncEventType.posPurchaseReturn:
+          case SyncEventType.posCollection:
+            // Validate the decrypted contract before refusing application.
+            // The atomic ledger/stock coordinator is not wired into this
+            // legacy generic processor yet, so financial events remain
+            // quarantined rather than being ACKed or partially applied.
+            PosFinancialSyncEvent.fromJson(
+              decryptedRawPayload.cast<String, Object?>(),
+              payloadFingerprint: 'validated-inbound',
+            );
+            await _quarantine(node, SyncInboundQuarantineReason.delegatedEvent);
+            continue;
           case SyncEventType.unknown:
             debugPrint('Sync: Unsupported event type; retaining ciphertext.');
             await _quarantine(
@@ -454,10 +466,7 @@ class SyncPayloadProcessor {
       } catch (_) {
         try {
           if (handlerStarted) {
-            await _quarantine(
-              node,
-              SyncInboundQuarantineReason.handlerFailed,
-            );
+            await _quarantine(node, SyncInboundQuarantineReason.handlerFailed);
           } else {
             await inboundEventJournal?.returnToPending(node.id);
           }
@@ -572,9 +581,9 @@ class SyncPayloadProcessor {
       if (currentStatus != 'pending' && currentStatus != status) return false;
 
       localPayload['acknowledgment_status'] = status;
-      localPayload['acknowledgment_received_at'] = DateTime.parse(
-        respondedAt,
-      ).toUtc().toIso8601String();
+      localPayload['acknowledgment_received_at'] = DateTime.parse(respondedAt)
+          .toUtc()
+          .toIso8601String();
       localPayload['acknowledgment_node_id'] = acknowledgementNodeId;
       final updated = await notificationMessageRepository.updateBodyAndPayload(
         id: outgoing.id,
