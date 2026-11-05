@@ -86,6 +86,100 @@ def _run_diagnostic(
     return f"[{title}] exit={result.returncode}\n{output}\n"
 
 
+def _recent_crash_reports(simulator_id: str, app_bundle_id: str) -> str:
+    simulator_logs = (
+        Path.home()
+        / "Library"
+        / "Developer"
+        / "CoreSimulator"
+        / "Devices"
+        / simulator_id
+        / "data"
+        / "Library"
+        / "Logs"
+    )
+    roots = (
+        Path.home() / "Library" / "Logs" / "DiagnosticReports",
+        Path.home() / "Library" / "Logs" / "CrashReporter",
+        simulator_logs / "CrashReporter",
+        simulator_logs / "DiagnosticReports",
+    )
+    candidates: dict[Path, float] = {}
+    errors: list[str] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        command = [
+            "find",
+            str(root),
+            "-type",
+            "f",
+            "-mmin",
+            "-30",
+            "(",
+            "-iname",
+            "*Runner*",
+            "-o",
+            "-iname",
+            f"*{app_bundle_id}*",
+            "-o",
+            "-iname",
+            "*ReportCrash*",
+            ")",
+            "-print",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except subprocess.TimeoutExpired:
+            errors.append(f"find timed out for {root}")
+            continue
+        except OSError as error:
+            errors.append(f"find could not run for {root}: {error}")
+            continue
+        if result.returncode != 0 and result.stderr.strip():
+            errors.append(f"find failed for {root}: {result.stderr.strip()[:1000]}")
+        for raw_path in result.stdout.splitlines():
+            report = Path(raw_path)
+            if report.suffix.lower() not in {".ips", ".crash", ".spin", ".hang", ".diag"}:
+                continue
+            try:
+                candidates[report] = report.stat().st_mtime
+            except OSError:
+                continue
+
+    if not candidates:
+        details = "\n".join(errors)
+        suffix = f"\n{details}" if details else ""
+        return (
+            "[recent Runner/Qayd crash reports] no matching files from the last "
+            f"30 minutes.{suffix}"
+        )
+
+    output = ["[recent Runner/Qayd crash reports; newest first]"]
+    for report, _ in sorted(
+        candidates.items(), key=lambda item: item[1], reverse=True
+    )[:5]:
+        try:
+            content = report.read_bytes()[:8_000].decode("utf-8", errors="replace")
+        except OSError as error:
+            output.append(f"{report}: could not read report: {error}")
+            continue
+        output.append(f"[crash report] {report}\n{content}")
+    joined = "\n".join(output)
+    if len(joined) > DIAGNOSTIC_OUTPUT_LIMIT:
+        joined = (
+            "[crash reports truncated to final 40 KB]\n"
+            + joined[-DIAGNOSTIC_OUTPUT_LIMIT:]
+        )
+    return joined
+
+
 def capture_diagnostics(simulator_id: str, app_bundle_id: str, cause: str) -> None:
     path = Path("artifacts/ios-e2ee-diagnostics.log")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -121,13 +215,16 @@ def capture_diagnostics(simulator_id: str, app_bundle_id: str, cause: str) -> No
                 "log",
                 "show",
                 "--last",
-                "5m",
+                "20m",
                 "--style",
                 "compact",
                 "--predicate",
                 (
                     f'process == "Runner" OR process == "{app_bundle_id}" '
-                    'OR process == "SpringBoard"'
+                    'OR process == "ReportCrash" '
+                    f'OR ((process == "runningboardd" OR process == "SpringBoard") '
+                    f'AND (eventMessage CONTAINS[c] "{app_bundle_id}" '
+                    'OR eventMessage CONTAINS[c] "Runner"))'
                 ),
             ],
         ),
@@ -164,7 +261,6 @@ def capture_diagnostics(simulator_id: str, app_bundle_id: str, cause: str) -> No
                 "flutter_tester",
                 "xcodebuild",
                 "SWBBuildService",
-                "CoreSimulator",
                 "simctl",
                 "dart",
             )
@@ -178,6 +274,7 @@ def capture_diagnostics(simulator_id: str, app_bundle_id: str, cause: str) -> No
             result = "\n".join(result.splitlines()[-260:]) + "\n"
         output.append(result)
 
+    output.append(_recent_crash_reports(simulator_id, app_bundle_id))
     content = "\n".join(output)
     path.write_text(content)
     print(content, flush=True)
