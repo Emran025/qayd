@@ -689,6 +689,152 @@ final class SqlitePosStockMovementRepository
         movement.reversesSourceId != null;
   }
 
+  /// Appends a purchase-return movement only after proving that it reverses
+  /// stock received on the linked original purchase line and does not exceed
+  /// that line/lot's unreturned quantity. The ordinary append path continues
+  /// to reject reversal movements.
+  Future<Result<void>> appendPurchaseReturnInTransaction(
+    DatabaseExecutor executor,
+    PosStockMovement movement,
+  ) async {
+    if (movement.type != PosStockMovementType.purchaseReturn ||
+        movement.direction != PosStockMovementDirection.outbound ||
+        movement.sourceType != 'pos_invoice' ||
+        movement.sourceId == null ||
+        movement.sourceLineId == null ||
+        movement.reversesSourceId == null ||
+        movement.quantity.isZero) {
+      return _invalidPurchaseReturnStock();
+    }
+    try {
+      final returnRows = await executor.rawQuery(
+        'SELECT i.document_type, i.source_invoice_id, i.warehouse_id, '
+        'l.source_line_id, l.product_id, l.quantity_scale '
+        'FROM pos_invoices i JOIN pos_invoice_lines l ON l.invoice_id = i.id '
+        'WHERE i.id = ? AND l.id = ?',
+        [movement.sourceId, movement.sourceLineId],
+      );
+      if (returnRows.length != 1 ||
+          returnRows.single['document_type'] != 'purchase_return' ||
+          returnRows.single['source_invoice_id'] != movement.reversesSourceId ||
+          returnRows.single['warehouse_id'] != movement.warehouseId ||
+          returnRows.single['source_line_id'] == null ||
+          returnRows.single['product_id'] != movement.productId ||
+          _asInt(returnRows.single['quantity_scale']) != movement.quantity.scale) {
+        return _invalidPurchaseReturnStock();
+      }
+      final originalLineId = returnRows.single['source_line_id'] as String;
+      final sourceRows = await executor.query(
+        'pos_invoices',
+        columns: ['id', 'warehouse_id'],
+        where: 'id = ? AND document_type = ? AND status IN (?, ?, ?, ?)',
+        whereArgs: [
+          movement.reversesSourceId,
+          'purchase',
+          'posted',
+          'partiallyPaid',
+          'paid',
+          'partiallyReturned',
+        ],
+        limit: 1,
+      );
+      final originalLines = await executor.query(
+        'pos_invoice_lines',
+        where:
+            'id = ? AND invoice_id = ? AND product_id = ? AND quantity_scale = ?',
+        whereArgs: [
+          originalLineId,
+          movement.reversesSourceId,
+          movement.productId,
+          movement.quantity.scale,
+        ],
+        limit: 1,
+      );
+      if (sourceRows.length != 1 ||
+          sourceRows.single['warehouse_id'] != movement.warehouseId ||
+          originalLines.length != 1) {
+        return _invalidPurchaseReturnStock();
+      }
+      final sourceMovements = await executor.rawQuery(
+        'SELECT COALESCE(SUM(quantity_scaled), 0) AS quantity_scaled '
+        'FROM pos_stock_movements '
+        "WHERE source_type = 'pos_invoice' AND source_id = ? "
+        "AND source_line_id = ? AND product_id = ? AND warehouse_id = ? "
+        "AND movement_type = 'purchase' AND quantity_scale = ? "
+        'AND quantity_scaled > 0',
+        [
+          movement.reversesSourceId,
+          originalLineId,
+          movement.productId,
+          movement.warehouseId,
+          movement.quantity.scale,
+        ],
+      );
+      final sourceLotMovements = await executor.rawQuery(
+        'SELECT COALESCE(SUM(quantity_scaled), 0) AS quantity_scaled '
+        'FROM pos_stock_movements '
+        "WHERE source_type = 'pos_invoice' AND source_id = ? "
+        "AND source_line_id = ? AND product_id = ? AND warehouse_id = ? "
+        "AND movement_type = 'purchase' AND quantity_scale = ? "
+        'AND quantity_scaled > 0 AND lot_id IS ?',
+        [
+          movement.reversesSourceId,
+          originalLineId,
+          movement.productId,
+          movement.warehouseId,
+          movement.quantity.scale,
+          movement.lotId,
+        ],
+      );
+      final priorReturns = await executor.rawQuery(
+        'SELECT COALESCE(SUM(ABS(m.quantity_scaled)), 0) AS quantity_scaled '
+        'FROM pos_stock_movements m '
+        'JOIN pos_invoice_lines rl ON rl.id = m.source_line_id '
+        'JOIN pos_invoices ri ON ri.id = rl.invoice_id '
+        "WHERE ri.document_type = 'purchase_return' "
+        'AND ri.source_invoice_id = ? AND rl.source_line_id = ? '
+        "AND m.movement_type = 'purchase_return' "
+        'AND m.quantity_scaled < 0 AND m.lot_id IS ?',
+        [movement.reversesSourceId, originalLineId, movement.lotId],
+      );
+      final purchased = _asInt(sourceMovements.single['quantity_scaled']);
+      final purchasedFromLot =
+          _asInt(sourceLotMovements.single['quantity_scaled']);
+      final alreadyReturned = _asInt(priorReturns.single['quantity_scaled']);
+      final sourceQuantity = _asInt(originalLines.single['quantity_scaled']);
+      if (purchased != sourceQuantity ||
+          purchasedFromLot == 0 ||
+          alreadyReturned + movement.quantity.scaledUnits > purchasedFromLot) {
+        return FailureResult(
+          ValidationFailure(
+            messageAr: AppStrings.posStockInvalidMovement,
+            code: 'pos_purchase_return_stock_exceeds_source',
+          ),
+        );
+      }
+      // The caller already inserted the immutable return invoice and line in
+      // this transaction. Only this branch may admit a reversal movement.
+      return await appendInTransaction(
+        executor,
+        movement,
+        allowStockDisposal: true,
+      );
+    } on DatabaseException {
+      return FailureResult(
+        DatabaseFailure(messageAr: AppStrings.posStockAppendFailed),
+      );
+    } catch (_) {
+      return _invalidPurchaseReturnStock();
+    }
+  }
+
+  FailureResult<void> _invalidPurchaseReturnStock() => FailureResult(
+        ValidationFailure(
+          messageAr: AppStrings.posStockInvalidMovement,
+          code: 'pos_purchase_return_stock_link_invalid',
+        ),
+      );
+
   /// Verifies the database's lot projection after all other atomic writes.
   Future<Result<void>> verifyLotProjectionInTransaction(
     DatabaseExecutor executor,

@@ -2,6 +2,7 @@ import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_financial_outbound_bundle.dart';
 import 'package:qayd/domain/entities/pos_invoice_payment_collection_posting.dart';
 import 'package:qayd/domain/entities/pos_purchase_posting.dart';
+import 'package:qayd/domain/entities/pos_purchase_return_posting.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
 import 'package:qayd/domain/entities/pos_sales_return_posting.dart';
 
@@ -19,6 +20,11 @@ abstract interface class PosFinancialOutboundPostingWriter {
 
   Future<Result<void>> saveSalesReturnWithOutboundAtomically(
     PosSalesReturnPosting posting,
+    PosFinancialOutboundBundle bundle,
+  );
+
+  Future<Result<void>> savePurchaseReturnWithOutboundAtomically(
+    PosPurchaseReturnPosting posting,
     PosFinancialOutboundBundle bundle,
   );
 

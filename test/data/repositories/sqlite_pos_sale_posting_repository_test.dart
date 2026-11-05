@@ -9,6 +9,7 @@ import 'package:qayd/data/database/transaction_runner.dart';
 import 'package:qayd/data/security/e2ee_envelope_format.dart';
 import 'package:qayd/data/mappers/pos_invoice_mapper.dart';
 import 'package:qayd/data/mappers/pos_sale_sync_snapshot_codec.dart';
+import 'package:qayd/data/mappers/pos_purchase_return_sync_snapshot_codec.dart';
 import 'package:qayd/data/repositories/device_sync_outbox_dao.dart';
 import 'package:qayd/data/repositories/pos_financial_event_store.dart';
 import 'package:qayd/data/repositories/sqlite_pos_financial_inbound_application_repository.dart';
@@ -16,6 +17,7 @@ import 'package:qayd/data/repositories/sqlite_pos_financial_outbound_posting_wri
 import 'package:qayd/application/sync/pos_financial_outbound_event_preparer.dart';
 import 'package:qayd/data/repositories/sqlite_pos_invoice_payment_collection_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_purchase_posting_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_purchase_return_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sale_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sales_return_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_stock_movement_repository.dart';
@@ -24,6 +26,7 @@ import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
 import 'package:qayd/domain/entities/pos_financial_apply_result.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
+import 'package:qayd/domain/entities/pos_purchase_return_posting.dart';
 import 'package:qayd/domain/entities/pos_financial_outbound_bundle.dart';
 import 'package:qayd/domain/entities/pos_financial_sync_event.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
@@ -396,6 +399,136 @@ PosSalePosting _sale({
   );
 }
 
+({
+  PosPurchaseReturnPosting posting,
+  PosInvoice source,
+  PosStockMovement sourceMovement,
+})
+_purchaseReturn() {
+  final date = DateTime.utc(2026, 1, 1, 10);
+  final sourceLine = PosInvoiceLine.create(
+    id: 'purchase-line-1',
+    invoiceId: 'purchase-invoice-1',
+    productId: 'product-1',
+    productNameSnapshot: 'Coffee',
+    quantity: PosQuantity.whole(2),
+    unitPrice: Money.fromMinorUnits(500, _currency),
+    unitCost: Money.fromMinorUnits(100, _currency),
+    discount: Money.zero(_currency),
+    tax: Money.zero(_currency),
+    createdAt: date,
+    expiryTrackingSnapshot: false,
+  );
+  final source = PosInvoice.draft(
+    id: 'purchase-invoice-1',
+    invoiceNumber: 'P-000001',
+    type: PosInvoiceType.purchase,
+    warehouseId: 'warehouse-1',
+    currency: _currency,
+    lines: [sourceLine],
+    idempotencyKey: 'purchase-key-1',
+    invoiceDate: date,
+    now: date,
+    counterpartyAccountId: AccountId('supplier'),
+  ).post(date);
+  final sourceMovement = PosStockMovement.create(
+    id: 'purchase-movement-1',
+    productId: 'product-1',
+    warehouseId: 'warehouse-1',
+    type: PosStockMovementType.purchase,
+    direction: PosStockMovementDirection.inbound,
+    quantity: PosQuantity.whole(2),
+    unitCost: Money.fromMinorUnits(100, _currency),
+    sourceType: 'pos_invoice',
+    sourceId: source.id,
+    sourceLineId: sourceLine.id,
+    occurredAt: date,
+    idempotencyKey: 'purchase-movement-key-1',
+    createdAt: date,
+  );
+  final returnLine = PosInvoiceLine.create(
+    id: 'purchase-return-1:line:0',
+    invoiceId: 'purchase-return-1',
+    productId: 'product-1',
+    productNameSnapshot: 'Coffee',
+    quantity: PosQuantity.whole(1),
+    unitPrice: Money.fromMinorUnits(500, _currency),
+    unitCost: Money.fromMinorUnits(100, _currency),
+    discount: Money.zero(_currency),
+    tax: Money.zero(_currency),
+    sourceLineId: sourceLine.id,
+    createdAt: date,
+    expiryTrackingSnapshot: false,
+  );
+  final invoice = PosInvoice.draft(
+    id: 'purchase-return-1',
+    invoiceNumber: 'PR-000001',
+    type: PosInvoiceType.purchaseReturn,
+    warehouseId: 'warehouse-1',
+    currency: _currency,
+    lines: [returnLine],
+    idempotencyKey: 'purchase-return-key-1',
+    invoiceDate: date,
+    now: date,
+    counterpartyAccountId: AccountId('supplier'),
+    sourceInvoiceId: source.id,
+  ).post(date);
+  final inventoryPosting = _posting(
+    voucherId: 'purchase-return-voucher-inventory',
+    invoiceId: invoice.id,
+    transactionId: 'purchase-return-tx-inventory',
+    debitEntryId: 'purchase-return-debit-inventory',
+    creditEntryId: 'purchase-return-credit-inventory',
+    type: VoucherType.payment,
+    counterpartyId: 'payables',
+    affectedAccountId: 'inventory',
+    amount: 100,
+    date: date,
+  );
+  final variancePosting = _posting(
+    voucherId: 'purchase-return-voucher-variance',
+    invoiceId: invoice.id,
+    transactionId: 'purchase-return-tx-variance',
+    debitEntryId: 'purchase-return-debit-variance',
+    creditEntryId: 'purchase-return-credit-variance',
+    type: VoucherType.payment,
+    counterpartyId: 'payables',
+    affectedAccountId: 'purchase-returns',
+    amount: 400,
+    date: date,
+  );
+  final movement = PosStockMovement.create(
+    id: 'purchase-return-movement-1',
+    productId: 'product-1',
+    warehouseId: 'warehouse-1',
+    type: PosStockMovementType.purchaseReturn,
+    direction: PosStockMovementDirection.outbound,
+    quantity: PosQuantity.whole(1),
+    unitCost: Money.fromMinorUnits(100, _currency),
+    sourceType: 'pos_invoice',
+    sourceId: invoice.id,
+    sourceLineId: returnLine.id,
+    reversesSourceId: source.id,
+    occurredAt: date,
+    idempotencyKey: 'purchase-return-stock-key-1',
+    createdAt: date,
+  );
+  return (
+    posting: PosPurchaseReturnPosting(
+      invoice: invoice,
+      sourceInvoiceId: source.id,
+      supplierPayablesAccountId: AccountId('payables'),
+      inventoryAccountId: AccountId('inventory'),
+      purchaseReturnsAccountId: AccountId('purchase-returns'),
+      movements: [movement],
+      postings: [inventoryPosting, variancePosting],
+      reason: 'supplier credit note',
+    ),
+    source: source,
+    sourceMovement: sourceMovement,
+  );
+}
+
 PosFinancialOutboundBundle _outboundBundleForSale(PosSalePosting posting) {
   final invoice = posting.invoice;
   final event = PosFinancialSyncEvent.decode(
@@ -432,6 +565,56 @@ PosFinancialOutboundBundle _outboundBundleForSale(PosSalePosting posting) {
         return PosFinancialOutboundDelivery(
           nodeId: 'node-${invoice.id}-$target',
           eventType: SyncEventType.posSale.name,
+          targetDeviceId: target,
+          encryptedPayload: ciphertext,
+          signature: base64Encode(utf8.encode('$target|$ciphertext')),
+          createdAt: createdAt,
+        );
+      })
+      .toList(growable: false);
+  return PosFinancialOutboundBundle(
+    event: event,
+    localEncryptedPayload: 'encrypted-local-copy',
+    deliveries: deliveries,
+  );
+}
+
+PosFinancialOutboundBundle _outboundBundleForPurchaseReturn(
+  PosPurchaseReturnPosting posting,
+) {
+  final invoice = posting.invoice;
+  final event = PosFinancialSyncEvent.fromJson({
+    'version': 2,
+    'kind': 'purchaseReturn',
+    'owner_user_id': 7,
+    'source_device_id': 'device-a',
+    'target_device_id': 'device-a',
+    'event_id': invoice.id,
+    'aggregate_id': invoice.id,
+    'idempotency_key': invoice.idempotencyKey,
+    'currency_code': invoice.currency.code,
+    'occurred_at': invoice.invoiceDate.toUtc().toIso8601String(),
+    'total_minor': invoice.total.minorUnits,
+    'lines': invoice.lines
+        .map(
+          (line) => {
+            'product_id': line.productId,
+            'quantity_scaled': line.quantity.scaledUnits,
+            'quantity_scale': line.quantity.scale,
+            'unit_price_minor': line.unitPrice.minorUnits,
+            'total_minor': line.lineTotal.minorUnits,
+          },
+        )
+        .toList(),
+    'snapshot': PosPurchaseReturnSyncSnapshotCodec.encode(posting),
+  });
+  final createdAt = DateTime.utc(2026, 11, 5);
+  final deliveries = ['device-b', 'device-c']
+      .map((target) {
+        final ciphertext = 'encrypted-for-$target';
+        return PosFinancialOutboundDelivery(
+          nodeId: 'node-${invoice.id}-$target',
+          eventType: SyncEventType.posPurchaseReturn.name,
           targetDeviceId: target,
           encryptedPayload: ciphertext,
           signature: base64Encode(utf8.encode('$target|$ciphertext')),
@@ -869,6 +1052,11 @@ void main() {
             stockRepository,
             voucherRepository,
           ),
+          purchaseReturnRepository: SqlitePosPurchaseReturnPostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
           collectionRepository: SqlitePosInvoicePaymentCollectionRepository(
             runner,
             voucherRepository,
@@ -895,6 +1083,87 @@ void main() {
       },
     );
 
+    test(
+      'commits purchase return, accounting, and encrypted device deliveries once',
+      () async {
+        final runner = DatabaseTransactionRunner(db);
+        final voucherRepository = SqliteVoucherRepository(db, runner);
+        for (final id in ['supplier', 'payables', 'purchase-returns']) {
+          await db.insert('accounts', {
+            'id': id,
+            'name': id,
+            'nature': id == 'supplier' ? 'credit' : 'debit',
+            'created_at': '2026-01-01T00:00:00.000Z',
+          });
+        }
+        for (final deviceId in ['device-b', 'device-c']) {
+          await db.insert('device_sessions', {
+            'device_id': deviceId,
+            'public_key_hex': 'a' * 64,
+            'paired_at': DateTime.utc(2026, 1, 1).toIso8601String(),
+          });
+        }
+        final fixture = _purchaseReturn();
+        await db.insert('pos_invoices', PosInvoiceMapper.toRow(fixture.source));
+        await db.insert(
+          'pos_invoice_lines',
+          PosInvoiceMapper.lineToRow(fixture.source.lines.single),
+        );
+        final sourceStock = await stockRepository.append(
+          fixture.sourceMovement,
+        );
+        expect(sourceStock.isSuccess, isTrue);
+        final purchaseReturnRepository =
+            SqlitePosPurchaseReturnPostingRepository(
+              runner,
+              stockRepository,
+              voucherRepository,
+            );
+        final writer = SqlitePosFinancialOutboundPostingWriter(
+          transactionRunner: runner,
+          eventStore: PosFinancialEventStore(db),
+          deviceSyncOutboxDao: DeviceSyncOutboxDao(db),
+          saleRepository: repository,
+          purchaseRepository: SqlitePosPurchasePostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
+          salesReturnRepository: SqlitePosSalesReturnPostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
+          purchaseReturnRepository: purchaseReturnRepository,
+          collectionRepository: SqlitePosInvoicePaymentCollectionRepository(
+            runner,
+            voucherRepository,
+          ),
+        );
+        final bundle = _outboundBundleForPurchaseReturn(fixture.posting);
+
+        final first = await writer.savePurchaseReturnWithOutboundAtomically(
+          fixture.posting,
+          bundle,
+        );
+        final replay = await writer.savePurchaseReturnWithOutboundAtomically(
+          fixture.posting,
+          bundle,
+        );
+
+        expect(first.isSuccess, isTrue);
+        expect(replay.isSuccess, isTrue);
+        expect(await db.query('pos_invoices'), hasLength(2));
+        expect(await db.query('pos_returns'), hasLength(1));
+        expect(await db.query('pos_stock_movements'), hasLength(3));
+        expect(await db.query('pos_payments'), isEmpty);
+        expect(await db.query('vouchers'), hasLength(2));
+        expect(await db.query('ledger_entries'), hasLength(4));
+        expect(await db.query('pos_financial_event_outbox'), hasLength(1));
+        expect(await db.query('device_sync_outbox'), hasLength(2));
+      },
+    );
+
     test('rolls back financial outbox when local posting fails', () async {
       final runner = DatabaseTransactionRunner(db);
       final voucherRepository = SqliteVoucherRepository(db, runner);
@@ -916,6 +1185,11 @@ void main() {
           voucherRepository,
         ),
         salesReturnRepository: SqlitePosSalesReturnPostingRepository(
+          runner,
+          stockRepository,
+          voucherRepository,
+        ),
+        purchaseReturnRepository: SqlitePosPurchaseReturnPostingRepository(
           runner,
           stockRepository,
           voucherRepository,
@@ -956,6 +1230,11 @@ void main() {
             voucherRepository,
           ),
           salesReturnRepository: SqlitePosSalesReturnPostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
+          purchaseReturnRepository: SqlitePosPurchaseReturnPostingRepository(
             runner,
             stockRepository,
             voucherRepository,
@@ -1023,6 +1302,105 @@ void main() {
           'quarantined',
         ]);
         expect(journalRows.last['encrypted_payload'], 'opaque-e2ee-conflict');
+      },
+    );
+
+    test(
+      'applies inbound purchase return once with atomic journal replay',
+      () async {
+        final runner = DatabaseTransactionRunner(db);
+        final voucherRepository = SqliteVoucherRepository(db, runner);
+        for (final id in ['supplier', 'payables', 'purchase-returns']) {
+          await db.insert('accounts', {
+            'id': id,
+            'name': id,
+            'nature': id == 'supplier' ? 'credit' : 'debit',
+            'created_at': '2026-01-01T00:00:00.000Z',
+          });
+        }
+        final fixture = _purchaseReturn();
+        await db.insert('pos_invoices', PosInvoiceMapper.toRow(fixture.source));
+        await db.insert(
+          'pos_invoice_lines',
+          PosInvoiceMapper.lineToRow(fixture.source.lines.single),
+        );
+        final sourceStock = await stockRepository.append(
+          fixture.sourceMovement,
+        );
+        expect(sourceStock.isSuccess, isTrue);
+
+        final eventStore = PosFinancialEventStore(db);
+        final journal = SqliteSyncInboundEventJournalRepository(db);
+        final applier = SqlitePosFinancialInboundApplicationRepository(
+          transactionRunner: runner,
+          eventStore: eventStore,
+          inboundJournal: journal,
+          saleRepository: repository,
+          purchaseRepository: SqlitePosPurchasePostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
+          salesReturnRepository: SqlitePosSalesReturnPostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
+          purchaseReturnRepository: SqlitePosPurchaseReturnPostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
+          collectionRepository: SqlitePosInvoicePaymentCollectionRepository(
+            runner,
+            voucherRepository,
+          ),
+        );
+        final rawEvent = _outboundBundleForPurchaseReturn(
+          fixture.posting,
+        ).event.toJson();
+        rawEvent['target_device_id'] = 'device-b';
+        final event = PosFinancialSyncEvent.fromJson(rawEvent);
+
+        Future<void> claim(String nodeId) async {
+          final result = await journal.beginProcessing(
+            nodeId: nodeId,
+            senderPublicKey: 'a' * 64,
+            eventType: SyncEventType.posPurchaseReturn.name,
+            payloadFingerprint: 'transport-$nodeId',
+            encryptedPayload: 'encrypted-$nodeId',
+          );
+          expect(result, SyncInboundEventClaim.claimed);
+        }
+
+        await claim('purchase-return-node-1');
+        final applied = await applier.applyPurchaseReturnAtomically(
+          event: event,
+          posting: fixture.posting,
+          transportNodeId: 'purchase-return-node-1',
+          encryptedPayload: 'encrypted-purchase-return-node-1',
+        );
+        expect(applied, PosFinancialApplyResult.applied);
+
+        await claim('purchase-return-node-2');
+        final replay = await applier.applyPurchaseReturnAtomically(
+          event: event,
+          posting: fixture.posting,
+          transportNodeId: 'purchase-return-node-2',
+          encryptedPayload: 'encrypted-purchase-return-node-2',
+        );
+        expect(replay, PosFinancialApplyResult.exactReplay);
+        expect(await db.query('pos_invoices'), hasLength(2));
+        expect(await db.query('pos_returns'), hasLength(1));
+        expect(await db.query('pos_stock_movements'), hasLength(3));
+        expect(await db.query('vouchers'), hasLength(2));
+        expect(await db.query('ledger_entries'), hasLength(4));
+        expect(await db.query('pos_financial_event_inbox'), hasLength(1));
+        final journalRows = await db.query(
+          'sync_inbound_event_journal',
+          orderBy: 'node_id ASC',
+        );
+        expect(journalRows.map((row) => row['state']), ['applied', 'applied']);
       },
     );
   });

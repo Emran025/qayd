@@ -51,6 +51,9 @@ import 'package:qayd/application/pos/respond_to_pos_credit_invoice_in_chat_use_c
 import 'package:qayd/application/pos/build_pos_sales_return_posting_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_sales_return_use_case.dart';
 import 'package:qayd/application/pos/post_pos_sales_return_atomically_use_case.dart';
+import 'package:qayd/application/pos/build_pos_purchase_return_posting_use_case.dart';
+import 'package:qayd/application/pos/complete_pos_purchase_return_use_case.dart';
+import 'package:qayd/application/pos/post_pos_purchase_return_atomically_use_case.dart';
 import 'package:qayd/application/pos/build_pos_invoice_payment_collection_use_case.dart';
 import 'package:qayd/application/pos/complete_pos_invoice_payment_collection_use_case.dart';
 import 'package:qayd/application/pos/post_pos_invoice_payment_collection_atomically_use_case.dart';
@@ -154,6 +157,7 @@ import 'package:qayd/data/repositories/sqlite_pos_accounting_posting_repository.
 import 'package:qayd/data/repositories/sqlite_pos_sale_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sales_return_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_purchase_posting_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_purchase_return_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_financial_inbound_application_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_financial_outbound_posting_writer.dart';
 import 'package:qayd/data/repositories/pos_financial_event_store.dart';
@@ -184,6 +188,7 @@ import 'package:qayd/domain/repositories/pos_accounting_posting_repository.dart'
 import 'package:qayd/domain/repositories/pos_sale_posting_repository.dart';
 import 'package:qayd/domain/repositories/pos_sales_return_posting_repository.dart';
 import 'package:qayd/domain/repositories/pos_purchase_posting_repository.dart';
+import 'package:qayd/domain/repositories/pos_purchase_return_posting_repository.dart';
 import 'package:qayd/domain/repositories/pos_purchase_request_identity_repository.dart';
 import 'package:qayd/domain/repositories/pos_sales_return_request_identity_repository.dart';
 import 'package:qayd/domain/services/voucher_qr_service.dart';
@@ -441,6 +446,8 @@ abstract final class InjectionContainer {
   static late PosInvoicePaymentCollectionRepository
   posInvoicePaymentCollectionRepository;
   static late PosPurchasePostingRepository posPurchasePostingRepository;
+  static late PosPurchaseReturnPostingRepository
+  posPurchaseReturnPostingRepository;
   static late PosFinancialEventStore posFinancialEventStore;
   static late SyncInboundEventJournalRepository
   syncInboundEventJournalRepository;
@@ -471,6 +478,9 @@ abstract final class InjectionContainer {
   static late BuildPosSalesReturnPostingUseCase
   buildPosSalesReturnPostingUseCase;
   static late CompletePosSalesReturnUseCase completePosSalesReturnUseCase;
+  static late BuildPosPurchaseReturnPostingUseCase
+  buildPosPurchaseReturnPostingUseCase;
+  static late CompletePosPurchaseReturnUseCase completePosPurchaseReturnUseCase;
   static late BuildPosInvoicePaymentCollectionUseCase
   buildPosInvoicePaymentCollectionUseCase;
   static late PostPosInvoicePaymentCollectionAtomicallyUseCase
@@ -512,6 +522,8 @@ abstract final class InjectionContainer {
   static late PostPosSaleAtomicallyUseCase postPosSaleAtomicallyUseCase;
   static late PostPosSalesReturnAtomicallyUseCase
   postPosSalesReturnAtomicallyUseCase;
+  static late PostPosPurchaseReturnAtomicallyUseCase
+  postPosPurchaseReturnAtomicallyUseCase;
   static late PostPosPurchaseAtomicallyUseCase postPosPurchaseAtomicallyUseCase;
 
   // ── Sync & Real-Time Components ──────────────────────────────────────────
@@ -1261,6 +1273,14 @@ abstract final class InjectionContainer {
           sqliteVoucherRepository,
         );
     posSalesReturnPostingRepository = sqlitePosSalesReturnPostingRepository;
+    final sqlitePosPurchaseReturnPostingRepository =
+        SqlitePosPurchaseReturnPostingRepository(
+          transactionRunner,
+          sqliteStockMovementRepository,
+          sqliteVoucherRepository,
+        );
+    posPurchaseReturnPostingRepository =
+        sqlitePosPurchaseReturnPostingRepository;
     final sqlitePosInvoicePaymentCollectionRepository =
         SqlitePosInvoicePaymentCollectionRepository(
           transactionRunner,
@@ -1283,6 +1303,7 @@ abstract final class InjectionContainer {
           saleRepository: sqlitePosSalePostingRepository,
           purchaseRepository: sqlitePosPurchasePostingRepository,
           salesReturnRepository: sqlitePosSalesReturnPostingRepository,
+          purchaseReturnRepository: sqlitePosPurchaseReturnPostingRepository,
           collectionRepository: sqlitePosInvoicePaymentCollectionRepository,
         );
     posFinancialOutboundPostingWriter = SqlitePosFinancialOutboundPostingWriter(
@@ -1292,6 +1313,7 @@ abstract final class InjectionContainer {
       saleRepository: sqlitePosSalePostingRepository,
       purchaseRepository: sqlitePosPurchasePostingRepository,
       salesReturnRepository: sqlitePosSalesReturnPostingRepository,
+      purchaseReturnRepository: sqlitePosPurchaseReturnPostingRepository,
       collectionRepository: sqlitePosInvoicePaymentCollectionRepository,
     );
     posFinancialOutboundEventPreparer = PosFinancialOutboundEventPreparer(
@@ -1394,6 +1416,25 @@ abstract final class InjectionContainer {
     completePosPurchaseUseCase = CompletePosPurchaseUseCase(
       buildPosting: buildPosPurchasePostingUseCase,
       postAtomically: postPosPurchaseAtomicallyUseCase,
+      signInvoice: signPosInvoiceUseCase,
+    );
+    buildPosPurchaseReturnPostingUseCase = BuildPosPurchaseReturnPostingUseCase(
+      invoiceRepository: posInvoiceReadRepository,
+      installationRepository: posTemplateInstallationRepository,
+      stockRepository: posStockMovementRepository,
+      accountRepository: accountRepository,
+    );
+    postPosPurchaseReturnAtomicallyUseCase =
+        PostPosPurchaseReturnAtomicallyUseCase(
+          writeGuard: governanceWriteGuard,
+          fiscalPeriodRepository: fiscalPeriodRepository,
+          postingRepository: posPurchaseReturnPostingRepository,
+          outboundEventPreparer: posFinancialOutboundEventPreparer,
+          outboundPostingWriter: posFinancialOutboundPostingWriter,
+        );
+    completePosPurchaseReturnUseCase = CompletePosPurchaseReturnUseCase(
+      buildPosting: buildPosPurchaseReturnPostingUseCase,
+      postAtomically: postPosPurchaseReturnAtomicallyUseCase,
       signInvoice: signPosInvoiceUseCase,
     );
     getPosStockBalanceUseCase = GetPosStockBalanceUseCase(

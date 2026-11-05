@@ -5,12 +5,14 @@ import 'package:qayd/data/mappers/pos_invoice_payment_collection_sync_snapshot_c
 import 'package:qayd/data/mappers/pos_purchase_sync_snapshot_codec.dart';
 import 'package:qayd/data/mappers/pos_sale_sync_snapshot_codec.dart';
 import 'package:qayd/data/mappers/pos_sales_return_sync_snapshot_codec.dart';
+import 'package:qayd/data/mappers/pos_purchase_return_sync_snapshot_codec.dart';
 import 'package:qayd/data/repositories/device_sync_outbox_dao.dart';
 import 'package:qayd/data/repositories/pos_financial_event_store.dart';
 import 'package:qayd/data/repositories/sqlite_pos_invoice_payment_collection_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_purchase_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sale_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sales_return_posting_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_purchase_return_posting_repository.dart';
 import 'package:qayd/domain/entities/pos_financial_outbound_bundle.dart';
 import 'package:qayd/domain/entities/pos_financial_sync_event.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
@@ -18,6 +20,7 @@ import 'package:qayd/domain/entities/pos_invoice_payment_collection_posting.dart
 import 'package:qayd/domain/entities/pos_purchase_posting.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
 import 'package:qayd/domain/entities/pos_sales_return_posting.dart';
+import 'package:qayd/domain/entities/pos_purchase_return_posting.dart';
 import 'package:qayd/domain/entities/sync_node.dart';
 import 'package:qayd/domain/repositories/pos_financial_outbound_posting_writer.dart';
 import 'package:qayd/core/error/failures.dart';
@@ -36,6 +39,7 @@ final class SqlitePosFinancialOutboundPostingWriter
     required SqlitePosSalePostingRepository saleRepository,
     required SqlitePosPurchasePostingRepository purchaseRepository,
     required SqlitePosSalesReturnPostingRepository salesReturnRepository,
+    required SqlitePosPurchaseReturnPostingRepository purchaseReturnRepository,
     required SqlitePosInvoicePaymentCollectionRepository collectionRepository,
   }) : _transactionRunner = transactionRunner,
        _eventStore = eventStore,
@@ -43,6 +47,7 @@ final class SqlitePosFinancialOutboundPostingWriter
        _saleRepository = saleRepository,
        _purchaseRepository = purchaseRepository,
        _salesReturnRepository = salesReturnRepository,
+       _purchaseReturnRepository = purchaseReturnRepository,
        _collectionRepository = collectionRepository;
 
   final DatabaseTransactionRunner _transactionRunner;
@@ -51,6 +56,7 @@ final class SqlitePosFinancialOutboundPostingWriter
   final SqlitePosSalePostingRepository _saleRepository;
   final SqlitePosPurchasePostingRepository _purchaseRepository;
   final SqlitePosSalesReturnPostingRepository _salesReturnRepository;
+  final SqlitePosPurchaseReturnPostingRepository _purchaseReturnRepository;
   final SqlitePosInvoicePaymentCollectionRepository _collectionRepository;
 
   @override
@@ -87,6 +93,18 @@ final class SqlitePosFinancialOutboundPostingWriter
     snapshot: PosSalesReturnSyncSnapshotCodec.encode(posting),
     bundle: bundle,
     save: (txn) => _salesReturnRepository.saveInTransaction(txn, posting),
+  );
+
+  @override
+  Future<Result<void>> savePurchaseReturnWithOutboundAtomically(
+    PosPurchaseReturnPosting posting,
+    PosFinancialOutboundBundle bundle,
+  ) => _writeInvoice(
+    kind: PosFinancialEventKind.purchaseReturn,
+    invoice: posting.invoice,
+    snapshot: PosPurchaseReturnSyncSnapshotCodec.encode(posting),
+    bundle: bundle,
+    save: (txn) => _purchaseReturnRepository.saveInTransaction(txn, posting),
   );
 
   @override
