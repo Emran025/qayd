@@ -330,9 +330,9 @@ def main() -> int:
         "flutter",
         "test",
         "--verbose",
-        # Use the VM Service directly: DDS fails to connect to the discovered
-        # host-loopback port on this iOS simulator runner.
-        "--no-dds",
+        # integration_test's golden comparator listens on DDS's extension-
+        # specific VM Service stream. Direct VM Service mode rejects that
+        # custom stream id and fails while loading the test, so keep DDS on.
         "--no-pub",
         "integration_test/e2ee_crypto_integration_test.dart",
         "--reporter",
