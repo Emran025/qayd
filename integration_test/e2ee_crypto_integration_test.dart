@@ -32,6 +32,9 @@ void main() {
         'schema': PosCreditInvoiceChatSnapshot.schema,
         'invoice_id': 'native-integration-invoice',
         'invoice_number': 'PDF-ENCRYPTED-001',
+        'counterparty_account_id': 'customer-account',
+        'credit_due_date': '2026-12-03',
+        'credit_terms': 'Net 30 days',
         'status': 'posted',
         'currency': <String, dynamic>{
           'code': 'YER',
