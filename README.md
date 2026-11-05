@@ -127,6 +127,10 @@ Qayd employs a strict Clean Architecture pattern (`Domain` → `Application` →
 * **Security & Cryptography:** Ed25519 digital signatures, PBKDF2 stretch-keys, SHA-512 hashing, Monotonic system-clock guards.
 * **Networking & Synchronization:** E2EE Event Payload Sync against blind-relay server nodes.
 
+### POS thermal receipts
+
+Thermal receipt formatting and reprint are included as a software-only demo. No physical printer or platform has been tested, the default printer adapter remains unavailable, and PDF/share remains the supported output. Do not treat this demo as production thermal-print support; see the [POS thermal printing status and hardware matrix](docs/pos-thermal-printing.md) before enabling any device adapter.
+
 ---
 
 ## 📑 8. Developer & Contributor Covenant

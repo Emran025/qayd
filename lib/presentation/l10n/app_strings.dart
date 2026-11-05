@@ -2798,6 +2798,44 @@ class AppStrings {
   static String get posCreditInvoiceTaxLabel => i.posCreditInvoiceTaxLabel;
   static String get posCreditInvoicePaidLabel => i.posCreditInvoicePaidLabel;
   static String get syncIdentityUnavailable => i.syncIdentityUnavailable;
+  static String get posReceiptTitle => i.posReceiptTitle;
+  static String get posReceiptReprintMark => i.posReceiptReprintMark;
+  static String get posReceiptNumberLabel => i.posReceiptNumberLabel;
+  static String get posReceiptDateLabel => i.posReceiptDateLabel;
+  static String get posReceiptPartyLabel => i.posReceiptPartyLabel;
+  static String get posReceiptLineDiscountLabel =>
+      i.posReceiptLineDiscountLabel;
+  static String get posReceiptLineTaxLabel => i.posReceiptLineTaxLabel;
+  static String get posReceiptLineTotalLabel => i.posReceiptLineTotalLabel;
+  static String get posReceiptSubtotalLabel => i.posReceiptSubtotalLabel;
+  static String get posReceiptDiscountLabel => i.posReceiptDiscountLabel;
+  static String get posReceiptTaxLabel => i.posReceiptTaxLabel;
+  static String get posReceiptTotalLabel => i.posReceiptTotalLabel;
+  static String get posReceiptPaidLabel => i.posReceiptPaidLabel;
+  static String get posReceiptDueLabel => i.posReceiptDueLabel;
+  static String get posReceiptPaymentMethodLabel =>
+      i.posReceiptPaymentMethodLabel;
+  static String get posReceiptDeferredDueLabel => i.posReceiptDeferredDueLabel;
+  static String get posReceiptCash => i.posReceiptCash;
+  static String get posReceiptBank => i.posReceiptBank;
+  static String get posReceiptCredit => i.posReceiptCredit;
+  static String get posReceiptOther => i.posReceiptOther;
+  static String get posReceiptPrintUnavailable => i.posReceiptPrintUnavailable;
+  static String get posReceiptPrintRequiresPostedInvoice =>
+      i.posReceiptPrintRequiresPostedInvoice;
+  static String get posReceiptPrintUnsupported => i.posReceiptPrintUnsupported;
+  static String get posReceiptPrintPermissionDenied =>
+      i.posReceiptPrintPermissionDenied;
+  static String get posReceiptPrintConnectionFailed =>
+      i.posReceiptPrintConnectionFailed;
+  static String get posReceiptPrintTimedOut => i.posReceiptPrintTimedOut;
+  static String get posReceiptPrintDisconnected =>
+      i.posReceiptPrintDisconnected;
+  static String get posReceiptPrintOutOfPaper => i.posReceiptPrintOutOfPaper;
+  static String get posReceiptPrintUnknownFailure =>
+      i.posReceiptPrintUnknownFailure;
+  static String get posReceiptHardwareNotVerified =>
+      i.posReceiptHardwareNotVerified;
   static String get posSalesReturnAction => i.posSalesReturnAction;
   static String get posSalesReturnTitle => i.posSalesReturnTitle;
   static String get posSalesReturnDescription => i.posSalesReturnDescription;

@@ -75,6 +75,10 @@ import 'package:qayd/data/repositories/sqlite_pos_currency_rate_repository.dart'
 import 'package:qayd/domain/repositories/pos_currency_rate_repository.dart';
 import 'package:qayd/domain/services/pos_currency_converter.dart';
 import 'package:qayd/domain/services/pos_invoice_pdf_generator.dart';
+import 'package:qayd/application/pos/pos_receipt_formatter.dart';
+import 'package:qayd/application/pos/print_pos_invoice_receipt_use_case.dart';
+import 'package:qayd/data/printer/unavailable_pos_receipt_printer.dart';
+import 'package:qayd/domain/services/pos_receipt_printer.dart';
 import 'package:qayd/application/pos/save_pos_product_use_case.dart';
 import 'package:qayd/data/repositories/sqlite_pos_product_category_repository.dart';
 import 'package:qayd/application/import_export/legacy_migration_use_case.dart';
@@ -411,6 +415,8 @@ abstract final class InjectionContainer {
   static late PosInvoiceSigningService posInvoiceSigningService;
   static late SignPosInvoiceUseCase signPosInvoiceUseCase;
   static late BuildPosInvoicePdfUseCase buildPosInvoicePdfUseCase;
+  static late PosReceiptPrinter posReceiptPrinter;
+  static late PrintPosInvoiceReceiptUseCase printPosInvoiceReceiptUseCase;
 
   static late MessageTemplateRepository messageTemplateRepository;
   static late NotificationLogRepository notificationLogRepository;
@@ -1154,6 +1160,12 @@ abstract final class InjectionContainer {
     posInvoicePdfGenerator = const CairoPosInvoicePdfGenerator();
     buildPosInvoicePdfUseCase = BuildPosInvoicePdfUseCase(
       generator: posInvoicePdfGenerator,
+    );
+    // The thermal output stays demo-only until an adapter is validated on real hardware.
+    posReceiptPrinter = const UnavailablePosReceiptPrinter();
+    printPosInvoiceReceiptUseCase = PrintPosInvoiceReceiptUseCase(
+      printer: posReceiptPrinter,
+      formatter: const PosReceiptFormatter(),
     );
     sendPosCreditInvoiceToChatUseCase = SendPosCreditInvoiceToChatUseCase(
       notificationMessageRepository: notificationMessageRepository,
