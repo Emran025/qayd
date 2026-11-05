@@ -176,6 +176,52 @@ void main() {
   );
 
   test(
+    'keeps an applied event re-acknowledgeable after a later ID conflict',
+    () async {
+      const originalCiphertext = '{"ciphertext":"applied-original"}';
+      const conflictingCiphertext = '{"ciphertext":"late-conflict"}';
+      expect(
+        await journal.beginProcessing(
+          nodeId: 'applied-collision',
+          senderPublicKey: _testKey('d'),
+          eventType: 'posSale',
+          payloadFingerprint: 'applied-fingerprint',
+          encryptedPayload: originalCiphertext,
+        ),
+        SyncInboundEventClaim.claimed,
+      );
+      await journal.markApplied('applied-collision');
+
+      expect(
+        await journal.beginProcessing(
+          nodeId: 'applied-collision',
+          senderPublicKey: _testKey('d'),
+          eventType: 'posSale',
+          payloadFingerprint: 'late-conflict-fingerprint',
+          encryptedPayload: conflictingCiphertext,
+        ),
+        SyncInboundEventClaim.conflictingPayload,
+      );
+      expect(
+        await journal.beginProcessing(
+          nodeId: 'applied-collision',
+          senderPublicKey: _testKey('d'),
+          eventType: 'posSale',
+          payloadFingerprint: 'applied-fingerprint',
+          encryptedPayload: originalCiphertext,
+        ),
+        SyncInboundEventClaim.alreadyApplied,
+      );
+
+      final conflict = (await journal.listQuarantined()).single;
+      expect(conflict.nodeId, 'applied-collision');
+      expect(conflict.reason, SyncInboundQuarantineReason.conflictingPayload);
+      expect(conflict.encryptedPayload, originalCiphertext);
+      expect(conflict.conflictingEncryptedPayload, conflictingCiphertext);
+    },
+  );
+
+  test(
     'quarantines an expired in-flight event instead of replaying its handler',
     () async {
       const ciphertext = '{"ciphertext":"may-have-been-applied"}';

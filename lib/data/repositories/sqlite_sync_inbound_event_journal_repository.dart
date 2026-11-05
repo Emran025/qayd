@@ -43,6 +43,9 @@ final class SqliteSyncInboundEventJournalRepository
 
       final row = rows.single;
       if (row['payload_fingerprint'] != payloadFingerprint) {
+        final conflictState = row['state'] == 'applied'
+            ? 'applied'
+            : 'quarantined';
         await txn.rawUpdate(
           '''
           UPDATE $_table
@@ -56,7 +59,7 @@ final class SqliteSyncInboundEventJournalRepository
           WHERE node_id = ?
           ''',
           [
-            'quarantined',
+            conflictState,
             SyncInboundQuarantineReason.conflictingPayload.name,
             payloadFingerprint,
             encryptedPayload,
@@ -159,7 +162,7 @@ final class SqliteSyncInboundEventJournalRepository
     }
     final rows = await _db.query(
       _table,
-      where: 'state = ?',
+      where: 'state = ? OR conflict_count > 0',
       whereArgs: ['quarantined'],
       orderBy: 'created_at ASC',
       limit: limit,
