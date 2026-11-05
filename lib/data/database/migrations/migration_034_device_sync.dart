@@ -1,13 +1,11 @@
 import 'package:qayd/data/database/migrations/schema_migration.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
-final class Migration034DeviceSync implements SchemaMigration {
-  @override
-  int get version => 34;
-
-  @override
-  Future<void> up(Database db) async {
-    await db.execute('''
+/// Creates the base device-pairing tables without changing audit-log columns.
+/// Later migrations may call this idempotent helper to repair partial upgrade
+/// fixtures while preserving the canonical schema.
+Future<void> ensureDeviceSyncTables(Database db) async {
+  await db.execute('''
 CREATE TABLE IF NOT EXISTS device_sessions (
   device_id TEXT NOT NULL PRIMARY KEY,
   device_name TEXT,
@@ -21,7 +19,7 @@ CREATE TABLE IF NOT EXISTS device_sessions (
 )
 ''');
 
-    await db.execute('''
+  await db.execute('''
 CREATE TABLE IF NOT EXISTS device_sync_outbox (
   id TEXT NOT NULL PRIMARY KEY,
   audit_entry_id TEXT NOT NULL,
@@ -35,13 +33,21 @@ CREATE TABLE IF NOT EXISTS device_sync_outbox (
   FOREIGN KEY (target_device_id) REFERENCES device_sessions(device_id)
 )
 ''');
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_dso_state ON device_sync_outbox(state)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_dso_target ON device_sync_outbox(target_device_id)',
-    );
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_dso_state ON device_sync_outbox(state)',
+  );
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_dso_target ON device_sync_outbox(target_device_id)',
+  );
+}
 
+final class Migration034DeviceSync implements SchemaMigration {
+  @override
+  int get version => 34;
+
+  @override
+  Future<void> up(Database db) async {
+    await ensureDeviceSyncTables(db);
     await db.addColumnIfNotExists('audit_logs', 'sync_seq', 'INTEGER');
     await db.addColumnIfNotExists('audit_logs', 'device_id', 'TEXT');
     await db.execute(

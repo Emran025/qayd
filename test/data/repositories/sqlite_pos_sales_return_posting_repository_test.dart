@@ -45,8 +45,7 @@ final class _CurrencyRepository implements CurrencyRepository {
   Future<Result<void>> save(
     CurrencyCode currency, {
     bool isPredefined = false,
-  }) async =>
-      const Success(null);
+  }) async => const Success(null);
 
   @override
   Future<Result<void>> toggleActiveStatus(String code, bool isActive) async =>
@@ -162,18 +161,20 @@ PosInvoice _sourceInvoice({int globalDiscount = 0, int globalTax = 0}) {
     createdAt: _sourceDate,
   );
   return PosInvoice.draft(
-    id: 'sale-1',
-    invoiceNumber: 'S-000001',
-    type: PosInvoiceType.sale,
-    warehouseId: 'warehouse-1',
-    currency: _currency,
-    lines: [line],
-    idempotencyKey: 'sale-key-1',
-    invoiceDate: _sourceDate,
-    now: _sourceDate,
-    discount: Money.fromMinorUnits(globalDiscount, _currency),
-    tax: Money.fromMinorUnits(globalTax, _currency),
-  ).post(_sourceDate).applyPayment(
+        id: 'sale-1',
+        invoiceNumber: 'S-000001',
+        type: PosInvoiceType.sale,
+        warehouseId: 'warehouse-1',
+        currency: _currency,
+        lines: [line],
+        idempotencyKey: 'sale-key-1',
+        invoiceDate: _sourceDate,
+        now: _sourceDate,
+        discount: Money.fromMinorUnits(globalDiscount, _currency),
+        tax: Money.fromMinorUnits(globalTax, _currency),
+      )
+      .post(_sourceDate)
+      .applyPayment(
         Money.fromMinorUnits(1000 - globalDiscount + globalTax, _currency),
         _sourceDate,
       );
@@ -201,41 +202,44 @@ PosSalesReturnPosting _returnPosting({
   bool tracked = false,
   String? lotId,
 }) {
-  final invoice = PosInvoice.draft(
-    id: invoiceId,
-    invoiceNumber: 'R-${invoiceId.replaceAll('return-', '')}',
-    type: PosInvoiceType.salesReturn,
-    warehouseId: 'warehouse-1',
-    currency: _currency,
-    sourceInvoiceId: 'sale-1',
-    idempotencyKey: idempotencyKey,
-    invoiceDate: _returnDate,
-    now: _returnDate,
-    discount: Money.fromMinorUnits(globalDiscount, _currency),
-    tax: Money.fromMinorUnits(globalTax, _currency),
-    lines: [
-      PosInvoiceLine.create(
-        id: '$invoiceId:line:0',
-        invoiceId: invoiceId,
-        productId: 'product-1',
-        productNameSnapshot: 'Coffee',
-        quantity: PosQuantity.whole(quantity),
-        unitPrice: Money.fromMinorUnits(500, _currency),
-        unitCost: Money.fromMinorUnits(100, _currency),
-        discount: Money.zero(_currency),
-        tax: Money.zero(_currency),
-        sourceLineId: 'sale-line-1',
-        createdAt: _returnDate,
-        expiryTrackingSnapshot: tracked,
-      ),
-    ],
-  ).post(_returnDate).applyPayment(
-        Money.fromMinorUnits(
-          quantity * 500 - globalDiscount + globalTax,
-          _currency,
-        ),
-        _returnDate,
-      );
+  final invoice =
+      PosInvoice.draft(
+            id: invoiceId,
+            invoiceNumber: 'R-${invoiceId.replaceAll('return-', '')}',
+            type: PosInvoiceType.salesReturn,
+            warehouseId: 'warehouse-1',
+            currency: _currency,
+            sourceInvoiceId: 'sale-1',
+            idempotencyKey: idempotencyKey,
+            invoiceDate: _returnDate,
+            now: _returnDate,
+            discount: Money.fromMinorUnits(globalDiscount, _currency),
+            tax: Money.fromMinorUnits(globalTax, _currency),
+            lines: [
+              PosInvoiceLine.create(
+                id: '$invoiceId:line:0',
+                invoiceId: invoiceId,
+                productId: 'product-1',
+                productNameSnapshot: 'Coffee',
+                quantity: PosQuantity.whole(quantity),
+                unitPrice: Money.fromMinorUnits(500, _currency),
+                unitCost: Money.fromMinorUnits(100, _currency),
+                discount: Money.zero(_currency),
+                tax: Money.zero(_currency),
+                sourceLineId: 'sale-line-1',
+                createdAt: _returnDate,
+                expiryTrackingSnapshot: tracked,
+              ),
+            ],
+          )
+          .post(_returnDate)
+          .applyPayment(
+            Money.fromMinorUnits(
+              quantity * 500 - globalDiscount + globalTax,
+              _currency,
+            ),
+            _returnDate,
+          );
   final refund = PosInvoicePayment.create(
     id: '$invoiceId:refund:0',
     invoiceId: invoiceId,
@@ -361,140 +365,174 @@ void main() {
     tearDown(() => db.close());
 
     test(
-        'commits return, stock, refund payment, relation, voucher and ledger atomically',
-        () async {
-      final result = await repository.saveAtomically(
-        _returnPosting(
+      'commits return, stock, refund payment, relation, voucher and ledger atomically',
+      () async {
+        final result = await repository.saveAtomically(
+          _returnPosting(
+            invoiceId: 'return-1',
+            idempotencyKey: 'return-key-1',
+            quantity: 1,
+          ),
+        );
+
+        expect(result.isSuccess, isTrue);
+        expect(await db.query('pos_invoices'), hasLength(2));
+        expect(await db.query('pos_invoice_lines'), hasLength(2));
+        expect(await db.query('pos_payments'), hasLength(2));
+        expect(await db.query('pos_returns'), hasLength(1));
+        expect(await db.query('pos_stock_movements'), hasLength(1));
+        expect(await db.query('vouchers'), hasLength(2));
+        expect(await db.query('ledger_entries'), hasLength(4));
+        final source = await db.query(
+          'pos_invoices',
+          where: 'id = ?',
+          whereArgs: ['sale-1'],
+        );
+        expect(source.single['status'], 'partiallyReturned');
+      },
+    );
+
+    test(
+      'rolls back every return write when the caller fails after saveInTransaction',
+      () async {
+        final posting = _returnPosting(
+          invoiceId: 'return-transaction',
+          idempotencyKey: 'return-transaction-key',
+          quantity: 1,
+        );
+
+        await expectLater(
+          db.transaction<void>((txn) async {
+            await repository.saveInTransaction(txn, posting);
+            throw StateError('caller failure');
+          }),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(await db.query('pos_invoices'), hasLength(1));
+        expect(await db.query('pos_invoice_lines'), hasLength(1));
+        expect(await db.query('pos_payments'), hasLength(1));
+        expect(await db.query('pos_returns'), isEmpty);
+        expect(await db.query('pos_stock_movements'), isEmpty);
+        expect(await db.query('vouchers'), isEmpty);
+        expect(await db.query('ledger_entries'), isEmpty);
+        final source = await db.query(
+          'pos_invoices',
+          where: 'id = ?',
+          whereArgs: ['sale-1'],
+        );
+        expect(source.single['status'], 'paid');
+      },
+    );
+
+    test(
+      'returns tracked stock to its sale lot and replays without duplication',
+      () async {
+        await db.update(
+          'pos_products',
+          {'expiry_tracking': 1},
+          where: 'id = ?',
+          whereArgs: ['product-1'],
+        );
+        await db.update(
+          'pos_invoice_lines',
+          {'expiry_tracking_snapshot': 1},
+          where: 'id = ?',
+          whereArgs: ['sale-line-1'],
+        );
+        final lot = PosStockLot.create(
+          id: 'sale-lot-1',
+          productId: 'product-1',
+          warehouseId: 'warehouse-1',
+          supplierLotNumber: 'SUP-1',
+          expiryDate: PosDate.fromParts(2026, 12, 31),
+          receivedQuantity: PosQuantity.whole(2),
+          unitCost: Money.fromMinorUnits(100, _currency),
+          createdAt: DateTime.utc(2026, 1, 1, 9),
+        );
+        expect(
+          (await stockRepository.createLotInTransaction(db, lot)).isSuccess,
+          isTrue,
+        );
+        expect(
+          (await stockRepository.append(
+            PosStockMovement.create(
+              id: 'sale-lot-receipt',
+              productId: 'product-1',
+              warehouseId: 'warehouse-1',
+              type: PosStockMovementType.purchase,
+              direction: PosStockMovementDirection.inbound,
+              quantity: PosQuantity.whole(2),
+              unitCost: Money.fromMinorUnits(100, _currency),
+              sourceType: 'test',
+              sourceId: 'sale-lot-receipt',
+              lotId: lot.id,
+              occurredAt: DateTime.utc(2026, 1, 1, 9),
+              idempotencyKey: 'sale-lot-receipt-key',
+              createdAt: DateTime.utc(2026, 1, 1, 9),
+            ),
+          )).isSuccess,
+          isTrue,
+        );
+        expect(
+          (await stockRepository.append(
+            PosStockMovement.create(
+              id: 'sale-lot-outbound',
+              productId: 'product-1',
+              warehouseId: 'warehouse-1',
+              type: PosStockMovementType.sale,
+              direction: PosStockMovementDirection.outbound,
+              quantity: PosQuantity.whole(2),
+              unitCost: Money.fromMinorUnits(100, _currency),
+              sourceType: 'pos_invoice',
+              sourceId: 'sale-1',
+              sourceLineId: 'sale-line-1',
+              lotId: lot.id,
+              occurredAt: _sourceDate,
+              idempotencyKey: 'sale-lot-outbound-key',
+              createdAt: _sourceDate,
+            ),
+          )).isSuccess,
+          isTrue,
+        );
+        final posting = _returnPosting(
           invoiceId: 'return-1',
           idempotencyKey: 'return-key-1',
           quantity: 1,
-        ),
-      );
+          tracked: true,
+          lotId: lot.id,
+        );
 
-      expect(result.isSuccess, isTrue);
-      expect(await db.query('pos_invoices'), hasLength(2));
-      expect(await db.query('pos_invoice_lines'), hasLength(2));
-      expect(await db.query('pos_payments'), hasLength(2));
-      expect(await db.query('pos_returns'), hasLength(1));
-      expect(await db.query('pos_stock_movements'), hasLength(1));
-      expect(await db.query('vouchers'), hasLength(2));
-      expect(await db.query('ledger_entries'), hasLength(4));
-      final source = await db.query(
-        'pos_invoices',
-        where: 'id = ?',
-        whereArgs: ['sale-1'],
-      );
-      expect(source.single['status'], 'partiallyReturned');
-    });
+        final first = await repository.saveAtomically(posting);
+        final replay = await repository.saveAtomically(posting);
 
-    test(
-        'returns tracked stock to its sale lot and replays without duplication',
-        () async {
-      await db.update(
-        'pos_products',
-        {'expiry_tracking': 1},
-        where: 'id = ?',
-        whereArgs: ['product-1'],
-      );
-      await db.update(
-        'pos_invoice_lines',
-        {'expiry_tracking_snapshot': 1},
-        where: 'id = ?',
-        whereArgs: ['sale-line-1'],
-      );
-      final lot = PosStockLot.create(
-        id: 'sale-lot-1',
-        productId: 'product-1',
-        warehouseId: 'warehouse-1',
-        supplierLotNumber: 'SUP-1',
-        expiryDate: PosDate.fromParts(2026, 12, 31),
-        receivedQuantity: PosQuantity.whole(2),
-        unitCost: Money.fromMinorUnits(100, _currency),
-        createdAt: DateTime.utc(2026, 1, 1, 9),
-      );
-      expect(
-        (await stockRepository.createLotInTransaction(db, lot)).isSuccess,
-        isTrue,
-      );
-      expect(
-        (await stockRepository.append(
-          PosStockMovement.create(
-            id: 'sale-lot-receipt',
-            productId: 'product-1',
-            warehouseId: 'warehouse-1',
-            type: PosStockMovementType.purchase,
-            direction: PosStockMovementDirection.inbound,
-            quantity: PosQuantity.whole(2),
-            unitCost: Money.fromMinorUnits(100, _currency),
-            sourceType: 'test',
-            sourceId: 'sale-lot-receipt',
-            lotId: lot.id,
-            occurredAt: DateTime.utc(2026, 1, 1, 9),
-            idempotencyKey: 'sale-lot-receipt-key',
-            createdAt: DateTime.utc(2026, 1, 1, 9),
-          ),
-        ))
-            .isSuccess,
-        isTrue,
-      );
-      expect(
-        (await stockRepository.append(
-          PosStockMovement.create(
-            id: 'sale-lot-outbound',
-            productId: 'product-1',
-            warehouseId: 'warehouse-1',
-            type: PosStockMovementType.sale,
-            direction: PosStockMovementDirection.outbound,
-            quantity: PosQuantity.whole(2),
-            unitCost: Money.fromMinorUnits(100, _currency),
-            sourceType: 'pos_invoice',
-            sourceId: 'sale-1',
-            sourceLineId: 'sale-line-1',
-            lotId: lot.id,
-            occurredAt: _sourceDate,
-            idempotencyKey: 'sale-lot-outbound-key',
-            createdAt: _sourceDate,
-          ),
-        ))
-            .isSuccess,
-        isTrue,
-      );
-      final posting = _returnPosting(
-        invoiceId: 'return-1',
-        idempotencyKey: 'return-key-1',
-        quantity: 1,
-        tracked: true,
-        lotId: lot.id,
-      );
-
-      final first = await repository.saveAtomically(posting);
-      final replay = await repository.saveAtomically(posting);
-
-      expect(first.isSuccess, isTrue, reason: first.failureOrNull?.messageAr);
-      expect(replay.isSuccess, isTrue, reason: replay.failureOrNull?.messageAr);
-      expect(
-          (await db.query('pos_stock_lots'))
-              .single['remaining_quantity_scaled'],
-          1);
-      expect(
-        await db.query('pos_stock_movements'),
-        hasLength(3),
-      );
-      final returnMovement = (await db.query(
-        'pos_stock_movements',
-        where: 'movement_type = ?',
-        whereArgs: ['sales_return'],
-      ))
-          .single;
-      expect(returnMovement['lot_id'], lot.id);
-      final returnLine = (await db.query(
-        'pos_invoice_lines',
-        where: 'invoice_id = ?',
-        whereArgs: ['return-1'],
-      ))
-          .single;
-      expect(returnLine['expiry_tracking_snapshot'], 1);
-    });
+        expect(first.isSuccess, isTrue, reason: first.failureOrNull?.messageAr);
+        expect(
+          replay.isSuccess,
+          isTrue,
+          reason: replay.failureOrNull?.messageAr,
+        );
+        expect(
+          (await db.query(
+            'pos_stock_lots',
+          )).single['remaining_quantity_scaled'],
+          1,
+        );
+        expect(await db.query('pos_stock_movements'), hasLength(3));
+        final returnMovement = (await db.query(
+          'pos_stock_movements',
+          where: 'movement_type = ?',
+          whereArgs: ['sales_return'],
+        )).single;
+        expect(returnMovement['lot_id'], lot.id);
+        final returnLine = (await db.query(
+          'pos_invoice_lines',
+          where: 'invoice_id = ?',
+          whereArgs: ['return-1'],
+        )).single;
+        expect(returnLine['expiry_tracking_snapshot'], 1);
+      },
+    );
 
     test(
       'accepts an exact retry without duplicating any persisted component',
@@ -542,8 +580,7 @@ void main() {
             idempotencyKey: 'return-key-1',
             quantity: 1,
           ),
-        ))
-            .isSuccess,
+        )).isSuccess,
         isTrue,
       );
 

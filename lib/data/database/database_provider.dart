@@ -6,7 +6,7 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 
 /// Opens the encrypted SQLite database and applies migrations.
 abstract final class DatabaseProvider {
-  static const int schemaVersion = 49;
+  static const int schemaVersion = 52;
 
   static const String databaseFileName = 'qayd_finance.db';
 
@@ -40,6 +40,13 @@ abstract final class DatabaseProvider {
           db,
           fromVersion: oldVersion,
           toVersion: newVersion,
+        );
+      },
+      onDowngrade: (_, oldVersion, newVersion) async {
+        throw StateError(
+          'Refusing database downgrade from schema $oldVersion to '
+          '$newVersion. Upgrade to a compatible app or restore a verified '
+          'backup to preserve encrypted inbound sync events.',
         );
       },
       onOpen: (db) async {

@@ -17,6 +17,7 @@ import 'package:qayd/domain/entities/sync_node.dart';
 import 'package:qayd/domain/entities/notification_message.dart';
 import 'package:qayd/domain/entities/pos_credit_invoice_chat_snapshot.dart';
 import 'package:qayd/domain/repositories/notification_message_repository.dart';
+import 'package:qayd/domain/repositories/sync_inbound_event_journal_repository.dart';
 import 'package:qayd/domain/repositories/account_repository.dart';
 import 'package:qayd/domain/repositories/identity_repository.dart';
 import 'package:qayd/domain/services/e2ee_encryption_service.dart';
@@ -62,6 +63,9 @@ class MockVoucherKeyService extends Mock implements VoucherKeyService {}
 
 class MockNotificationFilterService extends Mock
     implements NotificationFilterService {}
+
+class MockSyncInboundEventJournalRepository extends Mock
+    implements SyncInboundEventJournalRepository {}
 
 final _testPosCreditInvoicePdf = Uint8List.fromList(
   utf8.encode('%PDF-1.4\n% processor test\n%%EOF\n'),
@@ -328,7 +332,7 @@ void main() {
 
         final applied = await processor.processIncomingNodes([node]);
 
-        expect(applied, contains(nodeId));
+        expect(applied, isEmpty);
         expect(party.currentPublicKeyHex, currentKey);
         expect(party.publicKeyHistoryHex, [historicalKey]);
         verify(
@@ -806,6 +810,115 @@ void main() {
       },
     );
 
+    test(
+      'quarantines an inserted invoice when journal acknowledgement fails',
+      () async {
+        final snapshot = PosCreditInvoiceChatSnapshot.fromJson(
+          _creditInvoiceSnapshotJson(),
+        );
+        final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+          snapshot,
+        );
+        final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
+          invoiceNodeId: nodeId,
+          snapshot: snapshot,
+          pdfBytes: _testPosCreditInvoicePdf,
+        );
+        final node = SyncNode(
+          id: nodeId,
+          senderId: 101,
+          receiverId: 202,
+          eventType: SyncEventType.posCreditInvoice,
+          encryptedPayload: 'authenticated-envelope',
+          syncState: 'pending',
+          clientTimestamp: DateTime.utc(2026, 11, 3, 10),
+          senderPublicKey: _testKeyPair.publicKeyHex,
+        );
+        final journal = MockSyncInboundEventJournalRepository();
+        final journaledProcessor = SyncPayloadProcessor(
+          identityRepository: mockIdentityRepo,
+          voucherRepository: mockVoucherRepo,
+          ledgerRepository: mockLedgerRepo,
+          accountRepository: mockAccountRepo,
+          currencyRepository: MockCurrencyRepository(),
+          notificationMessageRepository: mockNotificationRepo,
+          notificationFilterService: mockFilterRepo,
+          e2eeService: mockE2ee,
+          signingService: _testReceiptSigningService,
+          getCurrentUserKeyPair: () async => _testKeyPair,
+          attachmentRepository: MockAttachmentRepository(),
+          collateralRepository: MockCollateralRepository(),
+          voucherKeyService: MockVoucherKeyService(),
+          inboundEventJournal: journal,
+        );
+
+        when(
+          () => journal.beginProcessing(
+            nodeId: nodeId,
+            senderPublicKey: any(named: 'senderPublicKey'),
+            eventType: any(named: 'eventType'),
+            payloadFingerprint: any(named: 'payloadFingerprint'),
+            encryptedPayload: node.encryptedPayload,
+          ),
+        ).thenAnswer((_) async => SyncInboundEventClaim.claimed);
+        when(
+          () => mockE2ee.decryptPayload(
+            encryptedPayload: any(named: 'encryptedPayload'),
+            receiverKeyPair: any(named: 'receiverKeyPair'),
+            senderPublicKeyHex: any(named: 'senderPublicKeyHex'),
+            nodeId: nodeId,
+            eventType: any(named: 'eventType'),
+          ),
+        ).thenAnswer((_) async => eventPayload);
+        when(
+          () => mockNotificationRepo.findById(nodeId),
+        ).thenAnswer((_) async => null);
+        when(
+          () => mockNotificationRepo.insert(
+            id: nodeId,
+            bodyText: any(named: 'bodyText'),
+            channel: PosCreditInvoiceChatProtocol.incomingChannel,
+            counterpartyAccountId: localSenderAccountUuid,
+            createdAtIso: any(named: 'createdAtIso'),
+            rawPayloadJson: any(named: 'rawPayloadJson'),
+          ),
+        ).thenAnswer((_) async => const Success(null));
+        when(() => journal.markApplied(nodeId)).thenAnswer((_) async {
+          throw StateError('simulated journal commit failure');
+        });
+        when(
+          () => journal.quarantine(
+            nodeId: nodeId,
+            reason: SyncInboundQuarantineReason.handlerFailed,
+            encryptedPayload: node.encryptedPayload,
+          ),
+        ).thenAnswer((_) async {});
+
+        final applied = await journaledProcessor.processIncomingNodes([node]);
+
+        expect(applied, isEmpty);
+        verify(
+          () => mockNotificationRepo.insert(
+            id: nodeId,
+            bodyText: any(named: 'bodyText'),
+            channel: PosCreditInvoiceChatProtocol.incomingChannel,
+            counterpartyAccountId: localSenderAccountUuid,
+            createdAtIso: any(named: 'createdAtIso'),
+            rawPayloadJson: any(named: 'rawPayloadJson'),
+          ),
+        ).called(1);
+        verify(() => journal.markApplied(nodeId)).called(1);
+        verify(
+          () => journal.quarantine(
+            nodeId: nodeId,
+            reason: SyncInboundQuarantineReason.handlerFailed,
+            encryptedPayload: node.encryptedPayload,
+          ),
+        ).called(1);
+        verifyNever(() => journal.returnToPending(nodeId));
+      },
+    );
+
     test('applies acknowledgment by updating chat metadata only', () async {
       final snapshot = PosCreditInvoiceChatSnapshot.fromJson(
         _creditInvoiceSnapshotJson(),
@@ -928,4 +1041,174 @@ void main() {
       verifyNoMoreInteractions(mockLedgerRepo);
     });
   });
+
+  group('SyncPayloadProcessor - delegated sync events', () {
+    test('does not acknowledge delegated or unsupported events here', () async {
+      final accountId = AccountId(localSenderAccountUuid);
+      final senderKey = List.filled(64, 'a').join();
+      final journal = MockSyncInboundEventJournalRepository();
+      final delegatedProcessor = SyncPayloadProcessor(
+        identityRepository: mockIdentityRepo,
+        voucherRepository: mockVoucherRepo,
+        ledgerRepository: mockLedgerRepo,
+        accountRepository: mockAccountRepo,
+        currencyRepository: MockCurrencyRepository(),
+        e2eeService: mockE2ee,
+        signingService: _testReceiptSigningService,
+        getCurrentUserKeyPair: () async => _testKeyPair,
+        attachmentRepository: MockAttachmentRepository(),
+        collateralRepository: MockCollateralRepository(),
+        voucherKeyService: MockVoucherKeyService(),
+        notificationMessageRepository: mockNotificationRepo,
+        notificationFilterService: mockFilterRepo,
+        inboundEventJournal: journal,
+      );
+      final nodes = <SyncNode>[
+        for (final eventType in <SyncEventType>[
+          SyncEventType.credentialBootstrap,
+          SyncEventType.p2pHandshake,
+          SyncEventType.unknown,
+        ])
+          SyncNode(
+            id: 'delegated-${eventType.name}',
+            senderId: 101,
+            eventType: eventType,
+            encryptedPayload: 'opaque-${eventType.name}',
+            syncState: 'pending',
+            senderPublicKey: senderKey,
+          ),
+      ];
+
+      when(
+        () => mockAccountRepo.findAccountByPublicKey(senderKey),
+      ).thenAnswer((_) async => Success<AccountId?>(accountId));
+      when(() => mockAccountRepo.getPartyDetails(accountId)).thenAnswer(
+        (_) async => Success(
+          PartyDetails(accountId: accountId, currentPublicKeyHex: senderKey),
+        ),
+      );
+      when(
+        () => journal.beginProcessing(
+          nodeId: any(named: 'nodeId'),
+          senderPublicKey: any(named: 'senderPublicKey'),
+          eventType: any(named: 'eventType'),
+          payloadFingerprint: any(named: 'payloadFingerprint'),
+          encryptedPayload: any(named: 'encryptedPayload'),
+        ),
+      ).thenAnswer((_) async => SyncInboundEventClaim.claimed);
+      when(
+        () => mockE2ee.decryptPayload(
+          encryptedPayload: any(named: 'encryptedPayload'),
+          receiverKeyPair: any(named: 'receiverKeyPair'),
+          senderPublicKeyHex: senderKey,
+          nodeId: any(named: 'nodeId'),
+          eventType: any(named: 'eventType'),
+        ),
+      ).thenAnswer((_) async => <String, dynamic>{'handled': true});
+      when(
+        () => journal.quarantine(
+          nodeId: any(named: 'nodeId'),
+          reason: SyncInboundQuarantineReason.delegatedEvent,
+          encryptedPayload: any(named: 'encryptedPayload'),
+        ),
+      ).thenAnswer((_) async {});
+      when(
+        () => journal.quarantine(
+          nodeId: any(named: 'nodeId'),
+          reason: SyncInboundQuarantineReason.unsupportedEventType,
+          encryptedPayload: any(named: 'encryptedPayload'),
+        ),
+      ).thenAnswer((_) async {});
+
+      final applied = await delegatedProcessor.processIncomingNodes(nodes);
+
+      expect(applied, isEmpty);
+      for (final node in nodes) {
+        final reason = node.eventType == SyncEventType.unknown
+            ? SyncInboundQuarantineReason.unsupportedEventType
+            : SyncInboundQuarantineReason.delegatedEvent;
+        verify(
+          () => journal.quarantine(
+            nodeId: node.id,
+            reason: reason,
+            encryptedPayload: node.encryptedPayload,
+          ),
+        ).called(1);
+      }
+      verifyNever(() => journal.markApplied(any()));
+      verifyNever(() => journal.returnToPending(any()));
+    });
+  });
+
+  test(
+    'POS financial nodes without an applier are quarantined without ACK',
+    () async {
+      final journal = MockSyncInboundEventJournalRepository();
+      final financialProcessor = SyncPayloadProcessor(
+        identityRepository: mockIdentityRepo,
+        voucherRepository: mockVoucherRepo,
+        ledgerRepository: mockLedgerRepo,
+        accountRepository: mockAccountRepo,
+        currencyRepository: MockCurrencyRepository(),
+        e2eeService: mockE2ee,
+        signingService: _testReceiptSigningService,
+        getCurrentUserKeyPair: () async => _testKeyPair,
+        attachmentRepository: MockAttachmentRepository(),
+        collateralRepository: MockCollateralRepository(),
+        voucherKeyService: MockVoucherKeyService(),
+        notificationMessageRepository: mockNotificationRepo,
+        notificationFilterService: mockFilterRepo,
+        inboundEventJournal: journal,
+      );
+      final node = SyncNode(
+        id: 'financial-without-applier',
+        senderId: 101,
+        receiverId: 101,
+        senderDeviceId: 'unpaired-device',
+        targetDeviceId: 'local-device',
+        eventType: SyncEventType.posSale,
+        encryptedPayload: 'opaque-pos-ciphertext',
+        syncState: 'pending',
+      );
+
+      when(
+        () => journal.beginProcessing(
+          nodeId: any(named: 'nodeId'),
+          senderPublicKey: any(named: 'senderPublicKey'),
+          eventType: any(named: 'eventType'),
+          payloadFingerprint: any(named: 'payloadFingerprint'),
+          encryptedPayload: any(named: 'encryptedPayload'),
+        ),
+      ).thenAnswer((_) async => SyncInboundEventClaim.claimed);
+      when(
+        () => journal.quarantine(
+          nodeId: node.id,
+          reason: SyncInboundQuarantineReason.unauthorizedSenderKey,
+          encryptedPayload: node.encryptedPayload,
+        ),
+      ).thenAnswer((_) async {});
+
+      final applied = await financialProcessor.processIncomingNodes([node]);
+
+      expect(applied, isEmpty);
+      verify(
+        () => journal.quarantine(
+          nodeId: node.id,
+          reason: SyncInboundQuarantineReason.unauthorizedSenderKey,
+          encryptedPayload: node.encryptedPayload,
+        ),
+      ).called(1);
+      verifyNever(() => journal.markApplied(node.id));
+      verifyNever(() => journal.returnToPending(node.id));
+      verifyNever(
+        () => mockE2ee.decryptPayload(
+          encryptedPayload: node.encryptedPayload,
+          receiverKeyPair: any(named: 'receiverKeyPair'),
+          senderPublicKeyHex: any(named: 'senderPublicKeyHex'),
+          nodeId: node.id,
+          eventType: node.eventType.name,
+        ),
+      );
+    },
+  );
 }

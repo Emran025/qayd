@@ -1,23 +1,46 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/data/database/migrations/migration_040_pos_foundation.dart';
 import 'package:qayd/data/database/migrations/migration_041_pos_invoice_metadata.dart';
 import 'package:qayd/data/database/migrations/migration_registry.dart';
 import 'package:qayd/data/database/transaction_runner.dart';
+import 'package:qayd/data/security/e2ee_envelope_format.dart';
 import 'package:qayd/data/mappers/pos_invoice_mapper.dart';
+import 'package:qayd/data/mappers/pos_sale_sync_snapshot_codec.dart';
+import 'package:qayd/data/repositories/device_sync_outbox_dao.dart';
+import 'package:qayd/data/repositories/pos_financial_event_store.dart';
+import 'package:qayd/data/repositories/sqlite_pos_financial_inbound_application_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_financial_outbound_posting_writer.dart';
+import 'package:qayd/application/sync/pos_financial_outbound_event_preparer.dart';
+import 'package:qayd/data/repositories/sqlite_pos_invoice_payment_collection_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_purchase_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sale_posting_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_sales_return_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_stock_movement_repository.dart';
+import 'package:qayd/data/repositories/sqlite_sync_inbound_event_journal_repository.dart';
 import 'package:qayd/data/repositories/sqlite_voucher_repository.dart';
 import 'package:qayd/domain/entities/pos_accounting_posting.dart';
+import 'package:qayd/domain/entities/pos_financial_apply_result.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
+import 'package:qayd/domain/entities/pos_financial_outbound_bundle.dart';
+import 'package:qayd/domain/entities/pos_financial_sync_event.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
+import 'package:qayd/domain/entities/device_session.dart';
 import 'package:qayd/domain/entities/pos_stock_lot.dart';
 import 'package:qayd/domain/entities/pos_stock_movement.dart';
+import 'package:qayd/domain/entities/sync_node.dart';
+import 'package:qayd/domain/repositories/sync_inbound_event_journal_repository.dart';
 import 'package:qayd/domain/entities/voucher.dart';
 import 'package:qayd/domain/repositories/currency_repository.dart';
+import 'package:qayd/domain/repositories/device_session_repository.dart';
+import 'package:qayd/domain/services/e2ee_encryption_service.dart';
 import 'package:qayd/domain/services/entry_generator.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/value_objects/currency_code.dart';
+import 'package:qayd/domain/value_objects/crypto_key_pair.dart';
+import 'package:qayd/domain/value_objects/digital_signature.dart';
 import 'package:qayd/domain/value_objects/entry_id.dart';
 import 'package:qayd/domain/value_objects/money.dart';
 import 'package:qayd/domain/value_objects/pos_quantity.dart';
@@ -44,8 +67,7 @@ final class _CurrencyRepository implements CurrencyRepository {
   Future<Result<void>> save(
     CurrencyCode currency, {
     bool isPredefined = false,
-  }) async =>
-      const Success(null);
+  }) async => const Success(null);
 
   @override
   Future<Result<void>> toggleActiveStatus(String code, bool isActive) async =>
@@ -57,6 +79,86 @@ final class _CurrencyRepository implements CurrencyRepository {
   @override
   Future<Result<void>> setBaseCurrencyCode(String code) async =>
       const Success(null);
+}
+
+final class _TestDeviceSessionRepository implements DeviceSessionRepository {
+  _TestDeviceSessionRepository(this.sessions);
+
+  final List<DeviceSession> sessions;
+
+  @override
+  Future<void> upsert(DeviceSession session) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<DeviceSession>> listAll() async => sessions;
+
+  @override
+  Future<List<DeviceSession>> listActive() async =>
+      sessions.where((session) => session.isActive).toList(growable: false);
+
+  @override
+  Future<DeviceSession?> getById(String deviceId) async {
+    for (final session in sessions) {
+      if (session.deviceId == deviceId) return session;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> setActive(String deviceId, bool isActive) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> updateLastSyncSeq(String deviceId, int lastSyncSeq) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> updateLastSeen(String deviceId, DateTime at) async =>
+      throw UnimplementedError();
+}
+
+final class _RecordingE2EEEncryptionService implements E2EEEncryptionService {
+  final receiverPublicKeys = <String>[];
+  final rawPayloads = <Map<String, dynamic>>[];
+
+  @override
+  Future<String> encryptPayload({
+    required Map<String, dynamic> rawPayload,
+    required CryptoKeyPair senderKeyPair,
+    required String receiverPublicKeyHex,
+    required String nodeId,
+    required String eventType,
+  }) async {
+    receiverPublicKeys.add(receiverPublicKeyHex);
+    rawPayloads.add(rawPayload);
+    return jsonEncode({
+      'version': E2EEEnvelopeFormat.version,
+      'algorithm': E2EEEnvelopeFormat.algorithm,
+      'node_id': nodeId,
+      'event_type': eventType,
+      'sender_public_key': senderKeyPair.publicKeyHex,
+      'recipient_public_key': receiverPublicKeyHex,
+      'ciphertext': base64Encode(utf8.encode(jsonEncode(rawPayload))),
+      'signature': 'valid-test-signature',
+    });
+  }
+
+  @override
+  Future<Map<String, dynamic>> decryptPayload({
+    required String encryptedPayload,
+    required CryptoKeyPair receiverKeyPair,
+    required String senderPublicKeyHex,
+    required String nodeId,
+    required String eventType,
+  }) async => throw UnimplementedError();
+
+  @override
+  bool verifySignerAuthenticity({
+    required Map<String, dynamic> decryptedPayload,
+    required String senderPublicKeyHex,
+    required DigitalSignature signature,
+  }) => false;
 }
 
 final _currency = CurrencyCode(
@@ -152,19 +254,19 @@ Future<void> _seed(Database db) async {
 }
 
 PosStockMovement _opening() => PosStockMovement.create(
-      id: 'opening-1',
-      productId: 'product-1',
-      warehouseId: 'warehouse-1',
-      type: PosStockMovementType.opening,
-      direction: PosStockMovementDirection.inbound,
-      quantity: PosQuantity.whole(5),
-      unitCost: Money.fromMinorUnits(100, _currency),
-      sourceType: 'opening',
-      sourceId: 'opening-1',
-      occurredAt: DateTime.utc(2026, 1, 1, 9),
-      idempotencyKey: 'opening-key',
-      createdAt: DateTime.utc(2026, 1, 1, 9),
-    );
+  id: 'opening-1',
+  productId: 'product-1',
+  warehouseId: 'warehouse-1',
+  type: PosStockMovementType.opening,
+  direction: PosStockMovementDirection.inbound,
+  quantity: PosQuantity.whole(5),
+  unitCost: Money.fromMinorUnits(100, _currency),
+  sourceType: 'opening',
+  sourceId: 'opening-1',
+  occurredAt: DateTime.utc(2026, 1, 1, 9),
+  idempotencyKey: 'opening-key',
+  createdAt: DateTime.utc(2026, 1, 1, 9),
+);
 
 PosAccountingPosting _posting({
   required String voucherId,
@@ -243,7 +345,8 @@ PosSalePosting _sale({
   ).post(date);
   return PosSalePosting(
     invoice: invoice,
-    movements: stockMovements ??
+    movements:
+        stockMovements ??
         [
           PosStockMovement.create(
             id: 'sale-movement-1',
@@ -293,8 +396,173 @@ PosSalePosting _sale({
   );
 }
 
+PosFinancialOutboundBundle _outboundBundleForSale(PosSalePosting posting) {
+  final invoice = posting.invoice;
+  final event = PosFinancialSyncEvent.decode(
+    jsonEncode({
+      'version': 2,
+      'kind': 'sale',
+      'owner_user_id': 7,
+      'source_device_id': 'device-a',
+      'target_device_id': 'device-a',
+      'event_id': invoice.id,
+      'aggregate_id': invoice.id,
+      'idempotency_key': invoice.idempotencyKey,
+      'currency_code': invoice.currency.code,
+      'occurred_at': invoice.invoiceDate.toUtc().toIso8601String(),
+      'total_minor': invoice.total.minorUnits,
+      'lines': invoice.lines
+          .map(
+            (line) => {
+              'product_id': line.productId,
+              'quantity_scaled': line.quantity.scaledUnits,
+              'quantity_scale': line.quantity.scale,
+              'unit_price_minor': line.unitPrice.minorUnits,
+              'total_minor': line.lineTotal.minorUnits,
+            },
+          )
+          .toList(),
+      'snapshot': PosSaleSyncSnapshotCodec.encode(posting),
+    }),
+  );
+  final createdAt = DateTime.utc(2026, 11, 5);
+  final deliveries = ['device-b', 'device-c']
+      .map((target) {
+        final ciphertext = 'encrypted-for-$target';
+        return PosFinancialOutboundDelivery(
+          nodeId: 'node-${invoice.id}-$target',
+          eventType: SyncEventType.posSale.name,
+          targetDeviceId: target,
+          encryptedPayload: ciphertext,
+          signature: base64Encode(utf8.encode('$target|$ciphertext')),
+          createdAt: createdAt,
+        );
+      })
+      .toList(growable: false);
+  return PosFinancialOutboundBundle(
+    event: event,
+    localEncryptedPayload: 'encrypted-local-copy',
+    deliveries: deliveries,
+  );
+}
+
+PosFinancialSyncEvent _inboundEventForSale(PosSalePosting posting) {
+  final raw = _outboundBundleForSale(posting).event.toJson();
+  raw['target_device_id'] = 'device-b';
+  return PosFinancialSyncEvent.fromJson(raw);
+}
+
 void main() {
   sqfliteFfiInit();
+
+  group('PosFinancialOutboundEventPreparer', () {
+    test(
+      'seals the POS event for each paired device with stable routing',
+      () async {
+        final keyPair = CryptoKeyPair.fromHex(
+          privateKeyHex: List.filled(64, '11').join(),
+          publicKeyHex: List.filled(32, 'aa').join(),
+        );
+        final currentSession = DeviceSession(
+          deviceId: 'device-a',
+          publicKeyHex: keyPair.publicKeyHex,
+          pairedAt: DateTime.utc(2026, 1, 1),
+          lastSyncSeq: 0,
+          isCurrent: true,
+        );
+        final targetSession = DeviceSession(
+          deviceId: 'device-b',
+          publicKeyHex: List.filled(32, 'bb').join(),
+          pairedAt: DateTime.utc(2026, 1, 2),
+          lastSyncSeq: 0,
+          role: 'companion',
+        );
+        final sessions = _TestDeviceSessionRepository([
+          currentSession,
+          targetSession,
+        ]);
+        final encryption = _RecordingE2EEEncryptionService();
+        final preparer = PosFinancialOutboundEventPreparer(
+          deviceSessionRepository: sessions,
+          encryptionService: encryption,
+          getCurrentUserKeyPair: () async => keyPair,
+          ownerUserId: 7,
+          currentDeviceId: 'device-a',
+        );
+
+        final first = await preparer.prepareSale(_sale());
+        final replay = await preparer.prepareSale(_sale());
+
+        expect(first, isNotNull);
+        expect(replay, isNotNull);
+        expect(first!.deliveries, hasLength(1));
+        expect(first.deliveries.single.targetDeviceId, 'device-b');
+        expect(first.deliveries.single.eventType, SyncEventType.posSale.name);
+        expect(encryption.rawPayloads, hasLength(4));
+        expect(encryption.receiverPublicKeys, [
+          keyPair.publicKeyHex,
+          targetSession.publicKeyHex,
+          keyPair.publicKeyHex,
+          targetSession.publicKeyHex,
+        ]);
+        expect(encryption.rawPayloads[1]['source_device_id'], 'device-a');
+        expect(encryption.rawPayloads[1]['target_device_id'], 'device-b');
+        expect(
+          E2EEEnvelopeFormat.isSupported(first.localEncryptedPayload),
+          isTrue,
+        );
+        expect(
+          E2EEEnvelopeFormat.isSupported(
+            first.deliveries.single.encryptedPayload,
+          ),
+          isTrue,
+        );
+        expect(
+          first.deliveries.single.signature,
+          base64Encode(
+            utf8.encode(
+              '${first.deliveries.single.targetDeviceId}|'
+              '${first.deliveries.single.encryptedPayload}',
+            ),
+          ),
+        );
+        expect(
+          replay!.deliveries.single.nodeId,
+          first.deliveries.single.nodeId,
+        );
+      },
+    );
+
+    test(
+      'does not create a device event when there is no paired target',
+      () async {
+        final keyPair = CryptoKeyPair.fromHex(
+          privateKeyHex: List.filled(64, '11').join(),
+          publicKeyHex: List.filled(32, 'aa').join(),
+        );
+        final sessions = _TestDeviceSessionRepository([
+          DeviceSession(
+            deviceId: 'device-a',
+            publicKeyHex: keyPair.publicKeyHex,
+            pairedAt: DateTime.utc(2026, 1, 1),
+            lastSyncSeq: 0,
+            isCurrent: true,
+          ),
+        ]);
+        final encryption = _RecordingE2EEEncryptionService();
+        final preparer = PosFinancialOutboundEventPreparer(
+          deviceSessionRepository: sessions,
+          encryptionService: encryption,
+          getCurrentUserKeyPair: () async => keyPair,
+          ownerUserId: 7,
+          currentDeviceId: 'device-a',
+        );
+
+        expect(await preparer.prepareSale(_sale()), isNull);
+        expect(encryption.rawPayloads, isEmpty);
+      },
+    );
+  });
 
   group('SqlitePosSalePostingRepository', () {
     late Database db;
@@ -325,17 +593,18 @@ void main() {
     tearDown(() => db.close());
 
     test(
-        'commits invoice, lines, stock, vouchers, ledger, and payments atomically',
-        () async {
-      final result = await repository.saveAtomically(_sale());
+      'commits invoice, lines, stock, vouchers, ledger, and payments atomically',
+      () async {
+        final result = await repository.saveAtomically(_sale());
 
-      expect(result.isSuccess, isTrue);
-      expect((await db.query('pos_invoices')), hasLength(1));
-      expect((await db.query('pos_invoice_lines')), hasLength(1));
-      expect((await db.query('pos_stock_movements')), hasLength(2));
-      expect((await db.query('vouchers')), hasLength(2));
-      expect((await db.query('ledger_entries')), hasLength(4));
-    });
+        expect(result.isSuccess, isTrue);
+        expect((await db.query('pos_invoices')), hasLength(1));
+        expect((await db.query('pos_invoice_lines')), hasLength(1));
+        expect((await db.query('pos_stock_movements')), hasLength(2));
+        expect((await db.query('vouchers')), hasLength(2));
+        expect((await db.query('ledger_entries')), hasLength(4));
+      },
+    );
 
     test('persists a multi-lot tracked sale and replays it exactly', () async {
       await db.insert('pos_products', <String, Object?>{
@@ -390,8 +659,11 @@ void main() {
             createdAt: receivedAt,
           ),
         );
-        expect(receipt.isSuccess, isTrue,
-            reason: receipt.failureOrNull?.messageAr);
+        expect(
+          receipt.isSuccess,
+          isTrue,
+          reason: receipt.failureOrNull?.messageAr,
+        );
       }
 
       const earlierLotId = 'product-2-lot-early';
@@ -462,19 +734,20 @@ void main() {
         earlierLotId,
         laterLotId,
       ]);
+      expect(saleMovements.map((row) => row['quantity_scaled']), [-2, -1]);
       expect(
-        saleMovements.map((row) => row['quantity_scaled']),
-        [-2, -1],
-      );
-      expect(
-        (await db.query('pos_stock_lots', orderBy: 'id ASC'))
-            .map((row) => row['remaining_quantity_scaled']),
+        (await db.query(
+          'pos_stock_lots',
+          orderBy: 'id ASC',
+        )).map((row) => row['remaining_quantity_scaled']),
         [0, 1],
       );
       expect(
-          (await db.query('pos_invoice_lines'))
-              .single['expiry_tracking_snapshot'],
-          1);
+        (await db.query(
+          'pos_invoice_lines',
+        )).single['expiry_tracking_snapshot'],
+        1,
+      );
       expect(
         await db.query(
           'pos_stock_movements',
@@ -568,5 +841,189 @@ void main() {
       expect(result.isFailure, isTrue);
       expect((await db.query('pos_stock_movements')), hasLength(1));
     });
+
+    test(
+      'commits a sale and encrypted device deliveries exactly once',
+      () async {
+        final runner = DatabaseTransactionRunner(db);
+        final voucherRepository = SqliteVoucherRepository(db, runner);
+        for (final deviceId in ['device-b', 'device-c']) {
+          await db.insert('device_sessions', {
+            'device_id': deviceId,
+            'public_key_hex': 'a' * 64,
+            'paired_at': DateTime.utc(2026, 1, 1).toIso8601String(),
+          });
+        }
+        final writer = SqlitePosFinancialOutboundPostingWriter(
+          transactionRunner: runner,
+          eventStore: PosFinancialEventStore(db),
+          deviceSyncOutboxDao: DeviceSyncOutboxDao(db),
+          saleRepository: repository,
+          purchaseRepository: SqlitePosPurchasePostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
+          salesReturnRepository: SqlitePosSalesReturnPostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
+          collectionRepository: SqlitePosInvoicePaymentCollectionRepository(
+            runner,
+            voucherRepository,
+          ),
+        );
+        final posting = _sale();
+        final bundle = _outboundBundleForSale(posting);
+
+        final first = await writer.saveSaleWithOutboundAtomically(
+          posting,
+          bundle,
+        );
+        final replay = await writer.saveSaleWithOutboundAtomically(
+          posting,
+          bundle,
+        );
+
+        expect(first.isSuccess, isTrue);
+        expect(replay.isSuccess, isTrue);
+        expect(await db.query('pos_invoices'), hasLength(1));
+        expect(await db.query('pos_stock_movements'), hasLength(2));
+        expect(await db.query('pos_financial_event_outbox'), hasLength(1));
+        expect(await db.query('device_sync_outbox'), hasLength(2));
+      },
+    );
+
+    test('rolls back financial outbox when local posting fails', () async {
+      final runner = DatabaseTransactionRunner(db);
+      final voucherRepository = SqliteVoucherRepository(db, runner);
+      for (final deviceId in ['device-b', 'device-c']) {
+        await db.insert('device_sessions', {
+          'device_id': deviceId,
+          'public_key_hex': 'a' * 64,
+          'paired_at': DateTime.utc(2026, 1, 1).toIso8601String(),
+        });
+      }
+      final writer = SqlitePosFinancialOutboundPostingWriter(
+        transactionRunner: runner,
+        eventStore: PosFinancialEventStore(db),
+        deviceSyncOutboxDao: DeviceSyncOutboxDao(db),
+        saleRepository: repository,
+        purchaseRepository: SqlitePosPurchasePostingRepository(
+          runner,
+          stockRepository,
+          voucherRepository,
+        ),
+        salesReturnRepository: SqlitePosSalesReturnPostingRepository(
+          runner,
+          stockRepository,
+          voucherRepository,
+        ),
+        collectionRepository: SqlitePosInvoicePaymentCollectionRepository(
+          runner,
+          voucherRepository,
+        ),
+      );
+      final posting = _sale(invalidCogs: true);
+      final result = await writer.saveSaleWithOutboundAtomically(
+        posting,
+        _outboundBundleForSale(posting),
+      );
+
+      expect(result.isFailure, isTrue);
+      expect(await db.query('pos_invoices'), isEmpty);
+      expect(await db.query('pos_financial_event_outbox'), isEmpty);
+      expect(await db.query('device_sync_outbox'), isEmpty);
+      expect(await db.query('pos_stock_movements'), hasLength(1));
+    });
+
+    test(
+      'applies inbound sale once with atomic inbox/journal and quarantines conflict',
+      () async {
+        final runner = DatabaseTransactionRunner(db);
+        final voucherRepository = SqliteVoucherRepository(db, runner);
+        final eventStore = PosFinancialEventStore(db);
+        final journal = SqliteSyncInboundEventJournalRepository(db);
+        final applier = SqlitePosFinancialInboundApplicationRepository(
+          transactionRunner: runner,
+          eventStore: eventStore,
+          inboundJournal: journal,
+          saleRepository: repository,
+          purchaseRepository: SqlitePosPurchasePostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
+          salesReturnRepository: SqlitePosSalesReturnPostingRepository(
+            runner,
+            stockRepository,
+            voucherRepository,
+          ),
+          collectionRepository: SqlitePosInvoicePaymentCollectionRepository(
+            runner,
+            voucherRepository,
+          ),
+        );
+
+        Future<void> claim(String nodeId, String ciphertext) async {
+          final result = await journal.beginProcessing(
+            nodeId: nodeId,
+            senderPublicKey: 'a' * 64,
+            eventType: SyncEventType.posSale.name,
+            payloadFingerprint: 'transport-$nodeId',
+            encryptedPayload: ciphertext,
+          );
+          expect(result, SyncInboundEventClaim.claimed);
+        }
+
+        final posting = _sale();
+        final event = _inboundEventForSale(posting);
+        const ciphertext = 'opaque-e2ee-node';
+        await claim('transport-1', ciphertext);
+        final applied = await applier.applySaleAtomically(
+          event: event,
+          posting: posting,
+          transportNodeId: 'transport-1',
+          encryptedPayload: ciphertext,
+        );
+        expect(applied, PosFinancialApplyResult.applied);
+
+        final exactReplayPosting = _sale();
+        await claim('transport-2', 'opaque-e2ee-replay');
+        final replay = await applier.applySaleAtomically(
+          event: _inboundEventForSale(exactReplayPosting),
+          posting: exactReplayPosting,
+          transportNodeId: 'transport-2',
+          encryptedPayload: 'opaque-e2ee-replay',
+        );
+        expect(replay, PosFinancialApplyResult.exactReplay);
+
+        final changedPosting = _sale(quantity: 2);
+        await claim('transport-3', 'opaque-e2ee-conflict');
+        final conflict = await applier.applySaleAtomically(
+          event: _inboundEventForSale(changedPosting),
+          posting: changedPosting,
+          transportNodeId: 'transport-3',
+          encryptedPayload: 'opaque-e2ee-conflict',
+        );
+        expect(conflict, PosFinancialApplyResult.conflictingReplay);
+
+        expect(await db.query('pos_invoices'), hasLength(1));
+        expect(await db.query('pos_stock_movements'), hasLength(2));
+        expect(await db.query('pos_financial_event_inbox'), hasLength(1));
+        expect(await db.query('pos_financial_event_conflicts'), hasLength(1));
+        final journalRows = await db.query(
+          'sync_inbound_event_journal',
+          orderBy: 'node_id ASC',
+        );
+        expect(journalRows.map((row) => row['state']), [
+          'applied',
+          'applied',
+          'quarantined',
+        ]);
+        expect(journalRows.last['encrypted_payload'], 'opaque-e2ee-conflict');
+      },
+    );
   });
 }

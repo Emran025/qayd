@@ -1,13 +1,17 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:qayd/di/injection_container.dart';
+import 'package:qayd/application/sync/apply_inbound_pos_financial_event_use_case.dart';
 import 'package:qayd/domain/repositories/notification_message_repository.dart';
 import 'package:qayd/domain/services/notification_filter_service.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:flutter/foundation.dart';
 import 'package:qayd/domain/entities/sync_node.dart';
+import 'package:qayd/domain/entities/pos_financial_apply_result.dart';
 import 'package:qayd/domain/repositories/identity_repository.dart';
+import 'package:qayd/domain/repositories/sync_inbound_event_journal_repository.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
 import 'package:qayd/domain/repositories/voucher_repository.dart';
 import 'package:qayd/domain/repositories/ledger_repository.dart';
@@ -75,6 +79,15 @@ List<String> _orderedDecryptPublicKeys({
   return out;
 }
 
+bool _isPosFinancialNode(SyncEventType type) => switch (type) {
+  SyncEventType.posSale ||
+  SyncEventType.posPurchase ||
+  SyncEventType.posSalesReturn ||
+  SyncEventType.posPurchaseReturn ||
+  SyncEventType.posCollection => true,
+  _ => false,
+};
+
 /// Intercepts inbound [SyncNode] streams, enforces E2EE Cryptographic rules,
 /// decrypts the payloads, and mutates the local Drift databases securely.
 class SyncPayloadProcessor {
@@ -95,6 +108,8 @@ class SyncPayloadProcessor {
     this.auditLogService,
     this.auditSyncProcessor,
     this.onDecryptionFailure,
+    this.inboundEventJournal,
+    this.posFinancialEventApplier,
   });
 
   final IdentityRepository identityRepository;
@@ -113,6 +128,34 @@ class SyncPayloadProcessor {
   final AuditLogService? auditLogService;
   final AuditSyncProcessor? auditSyncProcessor;
   final void Function(String nodeId)? onDecryptionFailure;
+  final SyncInboundEventJournalRepository? inboundEventJournal;
+  final ApplyInboundPosFinancialEventUseCase? posFinancialEventApplier;
+
+  String _inboundEventFingerprint(SyncNode node) => sha256
+      .convert(
+        utf8.encode(
+          <String>[
+            node.senderId.toString(),
+            node.senderDeviceId ?? '',
+            node.targetDeviceId ?? '',
+            node.senderPublicKey?.trim().toLowerCase() ?? '',
+            node.eventType.name,
+            node.encryptedPayload,
+          ].join('\u0000'),
+        ),
+      )
+      .toString();
+
+  Future<void> _quarantine(
+    SyncNode node,
+    SyncInboundQuarantineReason reason,
+  ) async {
+    await inboundEventJournal?.quarantine(
+      nodeId: node.id,
+      reason: reason,
+      encryptedPayload: node.encryptedPayload,
+    );
+  }
 
   Future<PartyDetails?> _resolveInboundSenderParty(SyncNode node) async {
     AccountId? accountId;
@@ -161,17 +204,13 @@ class SyncPayloadProcessor {
 
           if (alreadyHasName != null && alreadyHasName.isNotEmpty) {
             // Name already known — nothing to do.
-            debugPrint(
-              'Sync: Node [${node.id}] already staged with name [$alreadyHasName], skipping.',
-            );
+            debugPrint('Sync: Previously staged onboarding event found.');
             return null;
           }
 
           // Staged without a name (e.g. was offline at first staging).
           // Resolve the name now and backfill the existing record.
-          debugPrint(
-            'Sync: Node [${node.id}] staged but missing name — backfilling from server.',
-          );
+          debugPrint('Sync: Backfilling staged onboarding metadata.');
           try {
             final result = await identityRepository.lookupSyncNodeSender(
               nodeId: node.id,
@@ -193,19 +232,17 @@ class SyncPayloadProcessor {
                 ),
                 rawPayloadJson: jsonEncode(updatedPayload),
               );
-              debugPrint(
-                'Sync: Backfilled name [${result.name}] for node [${node.id}].',
-              );
+              debugPrint('Sync: Backfilled staged onboarding metadata.');
             }
-          } catch (e) {
-            debugPrint('Sync: Backfill name lookup failed (non-fatal): $e');
+          } catch (_) {
+            debugPrint('Sync: Backfill of staged onboarding metadata failed.');
           }
           return null;
         }
 
         // Node not yet staged — run the full staging flow.
         debugPrint(
-          'Sync: Unknown sender [Phone: $envPhone / PK: ${envPk.isNotEmpty ? envPk.substring(0, 8) : '—'}] — staging consent-based onboarding request.',
+          'Sync: Staging an onboarding request for an unknown sender.',
         );
         await stagePendingCounterpartyRequest(
           nodeId: node.id,
@@ -232,23 +269,67 @@ class SyncPayloadProcessor {
     final appliedIds = <String>{};
 
     for (final node in nodes) {
+      var handlerStarted = false;
+      var journalAppliedInHandler = false;
       try {
-        // §5.D — Hierarchical counterpart resolution ( pubkey → phone → whatsapp ).
-        final party = await _resolveInboundSenderParty(node);
-
-        if (party == null) {
-          debugPrint(
-            'Blocked SyncNode [${node.id}]: Untrusted or Unknown Sender Identity.',
-          );
-          continue; // DROP SILENTLY
+        final claim = await inboundEventJournal?.beginProcessing(
+          nodeId: node.id,
+          senderPublicKey: node.senderPublicKey?.trim().toLowerCase(),
+          eventType: node.eventType.name,
+          payloadFingerprint: _inboundEventFingerprint(node),
+          encryptedPayload: node.encryptedPayload,
+        );
+        if (claim == SyncInboundEventClaim.alreadyApplied) {
+          appliedIds.add(node.id);
+          continue;
+        }
+        if (claim != null && claim != SyncInboundEventClaim.claimed) {
+          if (claim == SyncInboundEventClaim.conflictingPayload) {
+            debugPrint(
+              'Sync: Conflicting encrypted payload for node ${node.id}; quarantined.',
+            );
+          }
+          continue;
         }
 
-        final decryptKeys = _orderedDecryptPublicKeys(node: node, party: party);
-        if (decryptKeys.isEmpty) {
-          debugPrint(
-            'Blocked SyncNode [${node.id}]: No public key available for Sender.',
-          );
-          continue;
+        // External counterparty events use the party/contact identity path.
+        // POS financial replication is a distinct, same-account device path:
+        // only an active paired DeviceSession may supply its decryption key.
+        final isFinancialNode = _isPosFinancialNode(node.eventType);
+        final PartyDetails? party;
+        final List<String> decryptKeys;
+        if (isFinancialNode) {
+          final trustedKey = await posFinancialEventApplier
+              ?.trustedSenderPublicKey(node);
+          if (trustedKey == null) {
+            await _quarantine(
+              node,
+              SyncInboundQuarantineReason.unauthorizedSenderKey,
+            );
+            continue;
+          }
+          party = null;
+          decryptKeys = [trustedKey];
+        } else {
+          party = await _resolveInboundSenderParty(node);
+          if (party == null) {
+            debugPrint(
+              'Sync: Sender is not paired; retaining the event pending.',
+            );
+            await inboundEventJournal?.returnToPending(node.id);
+            continue;
+          }
+          decryptKeys = _orderedDecryptPublicKeys(node: node, party: party);
+          if (decryptKeys.isEmpty) {
+            debugPrint(
+              'Sync: No authorized sender key; retaining encrypted event.',
+            );
+            await _quarantine(
+              node,
+              SyncInboundQuarantineReason.unauthorizedSenderKey,
+            );
+            continue;
+          }
         }
 
         Map<String, dynamic>? decryptedRawPayload;
@@ -270,17 +351,21 @@ class SyncPayloadProcessor {
         }
 
         if (decryptedRawPayload == null) {
-          debugPrint('Decryption failed for SyncNode [${node.id}]');
+          debugPrint(
+            'Sync: Encrypted event failed authentication or decryption.',
+          );
           onDecryptionFailure?.call(node.id);
+          await _quarantine(node, SyncInboundQuarantineReason.decryptionFailed);
           continue;
         }
 
-        final localSenderAccountIdStr = party.accountId.value;
+        final localSenderAccountIdStr = party?.accountId.value ?? '';
 
-        final senderPhone = party.phoneNumber ?? '';
-        final senderEmail = party.email ?? '';
+        final senderPhone = party?.phoneNumber ?? '';
+        final senderEmail = party?.email ?? '';
 
         // Process Domain Actions Structurally with Signatures
+        handlerStarted = true;
         switch (node.eventType) {
           case SyncEventType.claim:
             await _inboundVoucherClaim(
@@ -335,22 +420,24 @@ class SyncPayloadProcessor {
           case SyncEventType.auditBatch:
             final applied = await _inboundAuditBatch(decryptedRawPayload);
             if (!applied) {
-              debugPrint(
-                'Sync: Skipping ack for SyncNode [${node.id}]: '
-                'audit batch produced no local changes.',
+              debugPrint('Sync: Audit batch was not applied; retaining it.');
+              await _quarantine(
+                node,
+                SyncInboundQuarantineReason.handlerRejected,
               );
               continue;
             }
             break;
           case SyncEventType.credentialBootstrap:
-            // Bootstrap is consumed in pre-auth companion flow.
-            break;
+            // This node belongs to the pre-auth companion processor. Never
+            // acknowledge it as applied from the general sync pipeline.
+            await _quarantine(node, SyncInboundQuarantineReason.delegatedEvent);
+            continue;
           case SyncEventType.p2pHandshake:
-            // P2P handshake is handled at the transport layer, not here.
-            debugPrint(
-              'P2P Handshake event received — delegating to P2P service.',
-            );
-            break;
+            // Handshake nodes are consumed by the P2P transport, not this
+            // processor; do not acknowledge them as applied here.
+            await _quarantine(node, SyncInboundQuarantineReason.delegatedEvent);
+            continue;
           case SyncEventType.tripartiteRequest:
             await _inboundTripartiteRequest(
               decryptedRawPayload,
@@ -364,7 +451,13 @@ class SyncPayloadProcessor {
               node.id,
               localSenderAccountIdStr,
             );
-            if (!applied) continue;
+            if (!applied) {
+              await _quarantine(
+                node,
+                SyncInboundQuarantineReason.handlerRejected,
+              );
+              continue;
+            }
             break;
           case SyncEventType.posCreditInvoiceAcknowledgment:
             final applied = await _inboundPosCreditInvoiceAcknowledgment(
@@ -373,15 +466,65 @@ class SyncPayloadProcessor {
               localSenderAccountIdStr,
               decryptionKeyHexUsed ?? decryptKeys.first,
             );
-            if (!applied) continue;
+            if (!applied) {
+              await _quarantine(
+                node,
+                SyncInboundQuarantineReason.handlerRejected,
+              );
+              continue;
+            }
+            break;
+          case SyncEventType.posSale:
+          case SyncEventType.posPurchase:
+          case SyncEventType.posSalesReturn:
+          case SyncEventType.posPurchaseReturn:
+          case SyncEventType.posCollection:
+            final applier = posFinancialEventApplier;
+            if (applier == null) {
+              await _quarantine(
+                node,
+                SyncInboundQuarantineReason.delegatedEvent,
+              );
+              continue;
+            }
+            final disposition = await applier(
+              node: node,
+              decryptedPayload: decryptedRawPayload,
+            );
+            if (disposition == PosFinancialApplyResult.conflictingReplay) {
+              await _quarantine(
+                node,
+                SyncInboundQuarantineReason.handlerRejected,
+              );
+              continue;
+            }
+            journalAppliedInHandler = true;
             break;
           case SyncEventType.unknown:
-            debugPrint('Warning: Unknown event type in SyncNode [${node.id}]');
+            debugPrint('Sync: Unsupported event type; retaining ciphertext.');
+            await _quarantine(
+              node,
+              SyncInboundQuarantineReason.unsupportedEventType,
+            );
             continue;
         }
+        if (!journalAppliedInHandler) {
+          await inboundEventJournal?.markApplied(node.id);
+        }
         appliedIds.add(node.id);
-      } catch (e) {
-        debugPrint('Security Pipeline Failure for SyncNode [${node.id}]: $e');
+      } catch (_) {
+        try {
+          if (handlerStarted) {
+            await _quarantine(node, SyncInboundQuarantineReason.handlerFailed);
+          } else {
+            await inboundEventJournal?.returnToPending(node.id);
+          }
+        } catch (_) {}
+        debugPrint(
+          handlerStarted
+              ? 'Sync: Handler failed; event quarantined without acknowledgement.'
+              : 'Sync: Event processing failed; no acknowledgement was sent.',
+        );
       }
     }
     return appliedIds;

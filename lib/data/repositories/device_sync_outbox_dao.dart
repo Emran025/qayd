@@ -11,7 +11,21 @@ class DeviceSyncOutboxEntry {
     required this.retryCount,
     required this.createdAt,
     this.sentAt,
+    this.eventType = defaultEventType,
   });
+
+  static const defaultEventType = 'auditBatch';
+  static const trustedEventTypes = <String>{
+    defaultEventType,
+    'posSale',
+    'posPurchase',
+    'posSalesReturn',
+    'posPurchaseReturn',
+    'posCollection',
+  };
+
+  static bool isValidEventType(String value) =>
+      trustedEventTypes.contains(value);
 
   final String id;
   final String auditEntryId;
@@ -22,6 +36,7 @@ class DeviceSyncOutboxEntry {
   final int retryCount;
   final DateTime createdAt;
   final DateTime? sentAt;
+  final String eventType;
 
   Map<String, Object?> toMap() {
     return {
@@ -34,10 +49,21 @@ class DeviceSyncOutboxEntry {
       'retry_count': retryCount,
       'created_at': createdAt.toUtc().toIso8601String(),
       'sent_at': sentAt?.toUtc().toIso8601String(),
+      'event_type': eventType,
     };
   }
 
   factory DeviceSyncOutboxEntry.fromMap(Map<String, Object?> map) {
+    final eventType =
+        (map['event_type'] as String?) ??
+        DeviceSyncOutboxEntry.defaultEventType;
+    if (!isValidEventType(eventType)) {
+      throw ArgumentError.value(
+        eventType,
+        'eventType',
+        'Unsupported event type',
+      );
+    }
     return DeviceSyncOutboxEntry(
       id: map['id'] as String,
       auditEntryId: map['audit_entry_id'] as String,
@@ -50,6 +76,7 @@ class DeviceSyncOutboxEntry {
       sentAt: map['sent_at'] != null
           ? DateTime.parse(map['sent_at'] as String).toLocal()
           : null,
+      eventType: eventType,
     );
   }
 }
@@ -61,11 +88,50 @@ class DeviceSyncOutboxDao {
   static const _table = 'device_sync_outbox';
 
   Future<void> enqueue(DeviceSyncOutboxEntry entry) async {
+    if (!DeviceSyncOutboxEntry.isValidEventType(entry.eventType)) {
+      throw ArgumentError.value(
+        entry.eventType,
+        'eventType',
+        'Unsupported event type',
+      );
+    }
     await _db.insert(
       _table,
       entry.toMap(),
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
+  }
+
+  Future<void> enqueueInTransaction(
+    Transaction txn,
+    DeviceSyncOutboxEntry entry,
+  ) async {
+    if (!DeviceSyncOutboxEntry.isValidEventType(entry.eventType)) {
+      throw ArgumentError.value(
+        entry.eventType,
+        'eventType',
+        'Unsupported event type',
+      );
+    }
+    final inserted = await txn.insert(
+      _table,
+      entry.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    if (inserted != 0) return;
+    final rows = await txn.query(
+      _table,
+      columns: ['audit_entry_id', 'target_device_id', 'event_type'],
+      where: 'id = ?',
+      whereArgs: [entry.id],
+      limit: 1,
+    );
+    if (rows.isEmpty ||
+        rows.single['audit_entry_id'] != entry.auditEntryId ||
+        rows.single['target_device_id'] != entry.targetDeviceId ||
+        rows.single['event_type'] != entry.eventType) {
+      throw StateError('Device outbox id was reused for a different event.');
+    }
   }
 
   Future<List<DeviceSyncOutboxEntry>> listPending() async {
@@ -85,6 +151,29 @@ class DeviceSyncOutboxDao {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<void> markSentInTransaction(Transaction txn, String id) async {
+    await txn.update(
+      _table,
+      {'state': 'sent', 'sent_at': DateTime.now().toUtc().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<bool> hasPendingForAuditEntryInTransaction(
+    Transaction txn,
+    String auditEntryId,
+  ) async {
+    final rows = await txn.query(
+      _table,
+      columns: ['id'],
+      where: "audit_entry_id = ? AND state = 'pending'",
+      whereArgs: [auditEntryId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
   }
 
   /// Retains but quarantines a legacy payload so future syncs cannot send it.
