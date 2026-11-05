@@ -27,52 +27,9 @@ final class SqlitePosSalePostingRepository implements PosSalePostingRepository {
   @override
   Future<Result<void>> saveAtomically(PosSalePosting posting) async {
     try {
-      await _transactionRunner.run<void>((txn) async {
-        final state = await _inspect(txn, posting);
-        if (state == _SaleState.exact) return;
-        if (state != _SaleState.absent) {
-          throw _AtomicSaleFailure(
-            ValidationFailure(messageAr: AppStrings.posAccountingPartialState),
-          );
-        }
-
-        for (final movement in posting.movements) {
-          final result = await _stockRepository.appendInTransaction(
-            txn,
-            movement,
-          );
-          if (result.isFailure) {
-            throw _AtomicSaleFailure(result.failureOrNull!);
-          }
-        }
-
-        await txn.insert(
-            'pos_invoices', PosInvoiceMapper.toRow(posting.invoice));
-        for (final line in posting.invoice.lines) {
-          await txn.insert(
-              'pos_invoice_lines', PosInvoiceMapper.lineToRow(line));
-        }
-        for (final payment in posting.payments) {
-          await txn.insert(
-            'pos_payments',
-            PosInvoiceMapper.paymentToRow(
-              payment,
-              posting.invoice.createdAt,
-            ),
-          );
-        }
-        for (final accountingPosting in posting.postings) {
-          final result =
-              await _voucherRepository.saveWithLedgerEntriesInTransaction(
-            txn,
-            voucher: accountingPosting.voucher,
-            ledgerEntries: accountingPosting.entries,
-          );
-          if (result.isFailure) {
-            throw _AtomicSaleFailure(result.failureOrNull!);
-          }
-        }
-      });
+      await _transactionRunner.run<void>(
+        (txn) => saveInTransaction(txn, posting),
+      );
       return const Success(null);
     } on _AtomicSaleFailure catch (error) {
       return FailureResult(error.failure);
@@ -84,6 +41,52 @@ final class SqlitePosSalePostingRepository implements PosSalePostingRepository {
       return FailureResult(
         DatabaseFailure(messageAr: AppStrings.posAccountingTransactionFailed),
       );
+    }
+  }
+
+  /// Applies a complete sale on a caller-owned transaction.
+  ///
+  /// Used by the financial sync coordinator to commit invoice, stock, ledger,
+  /// financial inbox, and inbound journal state together.
+  Future<void> saveInTransaction(
+    Transaction txn,
+    PosSalePosting posting,
+  ) async {
+    final state = await _inspect(txn, posting);
+    if (state == _SaleState.exact) return;
+    if (state != _SaleState.absent) {
+      throw _AtomicSaleFailure(
+        ValidationFailure(messageAr: AppStrings.posAccountingPartialState),
+      );
+    }
+
+    for (final movement in posting.movements) {
+      final result = await _stockRepository.appendInTransaction(txn, movement);
+      if (result.isFailure) {
+        throw _AtomicSaleFailure(result.failureOrNull!);
+      }
+    }
+
+    await txn.insert('pos_invoices', PosInvoiceMapper.toRow(posting.invoice));
+    for (final line in posting.invoice.lines) {
+      await txn.insert('pos_invoice_lines', PosInvoiceMapper.lineToRow(line));
+    }
+    for (final payment in posting.payments) {
+      await txn.insert(
+        'pos_payments',
+        PosInvoiceMapper.paymentToRow(payment, posting.invoice.createdAt),
+      );
+    }
+    for (final accountingPosting in posting.postings) {
+      final result = await _voucherRepository
+          .saveWithLedgerEntriesInTransaction(
+            txn,
+            voucher: accountingPosting.voucher,
+            ledgerEntries: accountingPosting.entries,
+          );
+      if (result.isFailure) {
+        throw _AtomicSaleFailure(result.failureOrNull!);
+      }
     }
   }
 
@@ -104,7 +107,8 @@ final class SqlitePosSalePostingRepository implements PosSalePostingRepository {
       limit: 1,
     );
     final invoiceExists = invoiceRows.isNotEmpty || invoiceById.isNotEmpty;
-    final invoiceMatches = invoiceRows.length == 1 &&
+    final invoiceMatches =
+        invoiceRows.length == 1 &&
         invoiceById.length == 1 &&
         invoiceRows.first['id'] == posting.invoice.id &&
         _mapMatches(
@@ -120,11 +124,11 @@ final class SqlitePosSalePostingRepository implements PosSalePostingRepository {
       whereArgs: [posting.invoice.id],
       orderBy: 'id ASC',
     );
-    final expectedLines = posting.invoice.lines
-        .map(PosInvoiceMapper.lineToRow)
-        .toList()
-      ..sort(_compareIdMaps);
-    final linesMatch = lines.length == expectedLines.length &&
+    final expectedLines =
+        posting.invoice.lines.map(PosInvoiceMapper.lineToRow).toList()
+          ..sort(_compareIdMaps);
+    final linesMatch =
+        lines.length == expectedLines.length &&
         _rowsMatch(lines, expectedLines, ignored: const {'created_at'});
 
     final payments = await executor.query(
@@ -133,14 +137,18 @@ final class SqlitePosSalePostingRepository implements PosSalePostingRepository {
       whereArgs: [posting.invoice.id],
       orderBy: 'id ASC',
     );
-    final expectedPayments = posting.payments
-        .map((payment) => PosInvoiceMapper.paymentToRow(
-              payment,
-              posting.invoice.createdAt,
-            ))
-        .toList()
-      ..sort(_compareIdMaps);
-    final paymentsMatch = payments.length == expectedPayments.length &&
+    final expectedPayments =
+        posting.payments
+            .map(
+              (payment) => PosInvoiceMapper.paymentToRow(
+                payment,
+                posting.invoice.createdAt,
+              ),
+            )
+            .toList()
+          ..sort(_compareIdMaps);
+    final paymentsMatch =
+        payments.length == expectedPayments.length &&
         _rowsMatch(payments, expectedPayments, ignored: const {'created_at'});
 
     var movementState = _SaleState.exact;
@@ -195,11 +203,12 @@ final class SqlitePosSalePostingRepository implements PosSalePostingRepository {
         postingState = _SaleState.absent;
         continue;
       }
-      final expectedEntries = accountingPosting.entries
-          .map(LedgerEntryMapper.toModel)
-          .map((model) => model.toMap())
-          .toList()
-        ..sort(_compareIdMaps);
+      final expectedEntries =
+          accountingPosting.entries
+              .map(LedgerEntryMapper.toModel)
+              .map((model) => model.toMap())
+              .toList()
+            ..sort(_compareIdMaps);
       final actualEntries = [...ledgerRows]..sort(_compareIdMaps);
       if (voucherRows.length != 1 ||
           actualEntries.length != expectedEntries.length ||
@@ -217,7 +226,8 @@ final class SqlitePosSalePostingRepository implements PosSalePostingRepository {
       }
     }
 
-    final allExact = invoiceMatches &&
+    final allExact =
+        invoiceMatches &&
         linesMatch &&
         paymentsMatch &&
         movementState == _SaleState.exact &&

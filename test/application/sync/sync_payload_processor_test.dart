@@ -1139,4 +1139,76 @@ void main() {
       verifyNever(() => journal.returnToPending(any()));
     });
   });
+
+  test(
+    'POS financial nodes without an applier are quarantined without ACK',
+    () async {
+      final journal = MockSyncInboundEventJournalRepository();
+      final financialProcessor = SyncPayloadProcessor(
+        identityRepository: mockIdentityRepo,
+        voucherRepository: mockVoucherRepo,
+        ledgerRepository: mockLedgerRepo,
+        accountRepository: mockAccountRepo,
+        currencyRepository: MockCurrencyRepository(),
+        e2eeService: mockE2ee,
+        signingService: _testReceiptSigningService,
+        getCurrentUserKeyPair: () async => _testKeyPair,
+        attachmentRepository: MockAttachmentRepository(),
+        collateralRepository: MockCollateralRepository(),
+        voucherKeyService: MockVoucherKeyService(),
+        notificationMessageRepository: mockNotificationRepo,
+        notificationFilterService: mockFilterRepo,
+        inboundEventJournal: journal,
+      );
+      final node = SyncNode(
+        id: 'financial-without-applier',
+        senderId: 101,
+        receiverId: 101,
+        senderDeviceId: 'unpaired-device',
+        targetDeviceId: 'local-device',
+        eventType: SyncEventType.posSale,
+        encryptedPayload: 'opaque-pos-ciphertext',
+        syncState: 'pending',
+      );
+
+      when(
+        () => journal.beginProcessing(
+          nodeId: any(named: 'nodeId'),
+          senderPublicKey: any(named: 'senderPublicKey'),
+          eventType: any(named: 'eventType'),
+          payloadFingerprint: any(named: 'payloadFingerprint'),
+          encryptedPayload: any(named: 'encryptedPayload'),
+        ),
+      ).thenAnswer((_) async => SyncInboundEventClaim.claimed);
+      when(
+        () => journal.quarantine(
+          nodeId: node.id,
+          reason: SyncInboundQuarantineReason.unauthorizedSenderKey,
+          encryptedPayload: node.encryptedPayload,
+        ),
+      ).thenAnswer((_) async {});
+
+      final applied = await financialProcessor.processIncomingNodes([node]);
+
+      expect(applied, isEmpty);
+      verify(
+        () => journal.quarantine(
+          nodeId: node.id,
+          reason: SyncInboundQuarantineReason.unauthorizedSenderKey,
+          encryptedPayload: node.encryptedPayload,
+        ),
+      ).called(1);
+      verifyNever(() => journal.markApplied(node.id));
+      verifyNever(() => journal.returnToPending(node.id));
+      verifyNever(
+        () => mockE2ee.decryptPayload(
+          encryptedPayload: node.encryptedPayload,
+          receiverKeyPair: any(named: 'receiverKeyPair'),
+          senderPublicKeyHex: any(named: 'senderPublicKeyHex'),
+          nodeId: node.id,
+          eventType: node.eventType.name,
+        ),
+      );
+    },
+  );
 }

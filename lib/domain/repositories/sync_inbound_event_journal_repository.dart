@@ -1,3 +1,5 @@
+import 'package:sqflite_sqlcipher/sqflite.dart';
+
 /// Processing states for an inbound encrypted sync event.
 enum SyncInboundEventClaim {
   /// This caller may validate and handle the event.
@@ -70,11 +72,31 @@ abstract interface class SyncInboundEventJournalRepository {
     required String encryptedPayload,
   });
 
+  Future<SyncInboundEventClaim> beginProcessingInTransaction(
+    Transaction txn, {
+    required String nodeId,
+    required String? senderPublicKey,
+    required String eventType,
+    required String payloadFingerprint,
+    required String encryptedPayload,
+  });
+
   Future<void> markApplied(String nodeId);
+
+  Future<void> markAppliedInTransaction(Transaction txn, String nodeId);
 
   Future<void> returnToPending(String nodeId);
 
+  Future<void> returnToPendingInTransaction(Transaction txn, String nodeId);
+
   Future<void> quarantine({
+    required String nodeId,
+    required SyncInboundQuarantineReason reason,
+    required String encryptedPayload,
+  });
+
+  Future<void> quarantineInTransaction(
+    Transaction txn, {
     required String nodeId,
     required SyncInboundQuarantineReason reason,
     required String encryptedPayload,

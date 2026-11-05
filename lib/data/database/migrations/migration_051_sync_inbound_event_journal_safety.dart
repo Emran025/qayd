@@ -71,12 +71,16 @@ final class Migration051SyncInboundEventJournalSafety
       )
     ''');
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS pos_inventory_conflicts (
+      CREATE TABLE IF NOT EXISTS pos_financial_event_conflicts (
         id TEXT NOT NULL PRIMARY KEY,
         event_id TEXT NOT NULL,
         aggregate_id TEXT NOT NULL,
-        requested_quantity INTEGER NOT NULL,
-        available_quantity INTEGER NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        event_kind TEXT NOT NULL CHECK (event_kind IN
+          ('sale', 'purchase', 'salesReturn', 'purchaseReturn', 'collection')),
+        payload_fingerprint TEXT NOT NULL,
+        conflict_code TEXT NOT NULL CHECK
+          (conflict_code IN ('eventIdReused', 'idempotencyKeyReused')),
         state TEXT NOT NULL DEFAULT 'unresolved' CHECK
           (state IN ('unresolved', 'reconciled', 'rejected')),
         created_at TEXT NOT NULL,
@@ -88,8 +92,8 @@ final class Migration051SyncInboundEventJournalSafety
       'ON pos_financial_event_outbox (state, created_at)',
     );
     await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_pos_inventory_conflicts_state '
-      'ON pos_inventory_conflicts (state, created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_pos_financial_conflicts_state '
+      'ON pos_financial_event_conflicts (state, created_at)',
     );
   }
 }

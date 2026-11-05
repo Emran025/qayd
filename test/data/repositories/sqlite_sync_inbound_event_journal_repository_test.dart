@@ -266,6 +266,45 @@ void main() {
   );
 
   test(
+    'reclaims an expired financial claim for safe idempotent replay',
+    () async {
+      const ciphertext = 'opaque-financial-envelope';
+      final firstClaim = await journal.beginProcessing(
+        nodeId: 'interrupted-pos-sale',
+        senderPublicKey: _testKey('e'),
+        eventType: 'posSale',
+        payloadFingerprint: 'financial-fingerprint',
+        encryptedPayload: ciphertext,
+      );
+      expect(firstClaim, SyncInboundEventClaim.claimed);
+
+      await db.update(
+        'sync_inbound_event_journal',
+        {
+          'updated_at': DateTime.now()
+              .toUtc()
+              .subtract(const Duration(hours: 1))
+              .toIso8601String(),
+        },
+        where: 'node_id = ?',
+        whereArgs: ['interrupted-pos-sale'],
+      );
+
+      final retryClaim = await journal.beginProcessing(
+        nodeId: 'interrupted-pos-sale',
+        senderPublicKey: _testKey('e'),
+        eventType: 'posSale',
+        payloadFingerprint: 'financial-fingerprint',
+        encryptedPayload: ciphertext,
+      );
+      expect(retryClaim, SyncInboundEventClaim.claimed);
+      final journalRows = await db.query('sync_inbound_event_journal');
+      expect(journalRows, hasLength(1));
+      expect(journalRows.single['state'], 'processing');
+    },
+  );
+
+  test(
     'returns a failure known to precede domain handling to pending',
     () async {
       const ciphertext = '{"ciphertext":"retryable"}';
@@ -289,4 +328,52 @@ void main() {
       expect(retryClaim, SyncInboundEventClaim.claimed);
     },
   );
+
+  test('joins claim and applied marker to the caller transaction', () async {
+    const ciphertext = '{"ciphertext":"atomic"}';
+
+    await expectLater(
+      db.transaction((txn) async {
+        expect(
+          await journal.beginProcessingInTransaction(
+            txn,
+            nodeId: 'atomic-event',
+            senderPublicKey: _testKey('f'),
+            eventType: 'journalEntry',
+            payloadFingerprint: 'atomic-fingerprint',
+            encryptedPayload: ciphertext,
+          ),
+          SyncInboundEventClaim.claimed,
+        );
+        await journal.markAppliedInTransaction(txn, 'atomic-event');
+        throw StateError('roll back business mutation');
+      }),
+      throwsStateError,
+    );
+
+    expect(
+      await journal.beginProcessing(
+        nodeId: 'atomic-event',
+        senderPublicKey: _testKey('f'),
+        eventType: 'journalEntry',
+        payloadFingerprint: 'atomic-fingerprint',
+        encryptedPayload: ciphertext,
+      ),
+      SyncInboundEventClaim.claimed,
+    );
+
+    await db.transaction((txn) async {
+      await journal.markAppliedInTransaction(txn, 'atomic-event');
+    });
+    expect(
+      await journal.beginProcessing(
+        nodeId: 'atomic-event',
+        senderPublicKey: _testKey('f'),
+        eventType: 'journalEntry',
+        payloadFingerprint: 'atomic-fingerprint',
+        encryptedPayload: ciphertext,
+      ),
+      SyncInboundEventClaim.alreadyApplied,
+    );
+  });
 }

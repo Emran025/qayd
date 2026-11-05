@@ -3,12 +3,13 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:qayd/di/injection_container.dart';
+import 'package:qayd/application/sync/apply_inbound_pos_financial_event_use_case.dart';
 import 'package:qayd/domain/repositories/notification_message_repository.dart';
 import 'package:qayd/domain/services/notification_filter_service.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:flutter/foundation.dart';
 import 'package:qayd/domain/entities/sync_node.dart';
-import 'package:qayd/domain/entities/pos_financial_sync_event.dart';
+import 'package:qayd/domain/entities/pos_financial_apply_result.dart';
 import 'package:qayd/domain/repositories/identity_repository.dart';
 import 'package:qayd/domain/repositories/sync_inbound_event_journal_repository.dart';
 import 'package:qayd/domain/value_objects/account_id.dart';
@@ -78,6 +79,15 @@ List<String> _orderedDecryptPublicKeys({
   return out;
 }
 
+bool _isPosFinancialNode(SyncEventType type) => switch (type) {
+  SyncEventType.posSale ||
+  SyncEventType.posPurchase ||
+  SyncEventType.posSalesReturn ||
+  SyncEventType.posPurchaseReturn ||
+  SyncEventType.posCollection => true,
+  _ => false,
+};
+
 /// Intercepts inbound [SyncNode] streams, enforces E2EE Cryptographic rules,
 /// decrypts the payloads, and mutates the local Drift databases securely.
 class SyncPayloadProcessor {
@@ -99,6 +109,7 @@ class SyncPayloadProcessor {
     this.auditSyncProcessor,
     this.onDecryptionFailure,
     this.inboundEventJournal,
+    this.posFinancialEventApplier,
   });
 
   final IdentityRepository identityRepository;
@@ -118,6 +129,7 @@ class SyncPayloadProcessor {
   final AuditSyncProcessor? auditSyncProcessor;
   final void Function(String nodeId)? onDecryptionFailure;
   final SyncInboundEventJournalRepository? inboundEventJournal;
+  final ApplyInboundPosFinancialEventUseCase? posFinancialEventApplier;
 
   String _inboundEventFingerprint(SyncNode node) => sha256
       .convert(
@@ -258,6 +270,7 @@ class SyncPayloadProcessor {
 
     for (final node in nodes) {
       var handlerStarted = false;
+      var journalAppliedInHandler = false;
       try {
         final claim = await inboundEventJournal?.beginProcessing(
           nodeId: node.id,
@@ -279,27 +292,44 @@ class SyncPayloadProcessor {
           continue;
         }
 
-        // §5.D — Hierarchical counterpart resolution ( pubkey → phone → whatsapp ).
-        final party = await _resolveInboundSenderParty(node);
-
-        if (party == null) {
-          debugPrint(
-            'Sync: Sender is not paired; retaining the event pending.',
-          );
-          await inboundEventJournal?.returnToPending(node.id);
-          continue;
-        }
-
-        final decryptKeys = _orderedDecryptPublicKeys(node: node, party: party);
-        if (decryptKeys.isEmpty) {
-          debugPrint(
-            'Sync: No authorized sender key; retaining encrypted event.',
-          );
-          await _quarantine(
-            node,
-            SyncInboundQuarantineReason.unauthorizedSenderKey,
-          );
-          continue;
+        // External counterparty events use the party/contact identity path.
+        // POS financial replication is a distinct, same-account device path:
+        // only an active paired DeviceSession may supply its decryption key.
+        final isFinancialNode = _isPosFinancialNode(node.eventType);
+        final PartyDetails? party;
+        final List<String> decryptKeys;
+        if (isFinancialNode) {
+          final trustedKey = await posFinancialEventApplier
+              ?.trustedSenderPublicKey(node);
+          if (trustedKey == null) {
+            await _quarantine(
+              node,
+              SyncInboundQuarantineReason.unauthorizedSenderKey,
+            );
+            continue;
+          }
+          party = null;
+          decryptKeys = [trustedKey];
+        } else {
+          party = await _resolveInboundSenderParty(node);
+          if (party == null) {
+            debugPrint(
+              'Sync: Sender is not paired; retaining the event pending.',
+            );
+            await inboundEventJournal?.returnToPending(node.id);
+            continue;
+          }
+          decryptKeys = _orderedDecryptPublicKeys(node: node, party: party);
+          if (decryptKeys.isEmpty) {
+            debugPrint(
+              'Sync: No authorized sender key; retaining encrypted event.',
+            );
+            await _quarantine(
+              node,
+              SyncInboundQuarantineReason.unauthorizedSenderKey,
+            );
+            continue;
+          }
         }
 
         Map<String, dynamic>? decryptedRawPayload;
@@ -329,10 +359,10 @@ class SyncPayloadProcessor {
           continue;
         }
 
-        final localSenderAccountIdStr = party.accountId.value;
+        final localSenderAccountIdStr = party?.accountId.value ?? '';
 
-        final senderPhone = party.phoneNumber ?? '';
-        final senderEmail = party.email ?? '';
+        final senderPhone = party?.phoneNumber ?? '';
+        final senderEmail = party?.email ?? '';
 
         // Process Domain Actions Structurally with Signatures
         handlerStarted = true;
@@ -449,16 +479,27 @@ class SyncPayloadProcessor {
           case SyncEventType.posSalesReturn:
           case SyncEventType.posPurchaseReturn:
           case SyncEventType.posCollection:
-            // Validate the decrypted contract before refusing application.
-            // The atomic ledger/stock coordinator is not wired into this
-            // legacy generic processor yet, so financial events remain
-            // quarantined rather than being ACKed or partially applied.
-            PosFinancialSyncEvent.fromJson(
-              decryptedRawPayload.cast<String, Object?>(),
-              payloadFingerprint: 'validated-inbound',
+            final applier = posFinancialEventApplier;
+            if (applier == null) {
+              await _quarantine(
+                node,
+                SyncInboundQuarantineReason.delegatedEvent,
+              );
+              continue;
+            }
+            final disposition = await applier(
+              node: node,
+              decryptedPayload: decryptedRawPayload,
             );
-            await _quarantine(node, SyncInboundQuarantineReason.delegatedEvent);
-            continue;
+            if (disposition == PosFinancialApplyResult.conflictingReplay) {
+              await _quarantine(
+                node,
+                SyncInboundQuarantineReason.handlerRejected,
+              );
+              continue;
+            }
+            journalAppliedInHandler = true;
+            break;
           case SyncEventType.unknown:
             debugPrint('Sync: Unsupported event type; retaining ciphertext.');
             await _quarantine(
@@ -467,7 +508,9 @@ class SyncPayloadProcessor {
             );
             continue;
         }
-        await inboundEventJournal?.markApplied(node.id);
+        if (!journalAppliedInHandler) {
+          await inboundEventJournal?.markApplied(node.id);
+        }
         appliedIds.add(node.id);
       } catch (_) {
         try {

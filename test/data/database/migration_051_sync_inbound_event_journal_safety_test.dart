@@ -92,7 +92,7 @@ void main() {
       containsAll(<String>[
         'pos_financial_event_outbox',
         'pos_financial_event_inbox',
-        'pos_inventory_conflicts',
+        'pos_financial_event_conflicts',
       ]),
     );
   });

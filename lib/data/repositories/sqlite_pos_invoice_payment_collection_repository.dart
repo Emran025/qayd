@@ -55,57 +55,7 @@ final class SqlitePosInvoicePaymentCollectionRepository
   ) async {
     try {
       return await _transactionRunner.run((txn) async {
-        final inspection = await _inspect(txn, posting);
-        if (inspection == _Inspection.exactReplay) {
-          return const Success<void>(null);
-        }
-
-        final invoiceRows = await txn.query(
-          'pos_invoices',
-          where: 'id = ?',
-          whereArgs: [posting.invoiceBefore.id],
-          limit: 1,
-        );
-        if (invoiceRows.isEmpty) {
-          _fail('pos_collection_invoice_missing');
-        }
-        final invoiceRow = invoiceRows.single;
-        await _validateFreshPosting(txn, invoiceRow, posting);
-
-        final updated = await txn.update(
-          'pos_invoices',
-          {
-            'paid_minor': posting.invoiceAfter.paid.minorUnits,
-            'due_minor': posting.invoiceAfter.due.minorUnits,
-            'status': posting.invoiceAfter.status.name,
-            'updated_at': posting.recordedAt.toUtc().toIso8601String(),
-          },
-          where: 'id = ? AND paid_minor = ? AND due_minor = ? AND status = ?',
-          whereArgs: [
-            posting.invoiceBefore.id,
-            posting.invoiceBefore.paid.minorUnits,
-            posting.invoiceBefore.due.minorUnits,
-            posting.invoiceBefore.status.name,
-          ],
-        );
-        if (updated != 1) _fail('pos_collection_invoice_changed');
-
-        await txn.insert(
-          'pos_payments',
-          PosInvoiceMapper.paymentToRow(
-            posting.payment,
-            posting.recordedAt,
-          ),
-        );
-        final voucherResult =
-            await _voucherRepository.saveWithLedgerEntriesInTransaction(
-          txn,
-          voucher: posting.accountingPosting.voucher,
-          ledgerEntries: posting.accountingPosting.entries,
-        );
-        if (voucherResult.isFailure) {
-          throw _RepositoryFailure(voucherResult.failureOrNull!);
-        }
+        await saveInTransaction(txn, posting);
         return const Success<void>(null);
       });
     } on _RepositoryFailure catch (error) {
@@ -114,6 +64,66 @@ final class SqlitePosInvoicePaymentCollectionRepository
       return _databaseFailure<void>();
     } catch (_) {
       return _databaseFailure<void>();
+    }
+  }
+
+  /// Saves a collection using the caller-owned transaction.
+  ///
+  /// All validation, idempotency inspection, balance update, payment, voucher,
+  /// and ledger writes happen on [txn]. No nested transaction is opened here;
+  /// database errors are intentionally allowed to escape to the transaction
+  /// owner so it can roll back the whole unit of work.
+  Future<void> saveInTransaction(
+    Transaction txn,
+    PosInvoicePaymentCollectionPosting posting,
+  ) async {
+    final inspection = await _inspect(txn, posting);
+    if (inspection == _Inspection.exactReplay) {
+      return;
+    }
+
+    final invoiceRows = await txn.query(
+      'pos_invoices',
+      where: 'id = ?',
+      whereArgs: [posting.invoiceBefore.id],
+      limit: 1,
+    );
+    if (invoiceRows.isEmpty) {
+      _fail('pos_collection_invoice_missing');
+    }
+    final invoiceRow = invoiceRows.single;
+    await _validateFreshPosting(txn, invoiceRow, posting);
+
+    final updated = await txn.update(
+      'pos_invoices',
+      {
+        'paid_minor': posting.invoiceAfter.paid.minorUnits,
+        'due_minor': posting.invoiceAfter.due.minorUnits,
+        'status': posting.invoiceAfter.status.name,
+        'updated_at': posting.recordedAt.toUtc().toIso8601String(),
+      },
+      where: 'id = ? AND paid_minor = ? AND due_minor = ? AND status = ?',
+      whereArgs: [
+        posting.invoiceBefore.id,
+        posting.invoiceBefore.paid.minorUnits,
+        posting.invoiceBefore.due.minorUnits,
+        posting.invoiceBefore.status.name,
+      ],
+    );
+    if (updated != 1) _fail('pos_collection_invoice_changed');
+
+    await txn.insert(
+      'pos_payments',
+      PosInvoiceMapper.paymentToRow(posting.payment, posting.recordedAt),
+    );
+    final voucherResult = await _voucherRepository
+        .saveWithLedgerEntriesInTransaction(
+          txn,
+          voucher: posting.accountingPosting.voucher,
+          ledgerEntries: posting.accountingPosting.entries,
+        );
+    if (voucherResult.isFailure) {
+      throw _RepositoryFailure(voucherResult.failureOrNull!);
     }
   }
 
@@ -145,7 +155,8 @@ final class SqlitePosInvoicePaymentCollectionRepository
     );
 
     final hasPayment = keyRows.isNotEmpty || idRows.isNotEmpty;
-    final hasAccounting = voucherIdRows.isNotEmpty ||
+    final hasAccounting =
+        voucherIdRows.isNotEmpty ||
         voucherReferenceRows.isNotEmpty ||
         await _hasLedgerEntries(executor, posting);
     if (!hasPayment && !hasAccounting) return _Inspection.absent;
@@ -161,10 +172,14 @@ final class SqlitePosInvoicePaymentCollectionRepository
           idRows.single,
           PosInvoiceMapper.paymentToRow(payment, posting.recordedAt),
         ) ||
-        !_sameRow(voucherIdRows.single,
-            VoucherMapper.toModel(voucher).toMap()) ||
-        !_sameRow(voucherReferenceRows.single,
-            VoucherMapper.toModel(voucher).toMap()) ||
+        !_sameRow(
+          voucherIdRows.single,
+          VoucherMapper.toModel(voucher).toMap(),
+        ) ||
+        !_sameRow(
+          voucherReferenceRows.single,
+          VoucherMapper.toModel(voucher).toMap(),
+        ) ||
         !await _ledgerMatches(executor, posting)) {
       _fail('pos_collection_idempotency_conflict');
     }
@@ -202,9 +217,9 @@ final class SqlitePosInvoicePaymentCollectionRepository
         (before.status != PosDocumentStatus.posted &&
             before.status != PosDocumentStatus.partiallyPaid) ||
         before.counterpartyAccountId == null ||
-        PosDate.fromDateTime(payment.occurredAt.toLocal()).isBefore(
-          PosDate.fromDateTime(before.invoiceDate.toLocal()),
-        ) ||
+        PosDate.fromDateTime(
+          payment.occurredAt.toLocal(),
+        ).isBefore(PosDate.fromDateTime(before.invoiceDate.toLocal())) ||
         before.currency != payment.currency ||
         before.currency.code != (row['currency_code'] as String?) ||
         before.id != payment.invoiceId ||
@@ -267,19 +282,29 @@ final class SqlitePosInvoicePaymentCollectionRepository
 
     final entries = posting.accountingPosting.entries;
     if (entries.length != 2 ||
-        entries.where((entry) =>
-                entry.accountId == payment.accountId &&
-                entry.side == EntrySide.debit &&
-                entry.amount == payment.amount)
-            .length != 1 ||
-        entries.where((entry) =>
-                entry.accountId == before.counterpartyAccountId &&
-                entry.side == EntrySide.credit &&
-                entry.amount == payment.amount)
-            .length != 1 ||
-        entries.any((entry) =>
-            entry.currency != payment.currency ||
-            entry.voucherId != voucher.id)) {
+        entries
+                .where(
+                  (entry) =>
+                      entry.accountId == payment.accountId &&
+                      entry.side == EntrySide.debit &&
+                      entry.amount == payment.amount,
+                )
+                .length !=
+            1 ||
+        entries
+                .where(
+                  (entry) =>
+                      entry.accountId == before.counterpartyAccountId &&
+                      entry.side == EntrySide.credit &&
+                      entry.amount == payment.amount,
+                )
+                .length !=
+            1 ||
+        entries.any(
+          (entry) =>
+              entry.currency != payment.currency ||
+              entry.voucherId != voucher.id,
+        )) {
       _fail('pos_collection_ledger_direction_invalid');
     }
   }
@@ -340,7 +365,12 @@ final class SqlitePosInvoicePaymentCollectionRepository
   ) async {
     final rows = await executor.query(
       'accounts',
-      columns: ['is_active', 'is_archived', 'standard_classification', 'nature'],
+      columns: [
+        'is_active',
+        'is_archived',
+        'standard_classification',
+        'nature',
+      ],
       where: 'id = ?',
       whereArgs: [accountId],
       limit: 1,
@@ -383,19 +413,24 @@ final class SqlitePosInvoicePaymentCollectionRepository
     DatabaseExecutor executor,
     PosInvoicePaymentCollectionPosting posting,
   ) async {
-    final expected = posting.accountingPosting.entries
-        .map(LedgerEntryMapper.toModel)
-        .map((entry) => entry.toMap())
-        .toList(growable: false)
-      ..sort((left, right) =>
-          (left['id']! as String).compareTo(right['id']! as String));
-    final rows = (await executor.query(
-      'ledger_entries',
-      where: 'voucher_id = ?',
-      whereArgs: [posting.accountingPosting.voucher.id.value],
-    )).toList()
-      ..sort((left, right) =>
-          (left['id']! as String).compareTo(right['id']! as String));
+    final expected =
+        posting.accountingPosting.entries
+            .map(LedgerEntryMapper.toModel)
+            .map((entry) => entry.toMap())
+            .toList(growable: false)
+          ..sort(
+            (left, right) =>
+                (left['id']! as String).compareTo(right['id']! as String),
+          );
+    final rows =
+        (await executor.query(
+          'ledger_entries',
+          where: 'voucher_id = ?',
+          whereArgs: [posting.accountingPosting.voucher.id.value],
+        )).toList()..sort(
+          (left, right) =>
+              (left['id']! as String).compareTo(right['id']! as String),
+        );
     if (rows.length != expected.length) return false;
     for (var index = 0; index < rows.length; index++) {
       if (!_sameRow(rows[index], expected[index])) return false;
@@ -411,15 +446,15 @@ final class SqlitePosInvoicePaymentCollectionRepository
   }
 
   Never _fail(String code) => throw _RepositoryFailure(
-        ValidationFailure(
-          messageAr: AppStrings.posInvoicePaymentInvalid,
-          code: code,
-        ),
-      );
+    ValidationFailure(
+      messageAr: AppStrings.posInvoicePaymentInvalid,
+      code: code,
+    ),
+  );
 
   FailureResult<T> _databaseFailure<T>() => FailureResult(
-        DatabaseFailure(messageAr: AppStrings.posInvoicePaymentInvalid),
-      );
+    DatabaseFailure(messageAr: AppStrings.posInvoicePaymentInvalid),
+  );
 }
 
 enum _Inspection { absent, exactReplay }

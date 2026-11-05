@@ -85,9 +85,70 @@ void main() {
         applyBusinessMutation: (_) async {},
       );
       expect(result, PosFinancialApplyResult.conflictingReplay);
-      final conflicts = await db.query('pos_inventory_conflicts');
+      final conflicts = await db.query('pos_financial_event_conflicts');
       expect(conflicts, hasLength(1));
       expect(conflicts.single['state'], 'unresolved');
+      expect(conflicts.single['conflict_code'], 'eventIdReused');
+      expect(conflicts.single.containsKey('requested_quantity'), isFalse);
     },
   );
+
+  test(
+    'applies through the caller transaction without opening a nested transaction',
+    () async {
+      final store = PosFinancialEventStore(db);
+      var callbackTransaction;
+
+      final result = await db.transaction((txn) async {
+        return store.applyInboundInTransaction(
+          txn,
+          event(id: 'transaction-event'),
+          applyBusinessMutation: (businessTxn) async {
+            callbackTransaction = businessTxn;
+            await businessTxn.insert('pos_financial_event_inbox', {
+              'event_id': 'callback-row',
+              'idempotency_key': 'callback-key',
+              'event_kind': 'sale',
+              'aggregate_id': 'invoice-callback',
+              'payload_fingerprint': 'callback-fingerprint',
+              'state': 'applied',
+              'applied_at': DateTime.now().toUtc().toIso8601String(),
+            });
+          },
+        );
+      });
+
+      expect(result, PosFinancialApplyResult.applied);
+      expect(callbackTransaction, isNotNull);
+      expect(await db.query('pos_financial_event_inbox'), hasLength(2));
+    },
+  );
+
+  test('rolls back business and inbox writes when callback throws', () async {
+    final store = PosFinancialEventStore(db);
+
+    await expectLater(
+      db.transaction((txn) async {
+        await store.applyInboundInTransaction(
+          txn,
+          event(id: 'rollback-event'),
+          applyBusinessMutation: (businessTxn) async {
+            await businessTxn.insert('pos_financial_event_inbox', {
+              'event_id': 'rollback-callback-row',
+              'idempotency_key': 'rollback-callback-key',
+              'event_kind': 'sale',
+              'aggregate_id': 'invoice-rollback',
+              'payload_fingerprint': 'rollback-callback-fingerprint',
+              'state': 'applied',
+              'applied_at': DateTime.now().toUtc().toIso8601String(),
+            });
+            throw StateError('business mutation failed');
+          },
+        );
+      }),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(await db.query('pos_financial_event_inbox'), isEmpty);
+  });
 }

@@ -10,6 +10,8 @@ import 'package:qayd/domain/repositories/notification_message_repository.dart';
 import 'package:qayd/application/notifications/collateral_expiry_checker.dart';
 import 'package:qayd/data/repositories/outbox_dao.dart';
 import 'package:qayd/data/repositories/device_sync_outbox_dao.dart';
+import 'package:qayd/data/repositories/pos_financial_event_store.dart';
+import 'package:qayd/data/database/transaction_runner.dart';
 import 'package:qayd/data/repositories/sync_watermark_dao.dart';
 import 'package:qayd/data/security/e2ee_envelope_format.dart';
 import 'package:qayd/domain/repositories/voucher_repository.dart';
@@ -38,6 +40,8 @@ class SyncCoordinatorService {
     required this.voucherRepository,
     required this.syncEventDispatcher,
     required this.currentDeviceId,
+    this.transactionRunner,
+    this.posFinancialEventStore,
     this.collateralExpiryChecker,
     this.syncInterval = const Duration(minutes: 10),
   });
@@ -55,6 +59,8 @@ class SyncCoordinatorService {
   final VoucherRepository voucherRepository;
   final SyncEventDispatcher syncEventDispatcher;
   final String currentDeviceId;
+  final DatabaseTransactionRunner? transactionRunner;
+  final PosFinancialEventStore? posFinancialEventStore;
   final CollateralExpiryChecker? collateralExpiryChecker;
   final Duration syncInterval;
 
@@ -242,7 +248,7 @@ class SyncCoordinatorService {
           senderId: currentUserId,
           receiverId: currentUserId,
           receiverPublicKey: null,
-          eventType: SyncEventType.auditBatch,
+          eventType: SyncEventType.fromString(entry.eventType),
           encryptedPayload: entry.encryptedPayload,
           syncState: 'pending',
           clientTimestamp: entry.createdAt,
@@ -251,7 +257,23 @@ class SyncCoordinatorService {
           signature: entry.signature,
         );
         await syncRepository.pushNode(node);
-        await deviceSyncOutboxDao.markSent(entry.id);
+        final runner = transactionRunner;
+        final financialEventStore = posFinancialEventStore;
+        if (runner == null || financialEventStore == null) {
+          await deviceSyncOutboxDao.markSent(entry.id);
+        } else {
+          await runner.run<void>((txn) async {
+            await deviceSyncOutboxDao.markSentInTransaction(txn, entry.id);
+            final hasPending = await deviceSyncOutboxDao
+                .hasPendingForAuditEntryInTransaction(txn, entry.auditEntryId);
+            if (!hasPending) {
+              await financialEventStore.markOutboundDeliveredInTransaction(
+                txn,
+                entry.auditEntryId,
+              );
+            }
+          });
+        }
       } catch (_) {
         await deviceSyncOutboxDao.incrementRetry(entry.id);
       }

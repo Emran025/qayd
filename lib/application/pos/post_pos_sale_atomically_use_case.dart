@@ -1,11 +1,13 @@
 import 'package:qayd/application/failure_mapping.dart';
 import 'package:qayd/application/fiscal/fiscal_period_policy.dart';
 import 'package:qayd/application/governance/governance_write_guard.dart';
+import 'package:qayd/application/sync/pos_financial_outbound_event_preparer.dart';
 import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/domain/entities/pos_sale_posting.dart';
 import 'package:qayd/domain/repositories/fiscal_period_repository.dart';
 import 'package:qayd/domain/repositories/pos_sale_posting_repository.dart';
+import 'package:qayd/domain/repositories/pos_financial_outbound_posting_writer.dart';
 import 'package:qayd/presentation/l10n/app_strings.dart';
 
 /// Governed application boundary for posting a complete POS sale.
@@ -18,13 +20,17 @@ final class PostPosSaleAtomicallyUseCase {
     required GovernanceWriteGuard writeGuard,
     required FiscalPeriodRepository fiscalPeriodRepository,
     required PosSalePostingRepository postingRepository,
-  })  : _writeGuard = writeGuard,
-        _fiscalPeriodRepository = fiscalPeriodRepository,
-        _postingRepository = postingRepository;
+    this.outboundEventPreparer,
+    this.outboundPostingWriter,
+  }) : _writeGuard = writeGuard,
+       _fiscalPeriodRepository = fiscalPeriodRepository,
+       _postingRepository = postingRepository;
 
   final GovernanceWriteGuard _writeGuard;
   final FiscalPeriodRepository _fiscalPeriodRepository;
   final PosSalePostingRepository _postingRepository;
+  final PosFinancialOutboundEventPreparer? outboundEventPreparer;
+  final PosFinancialOutboundPostingWriter? outboundPostingWriter;
 
   Future<Result<void>> call(PosSalePosting posting) async {
     try {
@@ -51,6 +57,19 @@ final class PostPosSaleAtomicallyUseCase {
             code: 'pos_sale_closed_fiscal_period',
           ),
         );
+      }
+      final bundle = await outboundEventPreparer?.prepareSale(posting);
+      if (bundle != null) {
+        final writer = outboundPostingWriter;
+        if (writer == null) {
+          return FailureResult(
+            ValidationFailure(
+              messageAr: AppStrings.posInvoiceInvalid,
+              code: 'pos_financial_outbound_writer_unavailable',
+            ),
+          );
+        }
+        return await writer.saveSaleWithOutboundAtomically(posting, bundle);
       }
       return await _postingRepository.saveAtomically(posting);
     } catch (error) {

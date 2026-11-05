@@ -40,6 +40,8 @@ import 'package:qayd/application/pos/build_pos_stock_disposal_posting_use_case.d
 import 'package:qayd/application/pos/post_pos_stock_disposal_atomically_use_case.dart';
 import 'package:qayd/application/pos/post_pos_opening_balance_atomically_use_case.dart';
 import 'package:qayd/application/pos/post_pos_sale_atomically_use_case.dart';
+import 'package:qayd/application/sync/apply_inbound_pos_financial_event_use_case.dart';
+import 'package:qayd/application/sync/pos_financial_outbound_event_preparer.dart';
 import 'package:qayd/application/pos/post_pos_purchase_atomically_use_case.dart';
 import 'package:qayd/application/pos/build_pos_opening_balance_posting_use_case.dart';
 import 'package:qayd/application/pos/build_pos_sale_posting_use_case.dart';
@@ -152,6 +154,9 @@ import 'package:qayd/data/repositories/sqlite_pos_accounting_posting_repository.
 import 'package:qayd/data/repositories/sqlite_pos_sale_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sales_return_posting_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_purchase_posting_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_financial_inbound_application_repository.dart';
+import 'package:qayd/data/repositories/sqlite_pos_financial_outbound_posting_writer.dart';
+import 'package:qayd/data/repositories/pos_financial_event_store.dart';
 import 'package:qayd/data/repositories/sqlite_pos_purchase_request_identity_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_sales_return_request_identity_repository.dart';
 import 'package:qayd/data/repositories/sqlite_pos_invoice_payment_collection_repository.dart';
@@ -213,6 +218,9 @@ import 'package:qayd/data/security/e2ee_encryption_service_impl.dart';
 import 'package:qayd/domain/services/e2ee_encryption_service.dart';
 import 'package:qayd/domain/repositories/sync_repository.dart';
 import 'package:qayd/domain/repositories/device_registry_repository.dart';
+import 'package:qayd/domain/repositories/pos_financial_inbound_application_repository.dart';
+import 'package:qayd/domain/repositories/pos_financial_outbound_posting_writer.dart';
+import 'package:qayd/domain/repositories/sync_inbound_event_journal_repository.dart';
 import 'package:qayd/domain/repositories/voucher_repository.dart';
 import 'package:qayd/domain/repositories/fiscal_period_repository.dart';
 import 'package:qayd/domain/repositories/ledger_repository.dart';
@@ -433,6 +441,17 @@ abstract final class InjectionContainer {
   static late PosInvoicePaymentCollectionRepository
   posInvoicePaymentCollectionRepository;
   static late PosPurchasePostingRepository posPurchasePostingRepository;
+  static late PosFinancialEventStore posFinancialEventStore;
+  static late SyncInboundEventJournalRepository
+  syncInboundEventJournalRepository;
+  static late PosFinancialInboundApplicationRepository
+  posFinancialInboundApplicationRepository;
+  static late PosFinancialOutboundEventPreparer
+  posFinancialOutboundEventPreparer;
+  static late PosFinancialOutboundPostingWriter
+  posFinancialOutboundPostingWriter;
+  static late ApplyInboundPosFinancialEventUseCase
+  applyInboundPosFinancialEventUseCase;
   static late PosPurchaseRequestIdentityRepository
   posPurchaseRequestIdentityRepository;
   static late PosSalesReturnRequestIdentityRepository
@@ -500,6 +519,7 @@ abstract final class InjectionContainer {
   static late final NativeNotificationService nativeNotificationService;
   static late final NotificationFilterService notificationFilterService;
   static late SyncCoordinatorService syncCoordinatorService;
+  static late DatabaseTransactionRunner databaseTransactionRunner;
   static late final SyncSocketService syncSocketService;
   static late SyncPayloadProcessor syncPayloadProcessor;
   static late final SyncRepository syncRepository;
@@ -935,8 +955,16 @@ abstract final class InjectionContainer {
   }
 
   static Future<void> _initializeDatabaseDependentStack() async {
-    _registerSqliteStack();
+    final licenseData = await licenseVault.readLicenseData();
+    final userId = (licenseData?['id'] as num?)?.toInt() ?? 0;
+    _registerSqliteStack(ownerUserId: userId);
     _databaseReady = true;
+    applyInboundPosFinancialEventUseCase = ApplyInboundPosFinancialEventUseCase(
+      deviceSessionRepository: deviceSessionRepository,
+      applicationRepository: posFinancialInboundApplicationRepository,
+      currentUserId: userId,
+      currentDeviceId: currentDeviceId,
+    );
 
     // §C-6: Now that the SQLite stack is ready, inject deviceSessionRepository
     // into companionLinkService so companion registration can persist locally.
@@ -963,7 +991,8 @@ abstract final class InjectionContainer {
       notificationFilterService: notificationFilterService,
       auditLogService: auditLogService,
       auditSyncProcessor: auditSyncProcessor,
-      inboundEventJournal: SqliteSyncInboundEventJournalRepository(database),
+      inboundEventJournal: syncInboundEventJournalRepository,
+      posFinancialEventApplier: applyInboundPosFinancialEventUseCase,
       onDecryptionFailure: (nodeId) =>
           syncStatusCubit.reportDecryptionfailure(nodeId),
     );
@@ -975,9 +1004,6 @@ abstract final class InjectionContainer {
     );
 
     // ── Real-time Sync Engine Initialization ─────────────────────────────────
-    final licenseData = await licenseVault.readLicenseData();
-    final userId = (licenseData?['id'] as num?)?.toInt() ?? 0;
-
     syncCoordinatorService = SyncCoordinatorService(
       syncRepository: syncRepository,
       socketService: syncSocketService,
@@ -993,6 +1019,8 @@ abstract final class InjectionContainer {
       voucherRepository: voucherRepository,
       syncEventDispatcher: syncEventDispatcher,
       currentDeviceId: currentDeviceId,
+      transactionRunner: databaseTransactionRunner,
+      posFinancialEventStore: posFinancialEventStore,
     );
     syncFacade = SyncFacade(syncCoordinatorService);
 
@@ -1038,11 +1066,15 @@ abstract final class InjectionContainer {
     );
   }
 
-  static void _registerSqliteStack() {
+  static void _registerSqliteStack({required int ownerUserId}) {
     outboxDao = OutboxDao(database);
     deviceSyncOutboxDao = DeviceSyncOutboxDao(database);
     syncWatermarkDao = SyncWatermarkDao(database);
     deviceSessionRepository = SqliteDeviceSessionRepository(database);
+    posFinancialEventStore = PosFinancialEventStore(database);
+    syncInboundEventJournalRepository = SqliteSyncInboundEventJournalRepository(
+      database,
+    );
 
     syncEventDispatcher = SyncEventDispatcher(
       outboxDao: outboxDao,
@@ -1065,7 +1097,8 @@ abstract final class InjectionContainer {
     );
     ledgerRepository = SqliteLedgerRepository(database);
     fiscalPeriodRepository = SqliteFiscalPeriodRepository(database);
-    final transactionRunner = DatabaseTransactionRunner(database);
+    databaseTransactionRunner = DatabaseTransactionRunner(database);
+    final transactionRunner = databaseTransactionRunner;
     final sqliteVoucherRepository = SqliteVoucherRepository(
       database,
       transactionRunner,
@@ -1228,11 +1261,13 @@ abstract final class InjectionContainer {
           sqliteVoucherRepository,
         );
     posSalesReturnPostingRepository = sqlitePosSalesReturnPostingRepository;
-    posInvoicePaymentCollectionRepository =
+    final sqlitePosInvoicePaymentCollectionRepository =
         SqlitePosInvoicePaymentCollectionRepository(
           transactionRunner,
           sqliteVoucherRepository,
         );
+    posInvoicePaymentCollectionRepository =
+        sqlitePosInvoicePaymentCollectionRepository;
     final sqlitePosPurchasePostingRepository =
         SqlitePosPurchasePostingRepository(
           transactionRunner,
@@ -1240,6 +1275,32 @@ abstract final class InjectionContainer {
           sqliteVoucherRepository,
         );
     posPurchasePostingRepository = sqlitePosPurchasePostingRepository;
+    posFinancialInboundApplicationRepository =
+        SqlitePosFinancialInboundApplicationRepository(
+          transactionRunner: transactionRunner,
+          eventStore: posFinancialEventStore,
+          inboundJournal: syncInboundEventJournalRepository,
+          saleRepository: sqlitePosSalePostingRepository,
+          purchaseRepository: sqlitePosPurchasePostingRepository,
+          salesReturnRepository: sqlitePosSalesReturnPostingRepository,
+          collectionRepository: sqlitePosInvoicePaymentCollectionRepository,
+        );
+    posFinancialOutboundPostingWriter = SqlitePosFinancialOutboundPostingWriter(
+      transactionRunner: transactionRunner,
+      eventStore: posFinancialEventStore,
+      deviceSyncOutboxDao: deviceSyncOutboxDao,
+      saleRepository: sqlitePosSalePostingRepository,
+      purchaseRepository: sqlitePosPurchasePostingRepository,
+      salesReturnRepository: sqlitePosSalesReturnPostingRepository,
+      collectionRepository: sqlitePosInvoicePaymentCollectionRepository,
+    );
+    posFinancialOutboundEventPreparer = PosFinancialOutboundEventPreparer(
+      deviceSessionRepository: deviceSessionRepository,
+      encryptionService: e2eeService,
+      getCurrentUserKeyPair: () => setupIdentityUseCase.getKeyPair(),
+      ownerUserId: ownerUserId,
+      currentDeviceId: currentDeviceId,
+    );
     posPurchaseRequestIdentityRepository =
         SqlitePosPurchaseRequestIdentityRepository(database);
     posSalesReturnRequestIdentityRepository =
@@ -1269,6 +1330,8 @@ abstract final class InjectionContainer {
       writeGuard: governanceWriteGuard,
       fiscalPeriodRepository: fiscalPeriodRepository,
       postingRepository: posSalePostingRepository,
+      outboundEventPreparer: posFinancialOutboundEventPreparer,
+      outboundPostingWriter: posFinancialOutboundPostingWriter,
     );
     completePosSaleUseCase = CompletePosSaleUseCase(
       buildPosting: buildPosSalePostingUseCase,
@@ -1284,6 +1347,8 @@ abstract final class InjectionContainer {
       writeGuard: governanceWriteGuard,
       fiscalPeriodRepository: fiscalPeriodRepository,
       postingRepository: posSalesReturnPostingRepository,
+      outboundEventPreparer: posFinancialOutboundEventPreparer,
+      outboundPostingWriter: posFinancialOutboundPostingWriter,
     );
     completePosSalesReturnUseCase = CompletePosSalesReturnUseCase(
       buildPosting: buildPosSalesReturnPostingUseCase,
@@ -1302,6 +1367,8 @@ abstract final class InjectionContainer {
           writeGuard: governanceWriteGuard,
           fiscalPeriodRepository: fiscalPeriodRepository,
           postingRepository: posInvoicePaymentCollectionRepository,
+          outboundEventPreparer: posFinancialOutboundEventPreparer,
+          outboundPostingWriter: posFinancialOutboundPostingWriter,
         );
     completePosInvoicePaymentCollectionUseCase =
         CompletePosInvoicePaymentCollectionUseCase(
@@ -1321,6 +1388,8 @@ abstract final class InjectionContainer {
       writeGuard: governanceWriteGuard,
       fiscalPeriodRepository: fiscalPeriodRepository,
       postingRepository: posPurchasePostingRepository,
+      outboundEventPreparer: posFinancialOutboundEventPreparer,
+      outboundPostingWriter: posFinancialOutboundPostingWriter,
     );
     completePosPurchaseUseCase = CompletePosPurchaseUseCase(
       buildPosting: buildPosPurchasePostingUseCase,

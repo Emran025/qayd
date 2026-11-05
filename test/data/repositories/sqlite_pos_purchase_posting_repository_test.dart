@@ -53,8 +53,7 @@ final class _CurrencyRepository implements CurrencyRepository {
   Future<Result<void>> save(
     CurrencyCode currency, {
     bool isPredefined = false,
-  }) async =>
-      const Success(null);
+  }) async => const Success(null);
 
   @override
   Future<Result<void>> toggleActiveStatus(String code, bool isActive) async =>
@@ -333,6 +332,46 @@ void main() {
     );
 
     test(
+      'rolls back all saveInTransaction writes when the caller transaction fails',
+      () async {
+        await db.update(
+          'pos_products',
+          {'currency_code': _usd.code, 'expiry_tracking': 1},
+          where: 'id = ?',
+          whereArgs: ['product-1'],
+        );
+        final originalProduct = (await db.query('pos_products')).single;
+
+        await expectLater(
+          db.transaction((txn) async {
+            await repository.saveInTransaction(
+              txn,
+              _purchase(
+                convertedCost: true,
+                applyProposedSalePrice: true,
+                tracked: true,
+              ),
+            );
+            throw StateError('caller transaction failed');
+          }),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(await db.query('pos_invoices'), isEmpty);
+        expect(await db.query('pos_invoice_lines'), isEmpty);
+        expect(await db.query('pos_payments'), isEmpty);
+        expect(await db.query('pos_stock_lots'), isEmpty);
+        expect(await db.query('pos_stock_movements'), isEmpty);
+        expect(await db.query('vouchers'), isEmpty);
+        expect(await db.query('ledger_entries'), isEmpty);
+        expect(
+          (await db.query('pos_products')).single,
+          equals(originalProduct),
+        );
+      },
+    );
+
+    test(
       'atomically persists tracked lots and exact replay adds nothing',
       () async {
         await db.update(
@@ -359,13 +398,15 @@ void main() {
           'purchase-lot-1',
         );
         expect(
-          (await db.query('pos_stock_lots'))
-              .single['remaining_quantity_scaled'],
+          (await db.query(
+            'pos_stock_lots',
+          )).single['remaining_quantity_scaled'],
           2,
         );
         expect(
-          (await db.query('pos_invoice_lines'))
-              .single['expiry_tracking_snapshot'],
+          (await db.query(
+            'pos_invoice_lines',
+          )).single['expiry_tracking_snapshot'],
           1,
         );
       },
@@ -449,11 +490,12 @@ void main() {
         expect(await db.query('pos_invoices'), hasLength(1));
 
         final acknowledged =
-            await SqlitePosPurchaseRequestIdentityRepository(db)
-                .acknowledgeCommitted(
-          fingerprintHash: fingerprint,
-          identity: identity,
-        );
+            await SqlitePosPurchaseRequestIdentityRepository(
+              db,
+            ).acknowledgeCommitted(
+              fingerprintHash: fingerprint,
+              identity: identity,
+            );
         expect(acknowledged.isSuccess, isTrue);
         expect(await db.query('app_settings'), isEmpty);
       },
@@ -479,55 +521,59 @@ void main() {
     });
 
     test(
-        'rolls back stock, invoice and catalog price when ledger insertion conflicts',
-        () async {
-      final date = DateTime.utc(2026, 1, 10, 10).toIso8601String();
-      await db.insert('ledger_entries', {
-        'id': 'preexisting-ledger-id',
-        'transaction_id': 'existing-tx',
-        'account_id': 'inventory',
-        'side': 'debit',
-        'amount_minor': 1,
-        'currency_code': _currency.code,
-        'voucher_id': 'existing-voucher',
-        'date': date,
-        'created_at': date,
-      });
+      'rolls back stock, invoice and catalog price when ledger insertion conflicts',
+      () async {
+        final date = DateTime.utc(2026, 1, 10, 10).toIso8601String();
+        await db.insert('ledger_entries', {
+          'id': 'preexisting-ledger-id',
+          'transaction_id': 'existing-tx',
+          'account_id': 'inventory',
+          'side': 'debit',
+          'amount_minor': 1,
+          'currency_code': _currency.code,
+          'voucher_id': 'existing-voucher',
+          'date': date,
+          'created_at': date,
+        });
 
-      await db.update(
-        'pos_products',
-        {'currency_code': _usd.code, 'expiry_tracking': 1},
-        where: 'id = ?',
-        whereArgs: ['product-1'],
-      );
-      final originalProduct = (await db.query('pos_products')).single;
-      final result = await repository.saveAtomically(
-        _purchase(
-          duplicateLedgerEntryId: true,
-          convertedCost: true,
-          applyProposedSalePrice: true,
-          tracked: true,
-        ),
-      );
+        await db.update(
+          'pos_products',
+          {'currency_code': _usd.code, 'expiry_tracking': 1},
+          where: 'id = ?',
+          whereArgs: ['product-1'],
+        );
+        final originalProduct = (await db.query('pos_products')).single;
+        final result = await repository.saveAtomically(
+          _purchase(
+            duplicateLedgerEntryId: true,
+            convertedCost: true,
+            applyProposedSalePrice: true,
+            tracked: true,
+          ),
+        );
 
-      expect(result.isFailure, isTrue);
-      expect(await db.query('pos_invoices'), isEmpty);
-      expect(await db.query('pos_invoice_lines'), isEmpty);
-      expect(await db.query('pos_stock_movements'), isEmpty);
-      expect(await db.query('pos_stock_lots'), isEmpty);
-      expect(await db.query('vouchers'), isEmpty);
-      expect(await db.query('ledger_entries'), hasLength(1));
-      final productAfterFailure = (await db.query('pos_products')).single;
-      expect(
-        productAfterFailure['purchase_price_minor'],
-        originalProduct['purchase_price_minor'],
-      );
-      expect(
-        productAfterFailure['sale_price_minor'],
-        originalProduct['sale_price_minor'],
-      );
-      expect(productAfterFailure['updated_at'], originalProduct['updated_at']);
-    });
+        expect(result.isFailure, isTrue);
+        expect(await db.query('pos_invoices'), isEmpty);
+        expect(await db.query('pos_invoice_lines'), isEmpty);
+        expect(await db.query('pos_stock_movements'), isEmpty);
+        expect(await db.query('pos_stock_lots'), isEmpty);
+        expect(await db.query('vouchers'), isEmpty);
+        expect(await db.query('ledger_entries'), hasLength(1));
+        final productAfterFailure = (await db.query('pos_products')).single;
+        expect(
+          productAfterFailure['purchase_price_minor'],
+          originalProduct['purchase_price_minor'],
+        );
+        expect(
+          productAfterFailure['sale_price_minor'],
+          originalProduct['sale_price_minor'],
+        );
+        expect(
+          productAfterFailure['updated_at'],
+          originalProduct['updated_at'],
+        );
+      },
+    );
 
     test(
       'fails closed when invoice exists without its stock/accounting rows',

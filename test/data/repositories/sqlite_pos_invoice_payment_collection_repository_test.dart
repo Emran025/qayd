@@ -225,45 +225,72 @@ void main() {
 
   tearDown(() async => db.close());
 
-  test('commits collection and returns exact replay without duplicating rows',
-      () async {
-    final posting = _posting();
+  test(
+    'commits collection and returns exact replay without duplicating rows',
+    () async {
+      final posting = _posting();
 
-    final saved = await repository.saveAtomically(posting);
-    final recovered = await repository.recoverCommitted(posting);
-    final replay = await repository.saveAtomically(posting);
-    final invoiceRow = (await db.query('pos_invoices')).single;
+      final saved = await repository.saveAtomically(posting);
+      final recovered = await repository.recoverCommitted(posting);
+      final replay = await repository.saveAtomically(posting);
+      final invoiceRow = (await db.query('pos_invoices')).single;
 
-    expect(saved.isSuccess, isTrue);
-    expect(
-      recovered.valueOrNull,
-      isTrue,
-      reason: recovered.failureOrNull is ValidationFailure
-          ? (recovered.failureOrNull! as ValidationFailure).code
-          : '${recovered.failureOrNull}',
-    );
-    expect(replay.isSuccess, isTrue);
-    expect(invoiceRow['paid_minor'], 300);
-    expect(invoiceRow['due_minor'], 700);
-    expect(invoiceRow['status'], 'partiallyPaid');
-    expect(await db.rawQuery('SELECT id FROM pos_payments'), hasLength(1));
-    expect(await db.rawQuery('SELECT id FROM vouchers'), hasLength(1));
-    expect(await db.rawQuery('SELECT id FROM ledger_entries'), hasLength(2));
-  });
+      expect(saved.isSuccess, isTrue);
+      expect(
+        recovered.valueOrNull,
+        isTrue,
+        reason: recovered.failureOrNull is ValidationFailure
+            ? (recovered.failureOrNull! as ValidationFailure).code
+            : '${recovered.failureOrNull}',
+      );
+      expect(replay.isSuccess, isTrue);
+      expect(invoiceRow['paid_minor'], 300);
+      expect(invoiceRow['due_minor'], 700);
+      expect(invoiceRow['status'], 'partiallyPaid');
+      expect(await db.rawQuery('SELECT id FROM pos_payments'), hasLength(1));
+      expect(await db.rawQuery('SELECT id FROM vouchers'), hasLength(1));
+      expect(await db.rawQuery('SELECT id FROM ledger_entries'), hasLength(2));
+    },
+  );
 
-  test('same idempotency key with changed amount is rejected without writes',
-      () async {
-    final original = _posting();
-    expect((await repository.saveAtomically(original)).isSuccess, isTrue);
-    final changed = _posting(amount: 301);
+  test(
+    'caller transaction rolls back saveInTransaction after later failure',
+    () async {
+      final posting = _posting();
 
-    final result = await repository.saveAtomically(changed);
+      expect(
+        () => db.transaction((txn) async {
+          await repository.saveInTransaction(txn, posting);
+          throw StateError('rollback outer transaction');
+        }),
+        throwsStateError,
+      );
 
-    expect(result.isFailure, isTrue);
-    expect((await db.query('pos_payments')).single['amount_minor'], 300);
-    expect((await db.query('pos_invoices')).single['paid_minor'], 300);
-    expect(await db.rawQuery('SELECT id FROM ledger_entries'), hasLength(2));
-  });
+      final invoice = (await db.query('pos_invoices')).single;
+      expect(invoice['paid_minor'], 0);
+      expect(invoice['due_minor'], 1000);
+      expect(invoice['status'], 'posted');
+      expect(await db.query('pos_payments'), isEmpty);
+      expect(await db.query('vouchers'), isEmpty);
+      expect(await db.query('ledger_entries'), isEmpty);
+    },
+  );
+
+  test(
+    'same idempotency key with changed amount is rejected without writes',
+    () async {
+      final original = _posting();
+      expect((await repository.saveAtomically(original)).isSuccess, isTrue);
+      final changed = _posting(amount: 301);
+
+      final result = await repository.saveAtomically(changed);
+
+      expect(result.isFailure, isTrue);
+      expect((await db.query('pos_payments')).single['amount_minor'], 300);
+      expect((await db.query('pos_invoices')).single['paid_minor'], 300);
+      expect(await db.rawQuery('SELECT id FROM ledger_entries'), hasLength(2));
+    },
+  );
 
   test('stale concurrent balance snapshot cannot over-collect', () async {
     final first = _posting();
@@ -283,20 +310,22 @@ void main() {
     expect(await db.query('pos_payments'), hasLength(1));
   });
 
-  test('ledger write failure rolls back payment, voucher, and invoice balance',
-      () async {
-    await db.execute('''
+  test(
+    'ledger write failure rolls back payment, voucher, and invoice balance',
+    () async {
+      await db.execute('''
       CREATE TRIGGER reject_collection_ledger
       BEFORE INSERT ON ledger_entries
       BEGIN SELECT RAISE(ABORT, 'forced ledger failure'); END
     ''');
 
-    final result = await repository.saveAtomically(_posting());
+      final result = await repository.saveAtomically(_posting());
 
-    expect(result.isFailure, isTrue);
-    expect((await db.query('pos_invoices')).single['paid_minor'], 0);
-    expect(await db.query('pos_payments'), isEmpty);
-    expect(await db.query('vouchers'), isEmpty);
-    expect(await db.query('ledger_entries'), isEmpty);
-  });
+      expect(result.isFailure, isTrue);
+      expect((await db.query('pos_invoices')).single['paid_minor'], 0);
+      expect(await db.query('pos_payments'), isEmpty);
+      expect(await db.query('vouchers'), isEmpty);
+      expect(await db.query('ledger_entries'), isEmpty);
+    },
+  );
 }

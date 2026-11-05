@@ -31,77 +31,7 @@ final class SqlitePosSalesReturnPostingRepository
   @override
   Future<Result<void>> saveAtomically(PosSalesReturnPosting posting) async {
     try {
-      await _runner.run<void>((txn) async {
-        final state = await _inspect(txn, posting);
-        if (state == _ReturnState.exact) return;
-        if (state != _ReturnState.absent) {
-          throw _ReturnWriteFailure(
-            ValidationFailure(
-              messageAr: AppStrings.posAccountingPartialState,
-              code: 'pos_sales_return_partial_or_conflicting_state',
-            ),
-          );
-        }
-
-        final sourceLines = await _validateSourceAndQuantities(txn, posting);
-        for (final movement in posting.movements) {
-          final result = await _stock.appendInTransaction(txn, movement);
-          if (result.isFailure) {
-            throw _ReturnWriteFailure(result.failureOrNull!);
-          }
-        }
-
-        await txn.insert('pos_invoices', PosInvoiceMapper.toRow(posting.invoice));
-        for (final line in posting.invoice.lines) {
-          await txn.insert('pos_invoice_lines', PosInvoiceMapper.lineToRow(line));
-        }
-        for (final payment in posting.refundPayments) {
-          await txn.insert(
-            'pos_payments',
-            PosInvoiceMapper.paymentToRow(payment, posting.invoice.createdAt),
-          );
-        }
-        await txn.insert('pos_returns', _returnRelationRow(posting));
-        for (final accounting in posting.postings) {
-          final result = await _vouchers.saveWithLedgerEntriesInTransaction(
-            txn,
-            voucher: accounting.voucher,
-            ledgerEntries: accounting.entries,
-          );
-          if (result.isFailure) {
-            throw _ReturnWriteFailure(result.failureOrNull!);
-          }
-        }
-
-        final totals = await _returnedQuantities(txn, posting.sourceInvoiceId);
-        _assertNoOverReturn(sourceLines, totals);
-        final fullyReturned = sourceLines.every(
-          (line) => (totals[line['id'] as String] ?? 0) ==
-              _asInt(line['quantity_scaled']),
-        );
-        final nextStatus = posting.voidSource
-            ? 'voided'
-            : fullyReturned
-                ? 'fullyReturned'
-                : 'partiallyReturned';
-        final affected = await txn.update(
-          'pos_invoices',
-          {
-            'status': nextStatus,
-            'updated_at': posting.invoice.createdAt.toUtc().toIso8601String(),
-          },
-          where: 'id = ? AND status IN (?, ?)',
-          whereArgs: [posting.sourceInvoiceId, 'paid', 'partiallyReturned'],
-        );
-        if (affected != 1) {
-          throw _ReturnWriteFailure(
-            ValidationFailure(
-              messageAr: 'pos_sales_return_source_changed',
-              code: 'pos_sales_return_source_changed',
-            ),
-          );
-        }
-      });
+      await _runner.run<void>((txn) => saveInTransaction(txn, posting));
       return const Success(null);
     } on _ReturnWriteFailure catch (error) {
       return FailureResult(error.failure);
@@ -112,6 +42,82 @@ final class SqlitePosSalesReturnPostingRepository
     } catch (_) {
       return FailureResult(
         DatabaseFailure(messageAr: AppStrings.posAccountingTransactionFailed),
+      );
+    }
+  }
+
+  Future<void> saveInTransaction(
+    Transaction txn,
+    PosSalesReturnPosting posting,
+  ) async {
+    final state = await _inspect(txn, posting);
+    if (state == _ReturnState.exact) return;
+    if (state != _ReturnState.absent) {
+      throw _ReturnWriteFailure(
+        ValidationFailure(
+          messageAr: AppStrings.posAccountingPartialState,
+          code: 'pos_sales_return_partial_or_conflicting_state',
+        ),
+      );
+    }
+
+    final sourceLines = await _validateSourceAndQuantities(txn, posting);
+    for (final movement in posting.movements) {
+      final result = await _stock.appendInTransaction(txn, movement);
+      if (result.isFailure) {
+        throw _ReturnWriteFailure(result.failureOrNull!);
+      }
+    }
+
+    await txn.insert('pos_invoices', PosInvoiceMapper.toRow(posting.invoice));
+    for (final line in posting.invoice.lines) {
+      await txn.insert('pos_invoice_lines', PosInvoiceMapper.lineToRow(line));
+    }
+    for (final payment in posting.refundPayments) {
+      await txn.insert(
+        'pos_payments',
+        PosInvoiceMapper.paymentToRow(payment, posting.invoice.createdAt),
+      );
+    }
+    await txn.insert('pos_returns', _returnRelationRow(posting));
+    for (final accounting in posting.postings) {
+      final result = await _vouchers.saveWithLedgerEntriesInTransaction(
+        txn,
+        voucher: accounting.voucher,
+        ledgerEntries: accounting.entries,
+      );
+      if (result.isFailure) {
+        throw _ReturnWriteFailure(result.failureOrNull!);
+      }
+    }
+
+    final totals = await _returnedQuantities(txn, posting.sourceInvoiceId);
+    _assertNoOverReturn(sourceLines, totals);
+    final fullyReturned = sourceLines.every(
+      (line) =>
+          (totals[line['id'] as String] ?? 0) ==
+          _asInt(line['quantity_scaled']),
+    );
+    final nextStatus = posting.voidSource
+        ? 'voided'
+        : fullyReturned
+        ? 'fullyReturned'
+        : 'partiallyReturned';
+    final affected = await txn.update(
+      'pos_invoices',
+      {
+        'status': nextStatus,
+        'updated_at': posting.invoice.createdAt.toUtc().toIso8601String(),
+      },
+      where: 'id = ? AND status IN (?, ?)',
+      whereArgs: [posting.sourceInvoiceId, 'paid', 'partiallyReturned'],
+    );
+    if (affected != 1) {
+      throw _ReturnWriteFailure(
+        ValidationFailure(
+          messageAr: 'pos_sales_return_source_changed',
+          code: 'pos_sales_return_source_changed',
+        ),
       );
     }
   }
@@ -133,7 +139,8 @@ final class SqlitePosSalesReturnPostingRepository
       limit: 1,
     );
     final invoiceExists = invoiceByKey.isNotEmpty || invoiceById.isNotEmpty;
-    final invoiceMatches = invoiceByKey.length == 1 &&
+    final invoiceMatches =
+        invoiceByKey.length == 1 &&
         invoiceById.length == 1 &&
         invoiceByKey.first['id'] == posting.invoice.id &&
         _mapMatches(
@@ -149,11 +156,11 @@ final class SqlitePosSalesReturnPostingRepository
       whereArgs: [posting.invoice.id],
       orderBy: 'id ASC',
     );
-    final expectedLines = posting.invoice.lines
-        .map(PosInvoiceMapper.lineToRow)
-        .toList()
-      ..sort(_compareIdMaps);
-    final linesMatch = lines.length == expectedLines.length &&
+    final expectedLines =
+        posting.invoice.lines.map(PosInvoiceMapper.lineToRow).toList()
+          ..sort(_compareIdMaps);
+    final linesMatch =
+        lines.length == expectedLines.length &&
         _rowsMatch(lines, expectedLines, ignored: const {'created_at'});
 
     final payments = await executor.query(
@@ -162,14 +169,18 @@ final class SqlitePosSalesReturnPostingRepository
       whereArgs: [posting.invoice.id],
       orderBy: 'id ASC',
     );
-    final expectedPayments = posting.refundPayments
-        .map((payment) => PosInvoiceMapper.paymentToRow(
-              payment,
-              posting.invoice.createdAt,
-            ))
-        .toList()
-      ..sort(_compareIdMaps);
-    final paymentsMatch = payments.length == expectedPayments.length &&
+    final expectedPayments =
+        posting.refundPayments
+            .map(
+              (payment) => PosInvoiceMapper.paymentToRow(
+                payment,
+                posting.invoice.createdAt,
+              ),
+            )
+            .toList()
+          ..sort(_compareIdMaps);
+    final paymentsMatch =
+        payments.length == expectedPayments.length &&
         _rowsMatch(payments, expectedPayments, ignored: const {'created_at'});
 
     final relationById = await executor.query(
@@ -185,8 +196,10 @@ final class SqlitePosSalesReturnPostingRepository
       limit: 1,
     );
     final expectedRelation = _returnRelationRow(posting);
-    final relationExists = relationById.isNotEmpty || relationByReturn.isNotEmpty;
-    final relationMatches = relationById.length == 1 &&
+    final relationExists =
+        relationById.isNotEmpty || relationByReturn.isNotEmpty;
+    final relationMatches =
+        relationById.length == 1 &&
         relationByReturn.length == 1 &&
         _mapMatches(
           relationById.first,
@@ -202,7 +215,9 @@ final class SqlitePosSalesReturnPostingRepository
       where: 'source_type = ? AND source_id = ?',
       whereArgs: ['pos_invoice', posting.invoice.id],
     );
-    final expectedMovementIds = posting.movements.map((item) => item.id).toSet();
+    final expectedMovementIds = posting.movements
+        .map((item) => item.id)
+        .toSet();
     final actualMovementIds = movementRows
         .map((row) => row['id'] as String)
         .toSet();
@@ -264,11 +279,12 @@ final class SqlitePosSalesReturnPostingRepository
         postingState = _ReturnState.absent;
         continue;
       }
-      final expectedEntries = accounting.entries
-          .map(LedgerEntryMapper.toModel)
-          .map((entry) => entry.toMap())
-          .toList()
-        ..sort(_compareIdMaps);
+      final expectedEntries =
+          accounting.entries
+              .map(LedgerEntryMapper.toModel)
+              .map((entry) => entry.toMap())
+              .toList()
+            ..sort(_compareIdMaps);
       final sortedLedger = [...ledgerRows]..sort(_compareIdMaps);
       if (storedVoucher.length != 1 ||
           sortedLedger.length != expectedEntries.length ||
@@ -286,7 +302,8 @@ final class SqlitePosSalesReturnPostingRepository
       }
     }
 
-    final allExact = invoiceMatches &&
+    final allExact =
+        invoiceMatches &&
         linesMatch &&
         paymentsMatch &&
         relationMatches &&
@@ -317,11 +334,13 @@ final class SqlitePosSalesReturnPostingRepository
         if (quantities.keys.any((lineId) => !sourceLineIds.contains(lineId))) {
           return _ReturnState.conflict;
         }
-        final allReturned = sourceLines.isNotEmpty && sourceLines.every((line) {
-          final lineId = line['id'] as String;
-          return (quantities[lineId] ?? 0) ==
-              _asInt(line['quantity_scaled']);
-        });
+        final allReturned =
+            sourceLines.isNotEmpty &&
+            sourceLines.every((line) {
+              final lineId = line['id'] as String;
+              return (quantities[lineId] ?? 0) ==
+                  _asInt(line['quantity_scaled']);
+            });
         final storedStatus = source.first['status'];
         if (posting.voidSource) {
           if (!allReturned || storedStatus != 'voided') {
@@ -329,8 +348,9 @@ final class SqlitePosSalesReturnPostingRepository
           }
         } else {
           if (storedStatus == 'voided') return _ReturnState.conflict;
-          final expectedStatus =
-              allReturned ? 'fullyReturned' : 'partiallyReturned';
+          final expectedStatus = allReturned
+              ? 'fullyReturned'
+              : 'partiallyReturned';
           if (storedStatus != expectedStatus) return _ReturnState.conflict;
         }
       } on _ReturnWriteFailure {
@@ -369,8 +389,10 @@ final class SqlitePosSalesReturnPostingRepository
         _asInt(sources.first['paid_minor']) !=
             _asInt(sources.first['total_minor']) ||
         _asInt(sources.first['due_minor']) != 0 ||
-        !const {'paid', 'partiallyReturned'}
-            .contains(sources.first['status']) ||
+        !const {
+          'paid',
+          'partiallyReturned',
+        }.contains(sources.first['status']) ||
         (posting.voidSource && sources.first['status'] != 'paid')) {
       throw _ReturnWriteFailure(
         ValidationFailure(
@@ -407,7 +429,10 @@ final class SqlitePosSalesReturnPostingRepository
         ),
       );
     }
-    final previous = await _returnedQuantities(executor, posting.sourceInvoiceId);
+    final previous = await _returnedQuantities(
+      executor,
+      posting.sourceInvoiceId,
+    );
     if (posting.voidSource && previous.values.any((quantity) => quantity > 0)) {
       throw _ReturnWriteFailure(
         ValidationFailure(
@@ -420,7 +445,9 @@ final class SqlitePosSalesReturnPostingRepository
     final sourceById = {
       for (final line in sourceLines) line['id'] as String: line,
     };
-    if (previous.keys.any((sourceLineId) => !sourceById.containsKey(sourceLineId))) {
+    if (previous.keys.any(
+      (sourceLineId) => !sourceById.containsKey(sourceLineId),
+    )) {
       throw _ReturnWriteFailure(
         ValidationFailure(
           messageAr: 'pos_sales_return_line_invalid',
@@ -533,13 +560,15 @@ final class SqlitePosSalesReturnPostingRepository
           ),
         );
       }
-      final expectedLineDiscount = _cumulativeAllocation(
+      final expectedLineDiscount =
+          _cumulativeAllocation(
             _asInt(sourceLine['discount_minor']),
             total,
             _asInt(sourceLine['quantity_scaled']),
           ) -
           (priorDiscounts[sourceLineId] ?? 0);
-      final expectedLineTax = _cumulativeAllocation(
+      final expectedLineTax =
+          _cumulativeAllocation(
             _asInt(sourceLine['tax_minor']),
             total,
             _asInt(sourceLine['quantity_scaled']),
@@ -608,26 +637,33 @@ final class SqlitePosSalesReturnPostingRepository
         ),
       );
     }
-    final expectedGlobalDiscount = _cumulativeAllocation(
+    final expectedGlobalDiscount =
+        _cumulativeAllocation(
           sourceGlobalDiscount,
           priorGross + expectedSubtotal,
           sourceSubtotal,
         ) -
         priorGlobalDiscount;
-    final expectedGlobalTax = _cumulativeAllocation(
+    final expectedGlobalTax =
+        _cumulativeAllocation(
           sourceGlobalTax,
           priorGross + expectedSubtotal,
           sourceSubtotal,
         ) -
         priorGlobalTax;
-    if (expectedGlobalDiscount < 0 || expectedGlobalTax < 0 ||
+    if (expectedGlobalDiscount < 0 ||
+        expectedGlobalTax < 0 ||
         posting.invoice.subtotal.minorUnits != expectedSubtotal ||
         posting.invoice.discount.minorUnits !=
             expectedLineDiscountTotal + expectedGlobalDiscount ||
-        posting.invoice.tax.minorUnits != expectedLineTaxTotal + expectedGlobalTax ||
+        posting.invoice.tax.minorUnits !=
+            expectedLineTaxTotal + expectedGlobalTax ||
         posting.invoice.total.minorUnits !=
-            expectedSubtotal - expectedLineDiscountTotal - expectedGlobalDiscount +
-                expectedLineTaxTotal + expectedGlobalTax) {
+            expectedSubtotal -
+                expectedLineDiscountTotal -
+                expectedGlobalDiscount +
+                expectedLineTaxTotal +
+                expectedGlobalTax) {
       throw _ReturnWriteFailure(
         ValidationFailure(
           messageAr: 'pos_sales_return_invoice_total_invalid',
@@ -660,7 +696,9 @@ final class SqlitePosSalesReturnPostingRepository
       final gross = PosMoneyMath.multiply(quantity, unitPrice).minorUnits;
       final discount = _asInt(line['discount_minor']);
       final tax = _asInt(line['tax_minor']);
-      if (discount < 0 || tax < 0 || discount > gross ||
+      if (discount < 0 ||
+          tax < 0 ||
+          discount > gross ||
           _asInt(line['line_total_minor']) != gross - discount + tax) {
         throw _ReturnWriteFailure(
           ValidationFailure(
@@ -678,8 +716,7 @@ final class SqlitePosSalesReturnPostingRepository
     if (subtotal != _asInt(sourceInvoice['subtotal_minor']) ||
         discount < lineDiscount ||
         tax < lineTax ||
-        _asInt(sourceInvoice['total_minor']) !=
-            subtotal - discount + tax) {
+        _asInt(sourceInvoice['total_minor']) != subtotal - discount + tax) {
       throw _ReturnWriteFailure(
         ValidationFailure(
           messageAr: 'pos_sales_return_source_totals_invalid',
@@ -702,9 +739,11 @@ final class SqlitePosSalesReturnPostingRepository
     );
     final sourceTotal = _asInt(sourceInvoice['total_minor']);
     if (sourcePayments.isEmpty ||
-        sourcePayments.any((row) =>
-            row['payment_method'] == 'credit' ||
-            row['currency_code'] != posting.invoice.currency.code) ||
+        sourcePayments.any(
+          (row) =>
+              row['payment_method'] == 'credit' ||
+              row['currency_code'] != posting.invoice.currency.code,
+        ) ||
         sourcePayments.fold<int>(
               0,
               (sum, row) => sum + _asInt(row['amount_minor']),
@@ -729,9 +768,9 @@ final class SqlitePosSalesReturnPostingRepository
       final amount = index == sourcePayments.length - 1
           ? posting.invoice.total.minorUnits - allocated
           : (_asInt(sourcePayment['amount_minor']) *
-                      posting.invoice.total.minorUnits +
-                  denominator ~/ 2) ~/
-              denominator;
+                        posting.invoice.total.minorUnits +
+                    denominator ~/ 2) ~/
+                denominator;
       if (amount <= 0) continue;
       allocated += amount;
       expected.add((source: sourcePayment, index: index, amount: amount));
@@ -807,12 +846,12 @@ final class SqlitePosSalesReturnPostingRepository
   static Map<String, Object?> _returnRelationRow(
     PosSalesReturnPosting posting,
   ) => {
-        'id': '${posting.invoice.id}:relation',
-        'source_invoice_id': posting.sourceInvoiceId,
-        'return_invoice_id': posting.invoice.id,
-        'reason': posting.reason,
-        'created_at': posting.invoice.createdAt.toUtc().toIso8601String(),
-      };
+    'id': '${posting.invoice.id}:relation',
+    'source_invoice_id': posting.sourceInvoiceId,
+    'return_invoice_id': posting.invoice.id,
+    'reason': posting.reason,
+    'created_at': posting.invoice.createdAt.toUtc().toIso8601String(),
+  };
 
   static bool _rowsMatch(
     List<Map<String, Object?>> actual,
@@ -848,8 +887,8 @@ final class SqlitePosSalesReturnPostingRepository
   static int _asInt(Object? value) => value is int
       ? value
       : value is num
-          ? value.toInt()
-          : int.parse(value.toString());
+      ? value.toInt()
+      : int.parse(value.toString());
 
   static int _cumulativeAllocation(int total, int part, int whole) =>
       (total * part + whole ~/ 2) ~/ whole;
