@@ -23,6 +23,9 @@ enum SyncInboundQuarantineReason {
   decryptionFailed,
   unsupportedEventType,
   delegatedEvent,
+  conflictingPayload,
+  processingInterrupted,
+  handlerFailed,
   invalidPayload,
   handlerRejected,
 }
@@ -36,6 +39,9 @@ final class SyncInboundQuarantinedEvent {
     required this.encryptedPayload,
     required this.reason,
     required this.createdAt,
+    this.conflictingPayloadFingerprint,
+    this.conflictingEncryptedPayload,
+    this.conflictCount = 0,
   });
 
   final String nodeId;
@@ -44,6 +50,9 @@ final class SyncInboundQuarantinedEvent {
   final String encryptedPayload;
   final SyncInboundQuarantineReason reason;
   final DateTime createdAt;
+  final String? conflictingPayloadFingerprint;
+  final String? conflictingEncryptedPayload;
+  final int conflictCount;
 }
 
 /// Durable local processing journal for encrypted inbound sync events.
@@ -56,6 +65,7 @@ abstract interface class SyncInboundEventJournalRepository {
     required String? senderPublicKey,
     required String eventType,
     required String payloadFingerprint,
+    required String encryptedPayload,
   });
 
   Future<void> markApplied(String nodeId);

@@ -42,6 +42,13 @@ abstract final class DatabaseProvider {
           toVersion: newVersion,
         );
       },
+      onDowngrade: (_, oldVersion, newVersion) async {
+        throw StateError(
+          'Refusing database downgrade from schema $oldVersion to '
+          '$newVersion. Upgrade to a compatible app or restore a verified '
+          'backup to preserve encrypted inbound sync events.',
+        );
+      },
       onOpen: (db) async {
         // Safety net: ensure critical tables exist regardless of migration history.
         // This handles edge cases where a schema version bump was skipped.

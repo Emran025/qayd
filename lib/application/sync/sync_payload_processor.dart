@@ -252,18 +252,25 @@ class SyncPayloadProcessor {
     final appliedIds = <String>{};
 
     for (final node in nodes) {
+      var handlerStarted = false;
       try {
         final claim = await inboundEventJournal?.beginProcessing(
           nodeId: node.id,
           senderPublicKey: node.senderPublicKey?.trim().toLowerCase(),
           eventType: node.eventType.name,
           payloadFingerprint: _inboundEventFingerprint(node),
+          encryptedPayload: node.encryptedPayload,
         );
         if (claim == SyncInboundEventClaim.alreadyApplied) {
           appliedIds.add(node.id);
           continue;
         }
         if (claim != null && claim != SyncInboundEventClaim.claimed) {
+          if (claim == SyncInboundEventClaim.conflictingPayload) {
+            debugPrint(
+              'Sync: Conflicting encrypted payload for node ${node.id}; quarantined.',
+            );
+          }
           continue;
         }
 
@@ -320,6 +327,7 @@ class SyncPayloadProcessor {
         final senderEmail = party.email ?? '';
 
         // Process Domain Actions Structurally with Signatures
+        handlerStarted = true;
         switch (node.eventType) {
           case SyncEventType.claim:
             await _inboundVoucherClaim(
@@ -445,9 +453,20 @@ class SyncPayloadProcessor {
         appliedIds.add(node.id);
       } catch (_) {
         try {
-          await inboundEventJournal?.returnToPending(node.id);
+          if (handlerStarted) {
+            await _quarantine(
+              node,
+              SyncInboundQuarantineReason.handlerFailed,
+            );
+          } else {
+            await inboundEventJournal?.returnToPending(node.id);
+          }
         } catch (_) {}
-        debugPrint('Sync: Event processing failed; no acknowledgement was sent.');
+        debugPrint(
+          handlerStarted
+              ? 'Sync: Handler failed; event quarantined without acknowledgement.'
+              : 'Sync: Event processing failed; no acknowledgement was sent.',
+        );
       }
     }
     return appliedIds;

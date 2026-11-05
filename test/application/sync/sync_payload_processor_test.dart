@@ -546,6 +546,122 @@ void main() {
       verifyNoMoreInteractions(mockLedgerRepo);
     });
 
+    test(
+      'quarantines an inserted invoice when journal acknowledgement fails',
+      () async {
+        final snapshot = PosCreditInvoiceChatSnapshot.fromJson(
+          _creditInvoiceSnapshotJson(),
+        );
+        final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(
+          snapshot.invoiceId,
+        );
+        final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
+          invoiceNodeId: nodeId,
+          snapshot: snapshot,
+          pdfBytes: _testPosCreditInvoicePdf,
+        );
+        final node = SyncNode(
+          id: nodeId,
+          senderId: 101,
+          receiverId: 202,
+          eventType: SyncEventType.posCreditInvoice,
+          encryptedPayload: 'authenticated-envelope',
+          syncState: 'pending',
+          clientTimestamp: DateTime.utc(2026, 11, 3, 10),
+          senderPublicKey: 'sender-public',
+        );
+        final journal = MockSyncInboundEventJournalRepository();
+        final journaledProcessor = SyncPayloadProcessor(
+          identityRepository: mockIdentityRepo,
+          voucherRepository: mockVoucherRepo,
+          ledgerRepository: mockLedgerRepo,
+          accountRepository: mockAccountRepo,
+          currencyRepository: MockCurrencyRepository(),
+          notificationMessageRepository: mockNotificationRepo,
+          notificationFilterService: mockFilterRepo,
+          e2eeService: mockE2ee,
+          signingService: MockReceiptSigningService(),
+          getCurrentUserKeyPair: () async => CryptoKeyPair.fromHex(
+            publicKeyHex:
+                '0000000000000000000000000000000000000000000000000000000000000000',
+            privateKeyHex:
+                '0000000000000000000000000000000000000000000000000000000000000000',
+          ),
+          attachmentRepository: MockAttachmentRepository(),
+          collateralRepository: MockCollateralRepository(),
+          voucherKeyService: MockVoucherKeyService(),
+          inboundEventJournal: journal,
+        );
+
+        when(
+          () => journal.beginProcessing(
+            nodeId: nodeId,
+            senderPublicKey: any(named: 'senderPublicKey'),
+            eventType: any(named: 'eventType'),
+            payloadFingerprint: any(named: 'payloadFingerprint'),
+            encryptedPayload: node.encryptedPayload,
+          ),
+        ).thenAnswer((_) async => SyncInboundEventClaim.claimed);
+        when(
+          () => mockE2ee.decryptPayload(
+            encryptedPayload: any(named: 'encryptedPayload'),
+            receiverKeyPair: any(named: 'receiverKeyPair'),
+            senderPublicKeyHex: any(named: 'senderPublicKeyHex'),
+            nodeId: nodeId,
+            eventType: any(named: 'eventType'),
+          ),
+        ).thenAnswer((_) async => eventPayload);
+        when(
+          () => mockNotificationRepo.findById(nodeId),
+        ).thenAnswer((_) async => null);
+        when(
+          () => mockNotificationRepo.insert(
+            id: nodeId,
+            bodyText: any(named: 'bodyText'),
+            channel: PosCreditInvoiceChatProtocol.incomingChannel,
+            counterpartyAccountId: localSenderAccountUuid,
+            createdAtIso: any(named: 'createdAtIso'),
+            rawPayloadJson: any(named: 'rawPayloadJson'),
+          ),
+        ).thenAnswer((_) async => const Success(null));
+        when(
+          () => journal.markApplied(nodeId),
+        ).thenAnswer((_) async {
+          throw StateError('simulated journal commit failure');
+        });
+        when(
+          () => journal.quarantine(
+            nodeId: nodeId,
+            reason: SyncInboundQuarantineReason.handlerFailed,
+            encryptedPayload: node.encryptedPayload,
+          ),
+        ).thenAnswer((_) async {});
+
+        final applied = await journaledProcessor.processIncomingNodes([node]);
+
+        expect(applied, isEmpty);
+        verify(
+          () => mockNotificationRepo.insert(
+            id: nodeId,
+            bodyText: any(named: 'bodyText'),
+            channel: PosCreditInvoiceChatProtocol.incomingChannel,
+            counterpartyAccountId: localSenderAccountUuid,
+            createdAtIso: any(named: 'createdAtIso'),
+            rawPayloadJson: any(named: 'rawPayloadJson'),
+          ),
+        ).called(1);
+        verify(() => journal.markApplied(nodeId)).called(1);
+        verify(
+          () => journal.quarantine(
+            nodeId: nodeId,
+            reason: SyncInboundQuarantineReason.handlerFailed,
+            encryptedPayload: node.encryptedPayload,
+          ),
+        ).called(1);
+        verifyNever(() => journal.returnToPending(nodeId));
+      },
+    );
+
     test('applies acknowledgment by updating chat metadata only', () async {
       final snapshot = PosCreditInvoiceChatSnapshot.fromJson(
         _creditInvoiceSnapshotJson(),
@@ -692,6 +808,7 @@ void main() {
           senderPublicKey: any(named: 'senderPublicKey'),
           eventType: any(named: 'eventType'),
           payloadFingerprint: any(named: 'payloadFingerprint'),
+          encryptedPayload: any(named: 'encryptedPayload'),
         ),
       ).thenAnswer((_) async => SyncInboundEventClaim.claimed);
       when(
@@ -734,6 +851,7 @@ void main() {
         ).called(1);
       }
       verifyNever(() => journal.markApplied(any()));
+      verifyNever(() => journal.returnToPending(any()));
     });
   });
 }

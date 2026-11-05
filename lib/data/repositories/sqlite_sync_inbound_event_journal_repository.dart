@@ -1,7 +1,7 @@
 import 'package:qayd/domain/repositories/sync_inbound_event_journal_repository.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
-/// SQLCipher-backed journal for replay-safe inbound sync processing.
+/// SQLCipher-backed journal for fail-closed inbound sync processing.
 final class SqliteSyncInboundEventJournalRepository
     implements SyncInboundEventJournalRepository {
   const SqliteSyncInboundEventJournalRepository(this._db);
@@ -16,6 +16,7 @@ final class SqliteSyncInboundEventJournalRepository
     required String? senderPublicKey,
     required String eventType,
     required String payloadFingerprint,
+    required String encryptedPayload,
   }) async {
     final now = DateTime.now().toUtc();
     final nowIso = now.toIso8601String();
@@ -32,6 +33,7 @@ final class SqliteSyncInboundEventJournalRepository
           'sender_public_key': senderPublicKey,
           'event_type': eventType,
           'payload_fingerprint': payloadFingerprint,
+          'encrypted_payload': encryptedPayload,
           'state': 'processing',
           'created_at': nowIso,
           'updated_at': nowIso,
@@ -41,6 +43,27 @@ final class SqliteSyncInboundEventJournalRepository
 
       final row = rows.single;
       if (row['payload_fingerprint'] != payloadFingerprint) {
+        await txn.rawUpdate(
+          '''
+          UPDATE $_table
+          SET state = ?, reason_code = ?,
+              conflicting_payload_fingerprint =
+                COALESCE(conflicting_payload_fingerprint, ?),
+              conflicting_encrypted_payload =
+                COALESCE(conflicting_encrypted_payload, ?),
+              conflict_count = conflict_count + 1,
+              updated_at = ?
+          WHERE node_id = ?
+          ''',
+          [
+            'quarantined',
+            SyncInboundQuarantineReason.conflictingPayload.name,
+            payloadFingerprint,
+            encryptedPayload,
+            nowIso,
+            nodeId,
+          ],
+        );
         return SyncInboundEventClaim.conflictingPayload;
       }
 
@@ -57,13 +80,21 @@ final class SqliteSyncInboundEventJournalRepository
               now.difference(lastUpdated) <= _processingLease) {
             return SyncInboundEventClaim.inProgress;
           }
+          // A stale processing row has an ambiguous outcome: the app could
+          // have stopped after committing business writes but before marking
+          // this event applied. Never re-run that handler automatically.
           await txn.update(
             _table,
-            {'state': 'processing', 'reason_code': null, 'updated_at': nowIso},
+            {
+              'state': 'quarantined',
+              'reason_code':
+                  SyncInboundQuarantineReason.processingInterrupted.name,
+              'updated_at': nowIso,
+            },
             where: 'node_id = ? AND state = ?',
             whereArgs: [nodeId, 'processing'],
           );
-          return SyncInboundEventClaim.claimed;
+          return SyncInboundEventClaim.quarantined;
         case 'pending':
           await txn.update(
             _table,
@@ -168,6 +199,11 @@ final class SqliteSyncInboundEventJournalRepository
       encryptedPayload: encryptedPayload,
       reason: reason,
       createdAt: DateTime.parse(row['created_at'] as String).toUtc(),
+      conflictingPayloadFingerprint:
+          row['conflicting_payload_fingerprint'] as String?,
+      conflictingEncryptedPayload:
+          row['conflicting_encrypted_payload'] as String?,
+      conflictCount: row['conflict_count'] as int? ?? 0,
     );
   }
 }

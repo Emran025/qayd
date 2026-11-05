@@ -29,17 +29,31 @@ void main() {
         ['sync_inbound_event_journal'],
       );
       expect(tables, hasLength(1));
+      final columns = await db.rawQuery(
+        'PRAGMA table_info(sync_inbound_event_journal)',
+      );
+      expect(
+        columns.map((row) => row['name']),
+        containsAll(<String>[
+          'encrypted_payload',
+          'conflicting_payload_fingerprint',
+          'conflicting_encrypted_payload',
+          'conflict_count',
+        ]),
+      );
     },
   );
 
   test(
     'claims an event once and treats an exact applied replay idempotently',
     () async {
+      const ciphertext = '{"ciphertext":"opaque-event-1"}';
       final firstClaim = await journal.beginProcessing(
         nodeId: 'event-1',
         senderPublicKey: _testKey('a'),
         eventType: 'posSale',
         payloadFingerprint: 'fingerprint-a',
+        encryptedPayload: ciphertext,
       );
       expect(firstClaim, SyncInboundEventClaim.claimed);
 
@@ -48,6 +62,7 @@ void main() {
         senderPublicKey: _testKey('a'),
         eventType: 'posSale',
         payloadFingerprint: 'fingerprint-a',
+        encryptedPayload: ciphertext,
       );
       expect(concurrentClaim, SyncInboundEventClaim.inProgress);
 
@@ -57,19 +72,23 @@ void main() {
         senderPublicKey: _testKey('a'),
         eventType: 'posSale',
         payloadFingerprint: 'fingerprint-a',
+        encryptedPayload: ciphertext,
       );
       expect(replayClaim, SyncInboundEventClaim.alreadyApplied);
     },
   );
 
   test(
-    'rejects a changed payload under the same event ID without applying it',
+    'quarantines and retains both envelopes when an event ID conflicts',
     () async {
+      const originalCiphertext = '{"ciphertext":"original"}';
+      const conflictingCiphertext = '{"ciphertext":"changed"}';
       final firstClaim = await journal.beginProcessing(
         nodeId: 'event-collision',
         senderPublicKey: _testKey('b'),
         eventType: 'posSale',
         payloadFingerprint: 'original-fingerprint',
+        encryptedPayload: originalCiphertext,
       );
       expect(firstClaim, SyncInboundEventClaim.claimed);
 
@@ -78,17 +97,35 @@ void main() {
         senderPublicKey: _testKey('b'),
         eventType: 'posSale',
         payloadFingerprint: 'changed-fingerprint',
+        encryptedPayload: conflictingCiphertext,
       );
       expect(collision, SyncInboundEventClaim.conflictingPayload);
 
-      await journal.markApplied('event-collision');
+      final quarantined = await journal.listQuarantined();
+      expect(quarantined, hasLength(1));
+      expect(
+        quarantined.single.reason,
+        SyncInboundQuarantineReason.conflictingPayload,
+      );
+      expect(quarantined.single.encryptedPayload, originalCiphertext);
+      expect(
+        quarantined.single.conflictingPayloadFingerprint,
+        'changed-fingerprint',
+      );
+      expect(
+        quarantined.single.conflictingEncryptedPayload,
+        conflictingCiphertext,
+      );
+      expect(quarantined.single.conflictCount, 1);
+
       final originalReplay = await journal.beginProcessing(
         nodeId: 'event-collision',
         senderPublicKey: _testKey('b'),
         eventType: 'posSale',
         payloadFingerprint: 'original-fingerprint',
+        encryptedPayload: originalCiphertext,
       );
-      expect(originalReplay, SyncInboundEventClaim.alreadyApplied);
+      expect(originalReplay, SyncInboundEventClaim.quarantined);
     },
   );
 
@@ -101,6 +138,7 @@ void main() {
         senderPublicKey: _testKey('c'),
         eventType: 'unsupportedFutureEvent',
         payloadFingerprint: 'opaque-fingerprint',
+        encryptedPayload: ciphertext,
       );
       expect(claim, SyncInboundEventClaim.claimed);
 
@@ -128,28 +166,76 @@ void main() {
         senderPublicKey: _testKey('c'),
         eventType: 'unsupportedFutureEvent',
         payloadFingerprint: 'opaque-fingerprint',
+        encryptedPayload: ciphertext,
       );
       expect(replay, SyncInboundEventClaim.quarantined);
     },
   );
 
   test(
-    'returns a failed event to pending so a later attempt can retry',
+    'quarantines an expired in-flight event instead of replaying its handler',
     () async {
+      const ciphertext = '{"ciphertext":"may-have-been-applied"}';
       final firstClaim = await journal.beginProcessing(
-        nodeId: 'retryable-event',
+        nodeId: 'interrupted-event',
         senderPublicKey: _testKey('d'),
         eventType: 'journalEntry',
+        payloadFingerprint: 'interrupted-fingerprint',
+        encryptedPayload: ciphertext,
+      );
+      expect(firstClaim, SyncInboundEventClaim.claimed);
+
+      await db.update(
+        'sync_inbound_event_journal',
+        {
+          'updated_at': DateTime.now()
+              .toUtc()
+              .subtract(const Duration(hours: 1))
+              .toIso8601String(),
+        },
+        where: 'node_id = ?',
+        whereArgs: ['interrupted-event'],
+      );
+
+      final retryClaim = await journal.beginProcessing(
+        nodeId: 'interrupted-event',
+        senderPublicKey: _testKey('d'),
+        eventType: 'journalEntry',
+        payloadFingerprint: 'interrupted-fingerprint',
+        encryptedPayload: ciphertext,
+      );
+      expect(retryClaim, SyncInboundEventClaim.quarantined);
+
+      final quarantined = await journal.listQuarantined();
+      expect(quarantined, hasLength(1));
+      expect(
+        quarantined.single.reason,
+        SyncInboundQuarantineReason.processingInterrupted,
+      );
+      expect(quarantined.single.encryptedPayload, ciphertext);
+    },
+  );
+
+  test(
+    'returns a failure known to precede domain handling to pending',
+    () async {
+      const ciphertext = '{"ciphertext":"retryable"}';
+      final firstClaim = await journal.beginProcessing(
+        nodeId: 'retryable-event',
+        senderPublicKey: _testKey('e'),
+        eventType: 'journalEntry',
         payloadFingerprint: 'retry-fingerprint',
+        encryptedPayload: ciphertext,
       );
       expect(firstClaim, SyncInboundEventClaim.claimed);
 
       await journal.returnToPending('retryable-event');
       final retryClaim = await journal.beginProcessing(
         nodeId: 'retryable-event',
-        senderPublicKey: _testKey('d'),
+        senderPublicKey: _testKey('e'),
         eventType: 'journalEntry',
         payloadFingerprint: 'retry-fingerprint',
+        encryptedPayload: ciphertext,
       );
       expect(retryClaim, SyncInboundEventClaim.claimed);
     },

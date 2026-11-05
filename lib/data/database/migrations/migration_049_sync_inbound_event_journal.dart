@@ -19,7 +19,10 @@ final class Migration049SyncInboundEventJournal implements SchemaMigration {
         sender_public_key TEXT,
         event_type TEXT NOT NULL,
         payload_fingerprint TEXT NOT NULL,
-        encrypted_payload TEXT,
+        encrypted_payload TEXT NOT NULL,
+        conflicting_payload_fingerprint TEXT,
+        conflicting_encrypted_payload TEXT,
+        conflict_count INTEGER NOT NULL DEFAULT 0,
         state TEXT NOT NULL CHECK (
           state IN ('processing', 'pending', 'applied', 'quarantined')
         ),
