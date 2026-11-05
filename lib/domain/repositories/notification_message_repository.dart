@@ -44,4 +44,13 @@ abstract class NotificationMessageRepository {
     required String bodyText,
     required String rawPayloadJson,
   });
+
+  /// Updates the record only if [expectedRawPayloadJson] is still current.
+  /// Returns `false` when another writer changed the protocol state first.
+  Future<Result<bool>> updateBodyAndPayloadIfUnchanged({
+    required String id,
+    required String expectedRawPayloadJson,
+    required String bodyText,
+    required String rawPayloadJson,
+  });
 }

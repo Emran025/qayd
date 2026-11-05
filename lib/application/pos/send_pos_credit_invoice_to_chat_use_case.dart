@@ -1,10 +1,13 @@
 import 'dart:convert';
 
+import 'package:qayd/application/governance/audit_log_service.dart';
 import 'package:qayd/application/pos/build_pos_invoice_pdf_use_case.dart';
+import 'package:qayd/application/pos/pos_credit_invoice_audit.dart';
 import 'package:qayd/application/pos/pos_credit_invoice_chat_protocol.dart';
 import 'package:qayd/application/sync/sync_event_dispatcher.dart';
 import 'package:qayd/core/error/failures.dart';
 import 'package:qayd/core/result/result.dart';
+import 'package:qayd/domain/entities/audit_entry.dart';
 import 'package:qayd/domain/entities/notification_message.dart';
 import 'package:qayd/domain/entities/pos_credit_invoice_chat_snapshot.dart';
 import 'package:qayd/domain/entities/pos_invoice.dart';
@@ -16,15 +19,18 @@ final class SendPosCreditInvoiceToChatUseCase {
     required NotificationMessageRepository notificationMessageRepository,
     required SyncEventDispatcher syncEventDispatcher,
     required BuildPosInvoicePdfUseCase pdfUseCase,
+    AuditLogService? auditLogService,
   }) : _notifications = notificationMessageRepository,
        _sync = syncEventDispatcher,
-       _pdfUseCase = pdfUseCase;
+       _pdfUseCase = pdfUseCase,
+       _auditLogService = auditLogService;
 
   final NotificationMessageRepository _notifications;
 
   final SyncEventDispatcher _sync;
 
   final BuildPosInvoicePdfUseCase _pdfUseCase;
+  final AuditLogService? _auditLogService;
 
   /// Shares only an already-posted sale that still has an amount due.
   /// A chat-delivery failure never rolls back or changes the POS sale.
@@ -46,7 +52,9 @@ final class SendPosCreditInvoiceToChatUseCase {
       );
     }
 
-    final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(invoice.id);
+    final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+      snapshot,
+    );
     final existing = await _notifications.findById(nodeId);
     if (existing != null) {
       if (existing.channel != PosCreditInvoiceChatProtocol.outgoingChannel ||
@@ -133,6 +141,22 @@ final class SendPosCreditInvoiceToChatUseCase {
       rawPayloadJson: jsonEncode(localPayload),
     );
     if (inserted.isFailure) return inserted;
+    await recordPosCreditInvoiceAudit(
+      auditLogService: _auditLogService,
+      action: AuditAction.create,
+      requestNodeId: nodeId,
+      eventId: nodeId,
+      invoiceId: snapshot.invoiceId,
+      partyAccountId: invoice.counterpartyAccountId!.value,
+      fingerprint: snapshot.fingerprint,
+      pdfSha256: PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+        eventPayload,
+        expectedInvoiceFingerprint: snapshot.fingerprint,
+      ),
+      event: 'request_created',
+      result: 'pending',
+      occurredAt: invoice.createdAt,
+    );
 
     final notification = NotificationMessage(
       id: nodeId,
@@ -193,6 +217,14 @@ final class SendPosCreditInvoiceToChatUseCase {
     required String nodeId,
     required Map<String, dynamic> eventPayload,
   }) async {
+    final snapshot = PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
+      eventPayload,
+      expectedNodeId: nodeId,
+    );
+    final pdfSha256 = PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+      eventPayload,
+      expectedInvoiceFingerprint: snapshot.fingerprint,
+    );
     final dispatched = await _sync.dispatchGenericEvent(
       counterpartyAccountId: notification.counterpartyAccountId,
       eventType: PosCreditInvoiceChatProtocol.invoiceEventType,
@@ -200,29 +232,56 @@ final class SendPosCreditInvoiceToChatUseCase {
       nodeId: nodeId,
     );
 
-    final latest =
-        await _notifications.findById(notification.id) ?? notification;
-    try {
-      final localPayload = PosCreditInvoiceChatProtocol.decodePayload(
-        latest.rawPayloadJson,
-      );
-      // Keep any acknowledgment that arrived while the send was being queued.
-      localPayload['delivery_status'] = dispatched.isSuccess
-          ? 'queued'
-          : 'failed';
-      final updated = await _notifications.updateBodyAndPayload(
-        id: notification.id,
-        bodyText: dispatched.isSuccess
-            ? AppStrings.posCreditInvoiceAwaiting
-            : AppStrings.posCreditInvoiceDeliveryFailed,
-        rawPayloadJson: jsonEncode(localPayload),
-      );
-      if (updated.isFailure) return updated;
-    } on FormatException {
-      return const FailureResult(
-        ValidationFailure(messageAr: 'تعذر حفظ حالة إرسال الفاتورة.'),
-      );
+    var latest = await _notifications.findById(notification.id) ?? notification;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final localPayload = PosCreditInvoiceChatProtocol.decodePayload(
+          latest.rawPayloadJson,
+        );
+        // Merge into the latest state and retry if an acknowledgment raced us.
+        localPayload['delivery_status'] = dispatched.isSuccess
+            ? 'queued'
+            : 'failed';
+        final updated = await _notifications.updateBodyAndPayloadIfUnchanged(
+          id: notification.id,
+          expectedRawPayloadJson: latest.rawPayloadJson!,
+          bodyText: dispatched.isSuccess
+              ? AppStrings.posCreditInvoiceAwaiting
+              : AppStrings.posCreditInvoiceDeliveryFailed,
+          rawPayloadJson: jsonEncode(localPayload),
+        );
+        if (updated.isFailure) {
+          return FailureResult(updated.failureOrNull!);
+        }
+        if (updated.valueOrNull == true) {
+          await recordPosCreditInvoiceAudit(
+            auditLogService: _auditLogService,
+            action: AuditAction.update,
+            requestNodeId: nodeId,
+            eventId: nodeId,
+            invoiceId: snapshot.invoiceId,
+            partyAccountId: notification.counterpartyAccountId,
+            fingerprint: snapshot.fingerprint,
+            pdfSha256: pdfSha256,
+            event: 'request_dispatch',
+            result: dispatched.isSuccess ? 'queued' : 'failed',
+          );
+          return dispatched;
+        }
+        final refreshed = await _notifications.findById(notification.id);
+        if (refreshed == null) break;
+        latest = refreshed;
+      } on FormatException {
+        return const FailureResult(
+          ValidationFailure(messageAr: 'تعذر حفظ حالة إرسال الفاتورة.'),
+        );
+      }
     }
-    return dispatched;
+    return const FailureResult(
+      ValidationFailure(
+        messageAr:
+            'تغيرت حالة الفاتورة بالتزامن؛ أعد المحاولة بعد تحديث المحادثة.',
+      ),
+    );
   }
 }

@@ -19,6 +19,9 @@ final class PosCreditInvoiceChatSnapshot {
   const PosCreditInvoiceChatSnapshot._({
     required this.invoiceId,
     required this.invoiceNumber,
+    required this.counterpartyAccountId,
+    required this.creditDueDate,
+    required this.creditTerms,
     required this.status,
     required this.currency,
     required this.subtotalMinorUnits,
@@ -37,13 +40,40 @@ final class PosCreditInvoiceChatSnapshot {
     required this.signature,
   });
 
-  static const schema = 'qayd_pos_credit_invoice_snapshot_v1';
+  static const schema = 'qayd_pos_credit_invoice_snapshot_v2';
   static const maxLines = 500;
   static const maxSerializedBytes = 240 * 1024;
   static const maxExactInteger = 9007199254740991;
+  static const _snapshotFields = <String>{
+    'schema',
+    'invoice_id',
+    'invoice_number',
+    'counterparty_account_id',
+    'credit_due_date',
+    'credit_terms',
+    'status',
+    'currency',
+    'subtotal_minor',
+    'discount_minor',
+    'cart_discount_minor',
+    'invoice_level_tax_minor',
+    'tax_minor',
+    'total_minor',
+    'paid_minor',
+    'due_minor',
+    'invoice_date',
+    'created_at',
+    'updated_at',
+    'posted_at',
+    'lines',
+    'signature',
+  };
 
   final String invoiceId;
   final String invoiceNumber;
+  final String counterpartyAccountId;
+  final DateTime? creditDueDate;
+  final String? creditTerms;
   final PosDocumentStatus status;
   final CurrencyCode currency;
   final int subtotalMinorUnits;
@@ -68,6 +98,12 @@ final class PosCreditInvoiceChatSnapshot {
             invoice.status != PosDocumentStatus.partiallyPaid) ||
         invoice.postedAt == null) {
       throw const FormatException('Only posted credit sales can be shared.');
+    }
+    final counterpartyAccountId = invoice.counterpartyAccountId?.value;
+    if (counterpartyAccountId == null ||
+        counterpartyAccountId.isEmpty ||
+        counterpartyAccountId.length > 128) {
+      throw const FormatException('A valid invoice counterparty is required.');
     }
     if (invoice.lines.length > maxLines ||
         invoice.id.length > 128 ||
@@ -94,6 +130,11 @@ final class PosCreditInvoiceChatSnapshot {
       'schema': schema,
       'invoice_id': invoice.id,
       'invoice_number': invoice.invoiceNumber,
+      'counterparty_account_id': counterpartyAccountId,
+      'credit_due_date': invoice.creditDueDate == null
+          ? null
+          : _dateOnlyJson(invoice.creditDueDate!),
+      'credit_terms': invoice.creditTerms,
       'status': invoice.status.name,
       'currency': <String, dynamic>{
         'code': invoice.currency.code,
@@ -142,7 +183,9 @@ final class PosCreditInvoiceChatSnapshot {
   }
 
   factory PosCreditInvoiceChatSnapshot.fromJson(Map<String, dynamic> json) {
-    if (json['schema'] != schema) {
+    if (json['schema'] != schema ||
+        json.length != _snapshotFields.length ||
+        json.keys.any((key) => !_snapshotFields.contains(key))) {
       throw const FormatException('Unsupported POS credit invoice snapshot.');
     }
     if (utf8.encode(jsonEncode(json)).length > maxSerializedBytes) {
@@ -154,6 +197,22 @@ final class PosCreditInvoiceChatSnapshot {
       'invoice_number',
       max: 128,
     );
+    final counterpartyAccountId = _readString(
+      json['counterparty_account_id'],
+      'counterparty_account_id',
+      max: 128,
+    );
+    final creditDueDateValue = json['credit_due_date'];
+    final creditDueDate = creditDueDateValue == null
+        ? null
+        : _readDateOnly(creditDueDateValue, 'credit_due_date');
+    final creditTermsValue = json['credit_terms'];
+    final creditTerms = creditTermsValue == null
+        ? null
+        : _readString(creditTermsValue, 'credit_terms', max: 240);
+    if (creditTerms != null && creditTerms != creditTerms.trim()) {
+      throw const FormatException('Invalid credit terms.');
+    }
     final statusName = _readString(json['status'], 'status', max: 32);
     final status = PosDocumentStatus.values.firstWhere(
       (value) => value.name == statusName,
@@ -330,6 +389,9 @@ final class PosCreditInvoiceChatSnapshot {
     return PosCreditInvoiceChatSnapshot._(
       invoiceId: invoiceId,
       invoiceNumber: invoiceNumber,
+      counterpartyAccountId: counterpartyAccountId,
+      creditDueDate: creditDueDate,
+      creditTerms: creditTerms,
       status: status,
       currency: currency,
       subtotalMinorUnits: subtotal,
@@ -353,6 +415,11 @@ final class PosCreditInvoiceChatSnapshot {
     'schema': schema,
     'invoice_id': invoiceId,
     'invoice_number': invoiceNumber,
+    'counterparty_account_id': counterpartyAccountId,
+    'credit_due_date': creditDueDate == null
+        ? null
+        : _dateOnlyJson(creditDueDate!),
+    'credit_terms': creditTerms,
     'status': status.name,
     'currency': <String, dynamic>{
       'code': currency.code,
@@ -426,6 +493,8 @@ final class PosCreditInvoiceChatSnapshot {
       total: Money.fromMinorUnits(totalMinorUnits, currency),
       paid: Money.fromMinorUnits(paidMinorUnits, currency),
       due: Money.fromMinorUnits(dueMinorUnits, currency),
+      creditDueDate: creditDueDate,
+      creditTerms: creditTerms,
       idempotencyKey: 'shared:$invoiceId',
       invoiceDate: invoiceDate,
       createdAt: createdAt,
@@ -508,6 +577,22 @@ DateTime _readDate(Object? value, String field) {
   if (parsed == null) throw FormatException('Invalid $field.');
   return parsed.toUtc();
 }
+
+DateTime _readDateOnly(Object? value, String field) {
+  if (value is! String || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) {
+    throw FormatException('Invalid $field.');
+  }
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null || _dateOnlyJson(parsed) != value) {
+    throw FormatException('Invalid $field.');
+  }
+  return DateTime.utc(parsed.year, parsed.month, parsed.day);
+}
+
+String _dateOnlyJson(DateTime value) =>
+    '${value.toUtc().year.toString().padLeft(4, '0')}-'
+    '${value.toUtc().month.toString().padLeft(2, '0')}-'
+    '${value.toUtc().day.toString().padLeft(2, '0')}';
 
 String _readHex(Object? value, String field, int length) {
   if (value is! String ||

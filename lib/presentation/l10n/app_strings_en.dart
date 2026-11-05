@@ -5418,6 +5418,15 @@ class AppStringsEn extends AppStringsBase {
   @override
   String get posCreditInvoiceChatTitle => 'Credit invoice';
   @override
+  String get posCreditInvoiceDueDate => 'Credit due date';
+  @override
+  String get posCreditInvoiceTerms => 'Credit terms';
+  @override
+  String get posCreditInvoiceTermsOptionalHelp =>
+      'Optional; if left blank, the other party will see that terms are unspecified.';
+  @override
+  String get posCreditInvoiceUnspecified => 'Unspecified';
+  @override
   String get posCreditInvoiceAwaiting => 'Awaiting customer acknowledgment';
   @override
   String get posCreditInvoiceAccepted => 'Customer accepted the invoice';

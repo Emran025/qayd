@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:qayd/application/pos/build_pos_invoice_pdf_use_case.dart';
@@ -49,6 +50,7 @@ class _FixedPdfGenerator implements PosInvoicePdfGenerator {
 final _testPdfBytes = Uint8List.fromList(
   utf8.encode('%PDF-1.4\n% test credit invoice\n%%EOF\n'),
 );
+final _testPdfSha256 = crypto.sha256.convert(_testPdfBytes).toString();
 
 final _testIdentityService = const Ed25519IdentityService();
 final _testKeyPair = _testIdentityService.deriveKeyPair(
@@ -71,6 +73,7 @@ DigitalSignature _signAcknowledgment({
     invoiceNodeId: invoiceNodeId,
     invoiceId: invoiceId,
     fingerprint: fingerprint,
+    pdfSha256: _testPdfSha256,
     status: status,
     respondedAt: respondedAt.toUtc().toIso8601String(),
     signerPublicKeyHex: signer.publicKeyHex,
@@ -82,6 +85,9 @@ Map<String, dynamic> _snapshotJson() => <String, dynamic>{
   'schema': PosCreditInvoiceChatSnapshot.schema,
   'invoice_id': 'pos-invoice-001',
   'invoice_number': 'POS-001',
+  'counterparty_account_id': 'customer-account',
+  'credit_due_date': '2026-12-03',
+  'credit_terms': 'Net 30 days',
   'status': 'posted',
   'currency': <String, dynamic>{
     'code': 'YER',
@@ -136,6 +142,8 @@ PosInvoice _postedInvoice({
   PosInvoiceType type = PosInvoiceType.sale,
   int paidMinor = 0,
   int dueMinor = 2500,
+  DateTime? creditDueDate,
+  String? creditTerms,
 }) {
   final currency = CurrencyCode(
     code: 'YER',
@@ -175,6 +183,8 @@ PosInvoice _postedInvoice({
     total: Money.fromMinorUnits(2500, currency),
     paid: Money.fromMinorUnits(paidMinor, currency),
     due: Money.fromMinorUnits(dueMinor, currency),
+    creditDueDate: creditDueDate,
+    creditTerms: creditTerms,
     idempotencyKey: 'sale-idempotency-1',
     invoiceDate: now,
     createdAt: now,
@@ -192,11 +202,47 @@ void main() {
 
       expect(snapshot.fingerprint, isNotEmpty);
       expect(snapshot.dueMinorUnits, 2500);
+      expect(snapshot.counterpartyAccountId, 'customer-account');
+      expect(snapshot.creditDueDate, DateTime.utc(2026, 12, 3));
+      expect(snapshot.creditTerms, 'Net 30 days');
       expect(snapshot.lines.single.productName, 'منتج تجريبي');
       expect(pdfInvoice.due.minorUnits, 2500);
       expect(pdfInvoice.counterpartyAccountId, isNull);
+      expect(pdfInvoice.creditDueDate, DateTime.utc(2026, 12, 3));
+      expect(pdfInvoice.creditTerms, 'Net 30 days');
       expect(pdfInvoice.idempotencyKey, 'shared:pos-invoice-001');
       expect(pdfInvoice.signature, isNull);
+    });
+
+    test('fingerprint binds the counterparty and explicit credit terms', () {
+      final original = PosCreditInvoiceChatSnapshot.fromJson(_snapshotJson());
+      final changedParty = _snapshotJson()
+        ..['counterparty_account_id'] = 'different-customer';
+      final changedDate = _snapshotJson()..['credit_due_date'] = '2026-12-04';
+      final changedTerms = _snapshotJson()..['credit_terms'] = 'Net 45 days';
+
+      expect(
+        PosCreditInvoiceChatSnapshot.fromJson(changedParty).fingerprint,
+        isNot(original.fingerprint),
+      );
+      expect(
+        PosCreditInvoiceChatSnapshot.fromJson(changedDate).fingerprint,
+        isNot(original.fingerprint),
+      );
+      expect(
+        PosCreditInvoiceChatSnapshot.fromJson(changedTerms).fingerprint,
+        isNot(original.fingerprint),
+      );
+
+      final invoiceSnapshot = PosCreditInvoiceChatSnapshot.fromInvoice(
+        _postedInvoice(
+          creditDueDate: DateTime.utc(2026, 12, 3),
+          creditTerms: 'Net 30 days',
+        ),
+      );
+      expect(invoiceSnapshot.counterpartyAccountId, 'customer-account');
+      expect(invoiceSnapshot.creditDueDate, DateTime.utc(2026, 12, 3));
+      expect(invoiceSnapshot.creditTerms, 'Net 30 days');
     });
 
     test(
@@ -274,11 +320,24 @@ void main() {
     });
 
     test(
-      'binds event snapshot and fingerprint to the deterministic node id',
+      'binds each immutable snapshot version to its deterministic node id',
       () {
         final snapshot = PosCreditInvoiceChatSnapshot.fromJson(_snapshotJson());
-        final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(
-          snapshot.invoiceId,
+        final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+          snapshot,
+        );
+        final changedSnapshot = PosCreditInvoiceChatSnapshot.fromJson(
+          _snapshotJson()..['credit_terms'] = 'Net 45 days',
+        );
+        expect(
+          PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(snapshot),
+          nodeId,
+        );
+        expect(
+          PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+            changedSnapshot,
+          ),
+          isNot(nodeId),
         );
         final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
           invoiceNodeId: nodeId,
@@ -300,6 +359,13 @@ void main() {
           ),
           orderedEquals(_testPdfBytes),
         );
+        expect(
+          PosCreditInvoiceChatProtocol.pdfSha256FromEventPayload(
+            eventPayload,
+            expectedInvoiceFingerprint: snapshot.fingerprint,
+          ),
+          _testPdfSha256,
+        );
         final tampered = Map<String, dynamic>.from(eventPayload);
         tampered['pdf_attachment'] = Map<String, dynamic>.from(
           eventPayload['pdf_attachment'] as Map,
@@ -307,6 +373,18 @@ void main() {
         expect(
           () => PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
             tampered,
+            expectedNodeId: nodeId,
+          ),
+          throwsFormatException,
+        );
+        final changedTerms = Map<String, dynamic>.from(eventPayload)
+          ..['invoice_snapshot'] = Map<String, dynamic>.from(
+            eventPayload['invoice_snapshot'] as Map,
+          )
+          ..['credit_terms'] = 'Net 45 days';
+        expect(
+          () => PosCreditInvoiceChatProtocol.snapshotFromEventPayload(
+            changedTerms,
             expectedNodeId: nodeId,
           ),
           throwsFormatException,
@@ -340,14 +418,17 @@ void main() {
 
     test('caps acknowledgment event payloads at one kibibyte', () {
       final invoiceId = 'pos-invoice-001';
+      final fingerprint = List<String>.filled(64, 'a').join();
       final invoiceNodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(
         invoiceId,
+        fingerprint: fingerprint,
       );
       final acknowledgment =
           PosCreditInvoiceChatProtocol.acknowledgementEventPayload(
             invoiceNodeId: invoiceNodeId,
             invoiceId: invoiceId,
             fingerprint: List<String>.filled(64, 'a').join(),
+            pdfSha256: _testPdfSha256,
             status: 'accepted',
             respondedAt: DateTime.utc(2026, 11, 3),
             signature: _signAcknowledgment(
@@ -369,6 +450,7 @@ void main() {
       final oversizedInvoiceId = List<String>.filled(2048, 'I').join();
       final oversizedNodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(
         oversizedInvoiceId,
+        fingerprint: fingerprint,
       );
       final oversizedAcknowledgment = Map<String, dynamic>.from(acknowledgment)
         ..['invoice_id'] = oversizedInvoiceId
@@ -385,6 +467,7 @@ void main() {
           invoiceNodeId: oversizedNodeId,
           invoiceId: oversizedInvoiceId,
           fingerprint: List<String>.filled(64, 'a').join(),
+          pdfSha256: _testPdfSha256,
           status: 'accepted',
           respondedAt: DateTime.utc(2026, 11, 3),
           signature: _signAcknowledgment(
@@ -401,14 +484,17 @@ void main() {
 
     test('binds signature to invoice, decision, time and signer key', () {
       final invoiceId = 'pos-invoice-bound';
+      final fingerprint = List<String>.filled(64, 'b').join();
       final invoiceNodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(
         invoiceId,
+        fingerprint: fingerprint,
       );
       final respondedAt = DateTime.utc(2026, 11, 3, 12, 30);
       final payload = PosCreditInvoiceChatProtocol.acknowledgementEventPayload(
         invoiceNodeId: invoiceNodeId,
         invoiceId: invoiceId,
         fingerprint: List<String>.filled(64, 'b').join(),
+        pdfSha256: _testPdfSha256,
         status: 'rejected',
         respondedAt: respondedAt,
         signature: _signAcknowledgment(
@@ -469,7 +555,9 @@ void main() {
       'sends a deterministic encrypted event for a posted credit sale',
       () async {
         final invoice = _postedInvoice();
-        final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(invoice.id);
+        final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+          PosCreditInvoiceChatSnapshot.fromInvoice(invoice),
+        );
         when(
           () => notifications.findById(nodeId),
         ).thenAnswer((_) async => null);
@@ -484,12 +572,13 @@ void main() {
           ),
         ).thenAnswer((_) async => const Success(null));
         when(
-          () => notifications.updateBodyAndPayload(
+          () => notifications.updateBodyAndPayloadIfUnchanged(
             id: nodeId,
+            expectedRawPayloadJson: any(named: 'expectedRawPayloadJson'),
             bodyText: any(named: 'bodyText'),
             rawPayloadJson: any(named: 'rawPayloadJson'),
           ),
-        ).thenAnswer((_) async => const Success(null));
+        ).thenAnswer((_) async => const Success(true));
         when(
           () => sync.dispatchGenericEvent(
             counterpartyAccountId: 'customer-account',
@@ -553,7 +642,9 @@ void main() {
 
     test('keeps the posted invoice unchanged if chat delivery fails', () async {
       final invoice = _postedInvoice();
-      final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(invoice.id);
+      final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+        PosCreditInvoiceChatSnapshot.fromInvoice(invoice),
+      );
       when(() => notifications.findById(nodeId)).thenAnswer((_) async => null);
       when(
         () => notifications.insert(
@@ -566,12 +657,13 @@ void main() {
         ),
       ).thenAnswer((_) async => const Success(null));
       when(
-        () => notifications.updateBodyAndPayload(
+        () => notifications.updateBodyAndPayloadIfUnchanged(
           id: nodeId,
+          expectedRawPayloadJson: any(named: 'expectedRawPayloadJson'),
           bodyText: any(named: 'bodyText'),
           rawPayloadJson: any(named: 'rawPayloadJson'),
         ),
-      ).thenAnswer((_) async => const Success(null));
+      ).thenAnswer((_) async => const Success(true));
       when(
         () => sync.dispatchGenericEvent(
           counterpartyAccountId: 'customer-account',
@@ -594,7 +686,9 @@ void main() {
       'fails closed when the generated PDF exceeds the inline limit',
       () async {
         final invoice = _postedInvoice();
-        final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(invoice.id);
+        final nodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+          PosCreditInvoiceChatSnapshot.fromInvoice(invoice),
+        );
         when(
           () => notifications.findById(nodeId),
         ).thenAnswer((_) async => null);
@@ -651,8 +745,8 @@ void main() {
       );
 
       final snapshot = PosCreditInvoiceChatSnapshot.fromJson(_snapshotJson());
-      invoiceNodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(
-        snapshot.invoiceId,
+      invoiceNodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+        snapshot,
       );
       final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
         invoiceNodeId: invoiceNodeId,
@@ -675,8 +769,9 @@ void main() {
         () => notifications.findById(invoiceNodeId),
       ).thenAnswer((_) async => storedMessage);
       when(
-        () => notifications.updateBodyAndPayload(
+        () => notifications.updateBodyAndPayloadIfUnchanged(
           id: invoiceNodeId,
+          expectedRawPayloadJson: any(named: 'expectedRawPayloadJson'),
           bodyText: any(named: 'bodyText'),
           rawPayloadJson: any(named: 'rawPayloadJson'),
         ),
@@ -691,7 +786,7 @@ void main() {
           bodyText: bodyText,
           rawPayloadJson: rawPayloadJson,
         );
-        return const Success(null);
+        return const Success(true);
       });
       when(
         () => sync.dispatchGenericEvent(
@@ -850,6 +945,35 @@ void main() {
         ),
       ).called(1);
     });
+
+    test(
+      'does not dispatch when the durable decision compare-and-set loses',
+      () async {
+        when(
+          () => notifications.updateBodyAndPayloadIfUnchanged(
+            id: invoiceNodeId,
+            expectedRawPayloadJson: any(named: 'expectedRawPayloadJson'),
+            bodyText: any(named: 'bodyText'),
+            rawPayloadJson: any(named: 'rawPayloadJson'),
+          ),
+        ).thenAnswer((_) async => const Success(false));
+
+        final result = await useCase.call(
+          notificationId: invoiceNodeId,
+          accepted: true,
+        );
+
+        expect(result.isFailure, isTrue);
+        verifyNever(
+          () => sync.dispatchGenericEvent(
+            counterpartyAccountId: 'seller-account',
+            eventType: PosCreditInvoiceChatProtocol.acknowledgementEventType,
+            payload: any(named: 'payload'),
+            nodeId: any(named: 'nodeId'),
+          ),
+        );
+      },
+    );
 
     test('does not dispatch a response for an untrusted payload', () async {
       storedMessage = _message(

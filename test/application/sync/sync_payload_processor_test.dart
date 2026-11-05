@@ -1,12 +1,18 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:mocktail/mocktail.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qayd/application/sync/sync_payload_processor.dart';
+import 'package:qayd/application/sync/sync_event_dispatcher.dart';
 import 'package:qayd/application/pos/pos_credit_invoice_chat_protocol.dart';
 import 'package:qayd/core/result/result.dart';
 import 'package:qayd/data/security/ed25519_identity_service.dart';
+import 'package:qayd/data/security/e2ee_encryption_service_impl.dart';
+import 'package:qayd/data/security/e2ee_envelope_format.dart';
+import 'package:qayd/data/database/database_encryption_key_provider.dart';
+import 'package:qayd/data/repositories/outbox_dao.dart';
 import 'package:qayd/domain/entities/sync_node.dart';
 import 'package:qayd/domain/entities/notification_message.dart';
 import 'package:qayd/domain/entities/pos_credit_invoice_chat_snapshot.dart';
@@ -28,6 +34,8 @@ import 'package:qayd/domain/services/notification_filter_service.dart';
 import 'package:qayd/domain/entities/party_details.dart';
 import 'package:qayd/domain/entities/account.dart';
 import 'package:qayd/domain/value_objects/account_classification.dart';
+import 'package:sodium/sodium_sumo.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class MockIdentityRepository extends Mock implements IdentityRepository {}
 
@@ -58,6 +66,9 @@ class MockNotificationFilterService extends Mock
 final _testPosCreditInvoicePdf = Uint8List.fromList(
   utf8.encode('%PDF-1.4\n% processor test\n%%EOF\n'),
 );
+final _testPosCreditInvoicePdfSha256 = crypto.sha256
+    .convert(_testPosCreditInvoicePdf)
+    .toString();
 
 final _testIdentityService = const Ed25519IdentityService();
 final _testKeyPair = _testIdentityService.deriveKeyPair(
@@ -78,6 +89,7 @@ DigitalSignature _signAcknowledgment({
     invoiceNodeId: invoiceNodeId,
     invoiceId: invoiceId,
     fingerprint: fingerprint,
+    pdfSha256: _testPosCreditInvoicePdfSha256,
     status: status,
     respondedAt: respondedAt.toUtc().toIso8601String(),
     signerPublicKeyHex: _testKeyPair.publicKeyHex,
@@ -92,6 +104,9 @@ Map<String, dynamic> _creditInvoiceSnapshotJson() => <String, dynamic>{
   'schema': PosCreditInvoiceChatSnapshot.schema,
   'invoice_id': 'sync-pos-invoice-001',
   'invoice_number': 'SYNC-001',
+  'counterparty_account_id': 'customer-account',
+  'credit_due_date': '2026-12-03',
+  'credit_terms': 'Net 30 days',
   'status': 'posted',
   'currency': <String, dynamic>{
     'code': 'YER',
@@ -128,6 +143,14 @@ Map<String, dynamic> _creditInvoiceSnapshotJson() => <String, dynamic>{
 
 void main() {
   const localSenderAccountUuid = 'a1000001-1111-4111-a111-a11111111111';
+  late SodiumSumo sodium;
+  late E2EEEncryptionServiceImpl realE2ee;
+
+  setUpAll(() async {
+    sqfliteFfiInit();
+    sodium = await SodiumSumoInit.init();
+    realE2ee = E2EEEncryptionServiceImpl(sodium);
+  });
 
   late SyncPayloadProcessor processor;
   late MockIdentityRepository mockIdentityRepo;
@@ -510,8 +533,8 @@ void main() {
       final snapshot = PosCreditInvoiceChatSnapshot.fromJson(
         _creditInvoiceSnapshotJson(),
       );
-      invoiceNodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(
-        snapshot.invoiceId,
+      invoiceNodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+        snapshot,
       );
       final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
         invoiceNodeId: invoiceNodeId,
@@ -573,12 +596,222 @@ void main() {
       verifyNoMoreInteractions(mockLedgerRepo);
     });
 
+    test(
+      'rejects a duplicate invoice node carrying a different valid PDF',
+      () async {
+        final snapshot = PosCreditInvoiceChatSnapshot.fromJson(
+          _creditInvoiceSnapshotJson(),
+        );
+        final invoiceNodeId =
+            PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(snapshot);
+        final originalPayload =
+            PosCreditInvoiceChatProtocol.invoiceEventPayload(
+              invoiceNodeId: invoiceNodeId,
+              snapshot: snapshot,
+              pdfBytes: _testPosCreditInvoicePdf,
+            );
+        final existingPayload =
+            PosCreditInvoiceChatProtocol.localInvoicePayload(
+              eventPayload: originalPayload,
+              acknowledgementStatus: 'pending',
+              deliveryStatus: 'received',
+            );
+        final existingMessage = NotificationMessage(
+          id: invoiceNodeId,
+          bodyText: 'فاتورة آجل',
+          channel: PosCreditInvoiceChatProtocol.incomingChannel,
+          counterpartyAccountId: localSenderAccountUuid,
+          createdAt: snapshot.postedAt,
+          processed: false,
+          rawPayloadJson: jsonEncode(existingPayload),
+        );
+        final differentPdf = Uint8List.fromList(<int>[
+          ..._testPosCreditInvoicePdf,
+          0x20,
+        ]);
+        final conflictingPayload =
+            PosCreditInvoiceChatProtocol.invoiceEventPayload(
+              invoiceNodeId: invoiceNodeId,
+              snapshot: snapshot,
+              pdfBytes: differentPdf,
+            );
+        final node = SyncNode(
+          id: invoiceNodeId,
+          senderId: 101,
+          receiverId: 202,
+          eventType: SyncEventType.posCreditInvoice,
+          encryptedPayload: 'authenticated-envelope',
+          syncState: 'pending',
+          clientTimestamp: DateTime.utc(2026, 11, 3, 10),
+          senderPublicKey: _testKeyPair.publicKeyHex,
+        );
+        when(
+          () => mockE2ee.decryptPayload(
+            encryptedPayload: any(named: 'encryptedPayload'),
+            receiverKeyPair: any(named: 'receiverKeyPair'),
+            senderPublicKeyHex: any(named: 'senderPublicKeyHex'),
+            nodeId: any(named: 'nodeId'),
+            eventType: any(named: 'eventType'),
+          ),
+        ).thenAnswer((_) async => conflictingPayload);
+        when(
+          () => mockNotificationRepo.findById(invoiceNodeId),
+        ).thenAnswer((_) async => existingMessage);
+
+        final applied = await processor.processIncomingNodes([node]);
+
+        expect(applied, isNot(contains(invoiceNodeId)));
+        verifyNever(
+          () => mockNotificationRepo.insert(
+            id: any(named: 'id'),
+            bodyText: any(named: 'bodyText'),
+            channel: any(named: 'channel'),
+            counterpartyAccountId: any(named: 'counterpartyAccountId'),
+            createdAtIso: any(named: 'createdAtIso'),
+            rawPayloadJson: any(named: 'rawPayloadJson'),
+          ),
+        );
+        verifyNoMoreInteractions(mockVoucherRepo);
+        verifyNoMoreInteractions(mockLedgerRepo);
+      },
+    );
+
+    test(
+      'sends only ciphertext through the outbox and receives the invoice without financial posting',
+      () async {
+        final recipient = _testIdentityService.deriveKeyPair(
+          _testIdentityService.generateMnemonic(),
+        );
+        final snapshot = PosCreditInvoiceChatSnapshot.fromJson(
+          _creditInvoiceSnapshotJson(),
+        );
+        invoiceNodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+          snapshot,
+        );
+        final eventPayload = PosCreditInvoiceChatProtocol.invoiceEventPayload(
+          invoiceNodeId: invoiceNodeId,
+          snapshot: snapshot,
+          pdfBytes: _testPosCreditInvoicePdf,
+        );
+        final receiverParty = PartyDetails(
+          accountId: AccountId('customer-account'),
+          currentPublicKeyHex: recipient.publicKeyHex,
+          serverAccountId: 202,
+        );
+        when(
+          () => mockAccountRepo.getPartyDetails(AccountId('customer-account')),
+        ).thenAnswer((_) async => Success(receiverParty));
+
+        final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
+        addTearDown(db.close);
+        await db.execute('''
+          CREATE TABLE outbox (
+            id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            voucher_id TEXT,
+            counterparty_account_id TEXT NOT NULL,
+            encrypted_payload TEXT NOT NULL,
+            state TEXT NOT NULL,
+            transport TEXT,
+            retry_count INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            delivered_at TEXT,
+            receiver_phone TEXT,
+            receiver_whatsapp TEXT,
+            receiver_public_key TEXT,
+            receiver_server_id INTEGER
+          )
+        ''');
+        final outbox = OutboxDao(db);
+        final dispatcher = SyncEventDispatcher(
+          outboxDao: outbox,
+          e2eeEncryptionService: realE2ee,
+          accountRepository: mockAccountRepo,
+          identityRepository: mockIdentityRepo,
+          getCurrentUserKeyPair: () async => _testKeyPair,
+          attachmentKeyProvider:
+              const DevelopmentDatabaseEncryptionKeyProvider(),
+        );
+        final dispatched = await dispatcher.dispatchGenericEvent(
+          counterpartyAccountId: 'customer-account',
+          eventType: PosCreditInvoiceChatProtocol.invoiceEventType,
+          payload: eventPayload,
+          nodeId: invoiceNodeId,
+        );
+        expect(dispatched.isSuccess, isTrue);
+
+        final queuedEntries = (await outbox.listPending()).valueOrNull!;
+        expect(queuedEntries, hasLength(1));
+        final encryptedEnvelope = queuedEntries.single.encryptedPayload;
+        expect(E2EEEnvelopeFormat.isSupported(encryptedEnvelope), isTrue);
+        expect(encryptedEnvelope, isNot(contains('invoice_snapshot')));
+        expect(encryptedEnvelope, isNot(contains('Net 30 days')));
+        expect(encryptedEnvelope, isNot(contains('2500')));
+        expect(encryptedEnvelope, isNot(contains('تجريبي')));
+
+        final actualProcessor = SyncPayloadProcessor(
+          identityRepository: mockIdentityRepo,
+          voucherRepository: mockVoucherRepo,
+          ledgerRepository: mockLedgerRepo,
+          accountRepository: mockAccountRepo,
+          currencyRepository: MockCurrencyRepository(),
+          notificationMessageRepository: mockNotificationRepo,
+          notificationFilterService: mockFilterRepo,
+          e2eeService: realE2ee,
+          signingService: _testReceiptSigningService,
+          getCurrentUserKeyPair: () async => recipient,
+          attachmentRepository: MockAttachmentRepository(),
+          collateralRepository: MockCollateralRepository(),
+          voucherKeyService: MockVoucherKeyService(),
+        );
+        final node = SyncNode(
+          id: invoiceNodeId,
+          senderId: 101,
+          receiverId: 202,
+          eventType: SyncEventType.posCreditInvoice,
+          encryptedPayload: encryptedEnvelope,
+          syncState: 'pending',
+          clientTimestamp: DateTime.utc(2026, 11, 3, 10),
+          senderPublicKey: _testKeyPair.publicKeyHex,
+        );
+        when(
+          () => mockNotificationRepo.findById(invoiceNodeId),
+        ).thenAnswer((_) async => null);
+        when(
+          () => mockNotificationRepo.insert(
+            id: invoiceNodeId,
+            bodyText: any(named: 'bodyText'),
+            channel: PosCreditInvoiceChatProtocol.incomingChannel,
+            counterpartyAccountId: localSenderAccountUuid,
+            createdAtIso: any(named: 'createdAtIso'),
+            rawPayloadJson: any(named: 'rawPayloadJson'),
+          ),
+        ).thenAnswer((_) async => const Success(null));
+
+        final applied = await actualProcessor.processIncomingNodes([node]);
+
+        expect(applied, contains(invoiceNodeId));
+        verify(
+          () => mockNotificationRepo.insert(
+            id: invoiceNodeId,
+            bodyText: any(named: 'bodyText'),
+            channel: PosCreditInvoiceChatProtocol.incomingChannel,
+            counterpartyAccountId: localSenderAccountUuid,
+            createdAtIso: any(named: 'createdAtIso'),
+            rawPayloadJson: any(named: 'rawPayloadJson'),
+          ),
+        ).called(1);
+        verifyNoMoreInteractions(mockVoucherRepo);
+        verifyNoMoreInteractions(mockLedgerRepo);
+      },
+    );
+
     test('applies acknowledgment by updating chat metadata only', () async {
       final snapshot = PosCreditInvoiceChatSnapshot.fromJson(
         _creditInvoiceSnapshotJson(),
       );
-      invoiceNodeId = PosCreditInvoiceChatProtocol.invoiceNodeId(
-        snapshot.invoiceId,
+      invoiceNodeId = PosCreditInvoiceChatProtocol.invoiceNodeIdForSnapshot(
+        snapshot,
       );
       final invoiceEvent = PosCreditInvoiceChatProtocol.invoiceEventPayload(
         invoiceNodeId: invoiceNodeId,
@@ -608,6 +841,7 @@ void main() {
             invoiceNodeId: invoiceNodeId,
             invoiceId: snapshot.invoiceId,
             fingerprint: snapshot.fingerprint,
+            pdfSha256: _testPosCreditInvoicePdfSha256,
             status: 'accepted',
             respondedAt: DateTime.utc(2026, 11, 3, 10, 5),
             signature: _signAcknowledgment(
@@ -641,20 +875,22 @@ void main() {
         () => mockNotificationRepo.findById(invoiceNodeId),
       ).thenAnswer((_) async => outgoingMessage);
       when(
-        () => mockNotificationRepo.updateBodyAndPayload(
+        () => mockNotificationRepo.updateBodyAndPayloadIfUnchanged(
           id: invoiceNodeId,
+          expectedRawPayloadJson: any(named: 'expectedRawPayloadJson'),
           bodyText: any(named: 'bodyText'),
           rawPayloadJson: any(named: 'rawPayloadJson'),
         ),
-      ).thenAnswer((_) async => const Success(null));
+      ).thenAnswer((_) async => const Success(true));
 
       final applied = await processor.processIncomingNodes([node]);
 
       expect(applied, contains(ackNodeId));
       final updatedPayload =
           verify(
-                () => mockNotificationRepo.updateBodyAndPayload(
+                () => mockNotificationRepo.updateBodyAndPayloadIfUnchanged(
                   id: invoiceNodeId,
+                  expectedRawPayloadJson: any(named: 'expectedRawPayloadJson'),
                   bodyText: any(named: 'bodyText'),
                   rawPayloadJson: captureAny(named: 'rawPayloadJson'),
                 ),
@@ -681,8 +917,9 @@ void main() {
       final rejected = await processor.processIncomingNodes([node]);
       expect(rejected, isNot(contains(ackNodeId)));
       verifyNever(
-        () => mockNotificationRepo.updateBodyAndPayload(
+        () => mockNotificationRepo.updateBodyAndPayloadIfUnchanged(
           id: invoiceNodeId,
+          expectedRawPayloadJson: any(named: 'expectedRawPayloadJson'),
           bodyText: any(named: 'bodyText'),
           rawPayloadJson: any(named: 'rawPayloadJson'),
         ),

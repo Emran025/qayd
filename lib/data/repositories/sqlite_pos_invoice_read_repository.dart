@@ -151,6 +151,8 @@ final class SqlitePosInvoiceReadRepository implements PosInvoiceReadRepository {
       total: _money(row, 'total_minor', currency),
       paid: _money(row, 'paid_minor', currency),
       due: _money(row, 'due_minor', currency),
+      creditDueDate: _nullableDate(row['credit_due_date']),
+      creditTerms: row['credit_terms'] as String?,
       idempotencyKey: _string(row, 'idempotency_key'),
       invoiceDate: DateTime.parse(_string(row, 'invoice_date')),
       createdAt: DateTime.parse(_string(row, 'created_at')),

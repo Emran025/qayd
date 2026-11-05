@@ -80,11 +80,13 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
   final _inputController = TextEditingController();
   final _advanceController = TextEditingController(text: '0');
   final _customerController = TextEditingController();
+  final _creditTermsController = TextEditingController();
   final _paymentAccountController = TextEditingController();
   late CurrencyCode _selectedCurrency;
   List<CurrencyCode> _availableCurrencies = const [];
   String? _customerAccountId;
   String? _paymentAccountId;
+  DateTime? _creditDueDate;
   PosPaymentMethod _paymentMethod = PosPaymentMethod.cash;
   final _scannerKey = GlobalKey<PosBackgroundBarcodeScannerState>();
   bool _isBackCamera = true;
@@ -130,6 +132,7 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
     _inputController.dispose();
     _advanceController.dispose();
     _customerController.dispose();
+    _creditTermsController.dispose();
     _paymentAccountController.dispose();
     super.dispose();
   }
@@ -168,6 +171,8 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
       );
       return;
     }
+    final hasCreditBalance =
+        context.read<PosCheckoutCubit>().state.totalMinorUnits > advance;
     await context.read<PosCheckoutCubit>().completeCheckout(
       warehouseId: widget.warehouseId,
       currency: _selectedCurrency,
@@ -179,6 +184,8 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
       paymentAccountId: _paymentAccountId == null
           ? null
           : AccountId(_paymentAccountId!),
+      creditDueDate: hasCreditBalance ? _creditDueDate : null,
+      creditTerms: hasCreditBalance ? _creditTermsController.text : null,
     );
     if (mounted &&
         context.read<PosCheckoutCubit>().state.status ==
@@ -240,6 +247,10 @@ class _PosCheckoutViewState extends State<_PosCheckoutView> {
                   setState(() => _paymentMethod = value),
               advanceController: _advanceController,
               customerController: _customerController,
+              creditTermsController: _creditTermsController,
+              creditDueDate: _creditDueDate,
+              onCreditDueDateChanged: (value) =>
+                  setState(() => _creditDueDate = value),
               paymentAccountController: _paymentAccountController,
               onPickCustomer: () => _pickAccount(customer: true),
               onPickPaymentAccount: () => _pickAccount(customer: false),
@@ -280,6 +291,9 @@ class _CheckoutContent extends StatelessWidget {
     required this.onPaymentMethodChanged,
     required this.advanceController,
     required this.customerController,
+    required this.creditTermsController,
+    required this.creditDueDate,
+    required this.onCreditDueDateChanged,
     required this.paymentAccountController,
     required this.onPickCustomer,
     required this.onPickPaymentAccount,
@@ -304,6 +318,9 @@ class _CheckoutContent extends StatelessWidget {
   final ValueChanged<PosPaymentMethod> onPaymentMethodChanged;
   final TextEditingController advanceController;
   final TextEditingController customerController;
+  final TextEditingController creditTermsController;
+  final DateTime? creditDueDate;
+  final ValueChanged<DateTime?> onCreditDueDateChanged;
   final TextEditingController paymentAccountController;
   final VoidCallback onPickCustomer;
   final VoidCallback onPickPaymentAccount;
@@ -465,6 +482,9 @@ class _CheckoutContent extends StatelessWidget {
           paymentMethod: paymentMethod,
           onPaymentMethodChanged: onPaymentMethodChanged,
           customerController: customerController,
+          creditTermsController: creditTermsController,
+          creditDueDate: creditDueDate,
+          onCreditDueDateChanged: onCreditDueDateChanged,
           paymentAccountController: paymentAccountController,
           onPickCustomer: onPickCustomer,
           onPickPaymentAccount: onPickPaymentAccount,
@@ -566,6 +586,9 @@ class _CheckoutPaymentPanel extends StatelessWidget {
     required this.paymentMethod,
     required this.onPaymentMethodChanged,
     required this.customerController,
+    required this.creditTermsController,
+    required this.creditDueDate,
+    required this.onCreditDueDateChanged,
     required this.paymentAccountController,
     required this.onPickCustomer,
     required this.onPickPaymentAccount,
@@ -578,10 +601,81 @@ class _CheckoutPaymentPanel extends StatelessWidget {
   final PosPaymentMethod paymentMethod;
   final ValueChanged<PosPaymentMethod> onPaymentMethodChanged;
   final TextEditingController customerController;
+  final TextEditingController creditTermsController;
+  final DateTime? creditDueDate;
+  final ValueChanged<DateTime?> onCreditDueDateChanged;
   final TextEditingController paymentAccountController;
   final VoidCallback onPickCustomer;
   final VoidCallback onPickPaymentAccount;
   final VoidCallback onComplete;
+
+  Future<void> _pickCreditDueDate(BuildContext context) async {
+    final today = DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: creditDueDate ?? today,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (selected != null) {
+      onCreditDueDateChanged(
+        DateTime(selected.year, selected.month, selected.day),
+      );
+    }
+  }
+
+  String _dateLabel(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
+
+  Widget _creditTermsFields(
+    BuildContext context,
+  ) => ValueListenableBuilder<TextEditingValue>(
+    valueListenable: advanceController,
+    builder: (context, advanceValue, _) {
+      final advance = int.tryParse(advanceValue.text.trim()) ?? 0;
+      if (state.totalMinorUnits - advance <= 0) {
+        return const SizedBox.shrink();
+      }
+      return Padding(
+        padding: const EdgeInsets.only(top: SpacingTokens.sm),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () => _pickCreditDueDate(context),
+                    icon: const Icon(Icons.event_outlined),
+                    label: Text(
+                      '${AppStrings.posCreditInvoiceDueDate}: '
+                      '${creditDueDate == null ? AppStrings.posCreditInvoiceUnspecified : _dateLabel(creditDueDate!)}',
+                    ),
+                  ),
+                ),
+                if (creditDueDate != null)
+                  IconButton(
+                    tooltip: AppStrings.posCreditInvoiceUnspecified,
+                    onPressed: () => onCreditDueDateChanged(null),
+                    icon: const Icon(Icons.clear),
+                  ),
+              ],
+            ),
+            QaydTextField(
+              controller: creditTermsController,
+              label: AppStrings.posCreditInvoiceTerms,
+              helperText: AppStrings.posCreditInvoiceTermsOptionalHelp,
+              maxLength: 240,
+              maxLines: 2,
+              textCapitalization: TextCapitalization.sentences,
+            ),
+          ],
+        ),
+      );
+    },
+  );
 
   @override
   Widget build(BuildContext context) => Card(
@@ -662,6 +756,7 @@ class _CheckoutPaymentPanel extends StatelessWidget {
             label: AppStrings.posCheckoutCustomerAccount,
             suffixIcon: const Icon(Icons.person_outline_rounded),
           ),
+          _creditTermsFields(context),
           const SizedBox(height: SpacingTokens.md),
           FilledButton.icon(
             onPressed:

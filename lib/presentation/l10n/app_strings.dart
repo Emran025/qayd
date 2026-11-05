@@ -2772,6 +2772,12 @@ class AppStrings {
   static String get posInvoiceExportPdf => i.posInvoiceExportPdf;
   static String get posInvoicePdfFailed => i.posInvoicePdfFailed;
   static String get posCreditInvoiceChatTitle => i.posCreditInvoiceChatTitle;
+  static String get posCreditInvoiceDueDate => i.posCreditInvoiceDueDate;
+  static String get posCreditInvoiceTerms => i.posCreditInvoiceTerms;
+  static String get posCreditInvoiceTermsOptionalHelp =>
+      i.posCreditInvoiceTermsOptionalHelp;
+  static String get posCreditInvoiceUnspecified =>
+      i.posCreditInvoiceUnspecified;
   static String get posCreditInvoiceAwaiting => i.posCreditInvoiceAwaiting;
   static String get posCreditInvoiceAccepted => i.posCreditInvoiceAccepted;
   static String get posCreditInvoiceRejected => i.posCreditInvoiceRejected;

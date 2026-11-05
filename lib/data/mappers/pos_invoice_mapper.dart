@@ -25,6 +25,8 @@ abstract final class PosInvoiceMapper {
       'total_minor': invoice.total.minorUnits,
       'paid_minor': invoice.paid.minorUnits,
       'due_minor': invoice.due.minorUnits,
+      'credit_due_date': invoice.creditDueDate?.toUtc().toIso8601String(),
+      'credit_terms': invoice.creditTerms,
       'idempotency_key': invoice.idempotencyKey,
       'created_at': invoice.createdAt.toUtc().toIso8601String(),
       'updated_at': invoice.updatedAt.toUtc().toIso8601String(),

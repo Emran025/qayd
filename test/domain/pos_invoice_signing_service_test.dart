@@ -35,8 +35,7 @@ final class _CryptoFake implements CryptoIdentityService {
     Uint8List signatureBytes,
     Uint8List payloadHash,
     Uint8List publicKey,
-  ) =>
-      true;
+  ) => true;
 }
 
 void main() {
@@ -79,8 +78,9 @@ void main() {
 
   test('canonical payload includes fractional line snapshots and payments', () {
     final service = PosInvoiceSigningService(
-      receiptSigningService:
-          ReceiptSigningService(cryptoService: _CryptoFake()),
+      receiptSigningService: ReceiptSigningService(
+        cryptoService: _CryptoFake(),
+      ),
     );
     final withoutPayment = service.canonicalPayload(invoice, const []);
     final withPayment = service.canonicalPayload(invoice, [payment]);
@@ -89,5 +89,48 @@ void main() {
     expect(withoutPayment, contains('1250,3'));
     expect(withoutPayment, isNot(withPayment));
     expect(withPayment, contains('payment-1,cash,cash,200'));
+  });
+
+  test('credit due date and terms are part of the signed invoice payload', () {
+    final service = PosInvoiceSigningService(
+      receiptSigningService: ReceiptSigningService(
+        cryptoService: _CryptoFake(),
+      ),
+    );
+    PosInvoice creditInvoice({DateTime? dueDate, String? terms}) =>
+        PosInvoice.draft(
+          id: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          type: invoice.type,
+          warehouseId: invoice.warehouseId,
+          currency: currency,
+          lines: invoice.lines,
+          creditDueDate: dueDate,
+          creditTerms: terms,
+          idempotencyKey: invoice.idempotencyKey,
+          invoiceDate: invoice.invoiceDate,
+          now: invoice.createdAt,
+        ).post(DateTime.utc(2026, 1, 1, 1));
+
+    final baseline = service.canonicalPayload(invoice, const []);
+    final withTerms = service.canonicalPayload(
+      creditInvoice(dueDate: DateTime.utc(2026, 2, 1), terms: 'Net 30 days'),
+      const [],
+    );
+    final changedDate = service.canonicalPayload(
+      creditInvoice(dueDate: DateTime.utc(2026, 2, 2), terms: 'Net 30 days'),
+      const [],
+    );
+    final changedTerms = service.canonicalPayload(
+      creditInvoice(dueDate: DateTime.utc(2026, 2, 1), terms: 'Net 45 days'),
+      const [],
+    );
+
+    expect(baseline, contains('QAYD_POS_INVOICE_V1'));
+    expect(withTerms, contains('QAYD_POS_INVOICE_V3'));
+    expect(withTerms, contains('Net 30 days'));
+    expect(withTerms, isNot(baseline));
+    expect(changedDate, isNot(withTerms));
+    expect(changedTerms, isNot(withTerms));
   });
 }

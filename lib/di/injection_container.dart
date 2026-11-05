@@ -1112,6 +1112,7 @@ abstract final class InjectionContainer {
       notificationMessageRepository: notificationMessageRepository,
       syncEventDispatcher: syncEventDispatcher,
       pdfUseCase: buildPosInvoicePdfUseCase,
+      auditLogService: auditLogService,
     );
     respondToPosCreditInvoiceInChatUseCase =
         RespondToPosCreditInvoiceInChatUseCase(
@@ -1120,6 +1121,7 @@ abstract final class InjectionContainer {
           signingService: receiptSigningService,
           getCurrentUserKeyPair: () =>
               setupIdentityUseCase.getKeyPair().then((v) => v!),
+          auditLogService: auditLogService,
         );
     voucherKeyService = const VoucherKeyService();
     const balanceCalculator = BalanceCalculator();
